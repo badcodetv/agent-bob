@@ -489,6 +489,19 @@ export type {
   BuildActivityInput,
 } from './activity.js'
 
+// The Activity view (B1) — the rail, its hook, and its own watermark surface.
+export { default as ActivityPage } from './components/ActivityPage.js'
+export type { ActivityPageProps } from './components/ActivityPage.js'
+export { ACTIVITY_LENS_LABELS, ACTIVITY_WINDOW_STEP_MS } from './components/ActivityPage.js'
+export {
+  default as useActivity,
+  ACTIVITY_SURFACE,
+  activityLastSeenKey,
+  readActivityLastSeen,
+  writeActivityLastSeen,
+} from './useActivity.js'
+export type { UseActivityOptions, ActivityApi } from './useActivity.js'
+
 // The worker-history fold (A2) — one worker's runs and rewrites on the same
 // rail, which is what retires the hand-rolled before/after re-join (design 28 §2.3).
 export { buildWorkerHistory, runsAround } from './workerHistory.js'

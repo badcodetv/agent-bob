@@ -229,6 +229,13 @@ export interface SpineRailProps {
    */
   role?: string
   'aria-label'?: string
+  /**
+   * Declared, not spread — and declaring it is load-bearing. TypeScript does
+   * not excess-property-check `data-*` props in JSX, so a `data-testid` passed
+   * to a component that does not forward it compiles cleanly and vanishes at
+   * runtime. It was silently dropped here until six tests failed on it.
+   */
+  'data-testid'?: string
 }
 
 /**
@@ -244,12 +251,14 @@ export function SpineRail({
   sx,
   role,
   'aria-label': ariaLabel,
+  'data-testid': testId,
 }: SpineRailProps) {
   return (
     <Box
       component={component}
       role={role}
       aria-label={ariaLabel}
+      data-testid={testId}
       sx={[
         {
           position: 'relative',
@@ -283,6 +292,8 @@ export interface SpineRowProps {
   children?: ReactNode
   component?: ElementType
   sx?: SxProps<Theme>
+  /** Declared rather than spread, so a row is addressable without `any`. */
+  'data-testid'?: string
 }
 
 /**
@@ -292,10 +303,18 @@ export interface SpineRowProps {
  * hairline running behind it, which is why the rail can be one uninterrupted
  * line and the ticks still read as ticks.
  */
-export function SpineRow({ glyph, glyphLabel, children, component = 'div', sx }: SpineRowProps) {
+export function SpineRow({
+  glyph,
+  glyphLabel,
+  children,
+  component = 'div',
+  sx,
+  'data-testid': testId,
+}: SpineRowProps) {
   return (
     <Box
       component={component}
+      data-testid={testId}
       sx={[{ position: 'relative', pb: 2 }, ...(Array.isArray(sx) ? sx : [sx])]}
     >
       <Box
@@ -322,6 +341,11 @@ export function SpineRow({ glyph, glyphLabel, children, component = 'div', sx }:
 export interface SpineGapProps {
   /** What the gap was, already phrased — e.g. `4h 20m of nothing`. */
   label: string
+  /**
+   * The element to render as. A rail mounted as `<ol>` must not have a bare
+   * `<div>` among its children, so a gap on a list rail passes `'li'`.
+   */
+  component?: ElementType
 }
 
 /**
@@ -329,9 +353,10 @@ export interface SpineGapProps {
  * reads as a quiet night". Purely a caption on the rail; the caller decides
  * when a gap is long enough to be worth saying.
  */
-export function SpineGap({ label }: SpineGapProps) {
+export function SpineGap({ label, component = 'div' }: SpineGapProps) {
   return (
     <Box
+      component={component}
       sx={{
         position: 'relative',
         pb: 2,
