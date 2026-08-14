@@ -1,3 +1,9 @@
+// SUPERSEDED by the worker's Triggers tab (doc 28 §2, work plan 29 D2). Every
+// subscription targets exactly one worker, so every row has exactly one home,
+// and this page's own header already said the question is per-worker. The shell
+// no longer mounts it; the two editors it hosted moved across intact. Kept
+// exported rather than deleted — see the note at the top of EventsPage.tsx.
+//
 // AutomationPage — the two ways a worker is woken, on one screen: event
 // subscriptions (§8.3) and schedules (§8.6). Work-plan item F2.
 //

@@ -1,3 +1,9 @@
+// SUPERSEDED by WorkerHistory's rail (doc 28 §2.3, work plan 29 D2). This
+// component exists to manually re-join a rewrite with the runs either side of
+// it; on a time-ordered rail those are adjacent rows, and `runsAround()` reads
+// them with an index walk. It is now reachable only through WorkerLineage,
+// which the shell no longer mounts.
+//
 // BeforeAfterView — design §7.2, the product's thesis on one screen.
 //
 // Three columns around one prompt rewrite: the last thing the subject worker

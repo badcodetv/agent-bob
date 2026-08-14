@@ -1,3 +1,8 @@
+// SUPERSEDED by WorkerHistory (doc 28 §2.3, work plan 29 D2), which puts these
+// rewrites on the same rail as the runs either side of them. The shell no longer
+// mounts this. NOTE for anyone reviving it: it reads the DESK's watermark, which
+// is the coupling B2 was told to break — WorkerHistory has its own surface.
+//
 // WorkerLineage — design §7.1: the spine, filtered to one worker's prompt.
 //
 // Nearly free data, badly placed: every `worker_prompt_write` already carries

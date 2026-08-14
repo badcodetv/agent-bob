@@ -111,7 +111,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## B1 — the Activity view
 
-- [ ] New `web/src/components/ActivityPage.tsx` mounting `SpineRail`/`SpineRow`/`SpineGap` over A1.
+- [x] New `web/src/components/ActivityPage.tsx` mounting `SpineRail`/`SpineRow`/`SpineGap` over A1.
   - Filter chips `all · events · jobs · changes` that **subset the rail in place** — they must not
     swap the surface, and the rail, the watermark and the scroll position survive a filter change
     (doc 28 §1.3). If a filter re-mounts the rail, it is a tab wearing a chip's clothes and the
@@ -125,7 +125,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## B2 — Workers: `History` replaces the `Jobs` and `Lineage` tabs
 
-- [ ] Mount A2 as a single **History** tab; delete the separate Jobs and Lineage tabs. Keep the
+- [x] Mount A2 as a single **History** tab; delete the separate Jobs and Lineage tabs. Keep the
   diff rendering, the "mark viewed" affordance and the version-restore path — they move onto rows,
   they do not disappear. **Break the borrowed Desk watermark** (see Traps) and give History its own.
   `BeforeAfterView` becomes reachable-but-redundant here; do **not** delete it in this ticket —
@@ -134,7 +134,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## B3 — Workers: the `Triggers` tab, and `Woken by` on Configuration
 
-- [ ] Move `SubscriptionEditor` and `ScheduleEditor` intact into a new **Triggers** tab on
+- [x] Move `SubscriptionEditor` and `ScheduleEditor` intact into a new **Triggers** tab on
   `WorkersPage`, scoped to the selected worker. Every subscription targets exactly one worker, so
   each row has exactly one home.
   Add a **read-only** `Woken by` summary to the Configuration tab — the event type and filter, the
@@ -144,7 +144,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## B4 — progressive nav in the shell
 
-- [ ] Mount A3 in `examples/web/src/App.tsx`. Sticky set in `localStorage`, per project, keyed
+- [x] Mount A3 in `examples/web/src/App.tsx`. Sticky set in `localStorage`, per project, keyed
   beside the existing watermark keys (`watermark.ts` is the precedent).
   - Appearance is **one 180ms fade + height**, gated on the existing `useReducedMotion` hook. No
     pulse, no badge, no glow — §3.2 forbids spending colour on chrome, and the asks badge is the
@@ -159,7 +159,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## C1 — merge Replay into the propagation panel
 
-- [ ] Two additions and one deletion (doc 28 §4.2). Add template loading + `JsonObjectEditor` to
+- [x] Two additions and one deletion (doc 28 §4.2). Add template loading + `JsonObjectEditor` to
   the panel's paste-an-event field, and move `EventReplayPanel`'s emit flow across **with its
   confirm dialog intact**. **Delete the textual match list** — the answer renders on the shape, and
   keeping the list keeps the duplicate the merge exists to remove.
@@ -170,7 +170,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## C2 — the doc 21 chart defects
 
-- [ ] Fix X1 (the clipped `SpineGlyph` — CSS cannot size an `<svg>` nested inside SVG), X2 (wire
+- [x] **Already done — nothing to do.** Fix X1 (the clipped `SpineGlyph` — CSS cannot size an `<svg>` nested inside SVG), X2 (wire
   label collision at shared ranks), X3 (floating schedule dials), X4 (duplicated entry-pip label),
   X9 (a parked ask is invisible on the plate — the rose state exists on the Desk but not here) and
   X10 (a five-strike-disabled schedule renders as a normal dial).
@@ -179,7 +179,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## C3 — chart reveal threshold
 
-- [ ] Wire A3's first-subscription predicate to the chart's nav entry.
+- [x] Wire A3's first-subscription predicate to the chart's nav entry. *(Landed with B4: `navReveal.ts` holds the predicate and the shell renders only what `useNavReveal` returns.)*
   *Validation:* SHELL + RIG.
 
 ---
@@ -200,11 +200,12 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## D2 — retire what the folds replaced
 
-- [ ] Once B1–B3 are green and looked at: remove `EventsPage`'s Events/Jobs/Changelog tabs (the view
+- [x] Once B1–B3 are green and looked at: remove `EventsPage`'s Events/Jobs/Changelog tabs (the view
   becomes Activity), retire `AutomationPage` as a top-level view, and delete `BeforeAfterView` if —
   and only if — B2's rail genuinely reads better. **State the judgement in the DIL either way.**
   Keep `ChangelogView`'s filtering if Activity's chips do not yet cover its nine lenses; that is a
   real feature and losing it silently would be a regression, not a simplification.
+  **Judgement: marked SUPERSEDED, not deleted — see the DIL.**
   *Validation:* WEB + SHELL + D1's spec.
 
 ## D3 — the artifact-viewer decision *(deferred, still open)*
@@ -266,3 +267,63 @@ config change sits in it. There is a test for exactly that.
 
 *Validation run: `npm run typecheck` exit 0; full suite **1352 tests / 68 files green**
 (104 in the four affected files); `examples/web` `tsc --noEmit` exit 0.*
+
+### Tiers B and C, 2026-08-14 (B1–B4, C1, C2, C3, D2 done)
+
+**6. C2 was already done, and the plan should have known.** Every defect it lists — X1's clipped
+`SpineGlyph`, X2's wire-label collision, X3's floating dials, X4's duplicated pip caption, X9's
+invisible parked ask, X10's invisible dead clock — is fixed in the code, with the fix commented and
+the X-number cited at each site. Doc 21's own Discovered Issues Log records **"PLAN COMPLETE —
+W1–W6 all merged, 2026-07-28"** and a live-stack pass the next day. This plan wrote C2 straight from
+doc 21 §2's defect *table* without reading the completion record at the foot of the same document.
+**Lesson for whoever plans from a review doc: read its status and its DIL before planning from its
+problem list** — a defect table is a snapshot of a moment, not a backlog.
+
+**7. Doc 21 §4.2's "one integer" watermark rule is now overturned, deliberately.** It held that the
+console keeps ONE "since you last looked" mark, which is why `WorkerLineage` reads the *Desk's*.
+Docs 28/29 reverse that: the Desk, Activity and Worker History each keep their own, because they
+answer the same question about different surfaces and sharing one means reading either silently
+clears the others. Recorded here because a future reader will find doc 21 saying one thing and the
+code doing another. Note also that doc 21's DIL claims *"a test whose only job is to fail if this
+component ever grows its own storage key"* — **no such test exists in the repo**; it was described
+but never written, so nothing guarded the rule it was meant to guard.
+
+**8. Sessions, not deliveries, are a worker's runs (B2).** The fold first took deliveries, which is
+a recent window over the WHOLE project — so on a busy project a worker's runs might not appear in it
+at all and every worker's history would have quietly shortened. `GET /agent/sessions?worker=`
+filters in the database; it is the source, and deliveries only enrich a run with duration and
+failure reason, joined on session id. A run started by hand or by a clock has no delivery and still
+belongs on the rail. Caught by an existing test asserting a session title the new rail no longer
+rendered — the old tests earned their keep here.
+
+**9. TypeScript does not excess-property-check `data-*` props in JSX (B1).** `data-testid` passed to
+a component that does not forward it compiles cleanly and vanishes at runtime. Typecheck was green;
+six tests failed. `SpineRail` and `SpineRow` now DECLARE the prop. Worth knowing before writing any
+`data-testid` against a component in this package.
+
+**10. A duplicated label crept back in, and was caught by a test (B2).** The version read `v3` in a
+row's meta and again in its chip twenty pixels away — doc 21's X4 defect on a new surface. The
+number now lives on the chip alone. X4 was fixed a month ago and the shape of the mistake still
+recurred, which is an argument for keeping the X-numbers cited in the code.
+
+**11. D2's judgement: marked SUPERSEDED, not deleted.** `EventsPage`, `AutomationPage`,
+`WorkerLineage`, `WorkerJobHistory` and `BeforeAfterView` are no longer mounted by the shell. Each
+now carries a header naming what replaced it and why. They are **not** deleted, for three reasons:
+they work when mounted (unlike the artifact-viewer family, whose sin was a live-looking entry point
+that silently failed — a different fault entirely); `web/` is a component library and deleting an
+export is a public-API break that is Kai's call, not an executor's; and doc 27's precedent is
+explicit that marking is cheaper than removing and keeps the reasoning visible. `ChangelogView`
+survives untouched and is still mounted by `EventsPage` — Activity's four chips do not yet cover its
+nine lenses, and losing that filtering silently would be a regression rather than a simplification.
+
+**13. `cd web && npm run typecheck` is NOT the whole gate — the SHELL's tsconfig is stricter.**
+Removing the Replay tab left `subscriptions` destructured and unused in `EventsPage`. The library
+typecheck passed; `examples/web`'s `tsc --noEmit` failed it with TS6133 (`noUnusedLocals`). So the
+real gate for any change touching `web/` is **library typecheck + library tests + shell typecheck**,
+and the shell one must actually be run rather than assumed to follow. Add it to the WEB/SHELL habit:
+`SHELL` is not only for shell edits.
+
+**12. `BeforeAfterView` is now reachable only through `WorkerLineage`**, which nothing mounts — so
+it is transitively unreachable in the shell. `runsAround()` in `workerHistory.ts` is what replaces
+it, and it is fifteen lines against that component's several hundred, which is the clearest evidence
+the merge was a simplification rather than a rearrangement.

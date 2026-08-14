@@ -1,3 +1,9 @@
+// SUPERSEDED by ActivityPage (doc 28 §1, work plan 29 D2). Its Events, Jobs and
+// Changelog tabs are three lenses on one question and now live on one rail; the
+// shell no longer mounts this page. Kept exported, not deleted: it works when
+// mounted, deleting it is a public-API break, and doc 27's precedent is that
+// marking is cheaper than removing and keeps the reasoning visible.
+//
 // EventsPage — the observability surface that replaces the deleted watchapi
 // cockpit (work-plan F1): recent events, the deliveries they produced, the jobs
 // those became, and the changelog (§15.10).
@@ -93,7 +99,9 @@ export default function EventsPage({
   // animation, it is about not being chased down the page.
   const [paused, setPaused] = useState(reduced)
   const overview = useEventsOverview(options)
-  const { events, deliveries, subscriptions, jobs, loading, error, truncated } = overview
+  // `subscriptions` left with the replay tab (C1) — it was only ever read for
+  // the match preview.
+  const { events, deliveries, jobs, loading, error, truncated } = overview
 
   // The mark for THIS surface — the same integer scheme the Desk uses, under a
   // different surface name (watermark.ts), never a second storage scheme.

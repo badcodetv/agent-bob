@@ -1,3 +1,7 @@
+// SUPERSEDED by WorkerHistory (doc 28 §2.3, work plan 29 D2). Its route —
+// GET /agent/sessions?worker=, filtered in the database — is still the source
+// of a worker's runs there; only the rendering moved.
+//
 // WorkerJobHistory — the sessions one worker has run (spec §6.5, "job history").
 //
 // Rows link to the canonical session permalink (F3) so a job is shareable, and
