@@ -113,7 +113,11 @@ export interface BuildWorkerHistoryInput {
   windowStartMs?: number
 }
 
-export interface WorkerHistory {
+/**
+ * The fold's result. Named `…Result` because `WorkerHistory` is the component
+ * that renders it, and one public API cannot export both under one name.
+ */
+export interface WorkerHistoryResult {
   records: WorkerHistoryRecord[]
   /** Prompt-carrying changes — the number of versions, v1…vN. */
   versions: number
@@ -141,7 +145,7 @@ export interface WorkerHistory {
  * the same thing differently, and the fix was one counter. This fold consumes
  * that counter rather than becoming a second one.
  */
-export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistory {
+export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistoryResult {
   const { workerName, configEvents, projectId = '', windowStartMs = 0 } = input
 
   const lineage = workerLineage(buildChangelog(configEvents, { projectId }), workerName)

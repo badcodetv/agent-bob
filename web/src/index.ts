@@ -507,8 +507,9 @@ export type { UseActivityOptions, ActivityApi } from './useActivity.js'
 export { buildWorkerHistory, runsAround } from './workerHistory.js'
 export type {
   BuildWorkerHistoryInput,
-  WorkerHistory,
+  WorkerHistoryResult,
   WorkerHistoryRecord,
+  WorkerJobRow,
 } from './workerHistory.js'
 
 // The worker's History and Triggers tabs (B2, B3) — the runs-and-rewrites rail,
