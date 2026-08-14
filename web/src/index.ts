@@ -529,6 +529,13 @@ export {
   revealedNav,
 } from './navReveal.js'
 export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'
+export {
+  default as useNavReveal,
+  navRevealKey,
+  readRevealed,
+  writeRevealed,
+} from './useNavReveal.js'
+export type { UseNavRevealOptions, NavRevealApi } from './useNavReveal.js'
 
 // The Desk (DK2) — the landing view, its data hook, and the attention read
 // route behind the Asks stack.

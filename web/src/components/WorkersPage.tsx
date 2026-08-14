@@ -52,6 +52,12 @@ export interface WorkersPageProps extends ConfigApiOptions {
   onOpenSession?: (sessionId: string) => void
   /** Render the "Chat" tab. Requires an <AgentChatProvider> ancestor. */
   enableChat?: boolean
+  /**
+   * Which tab to open on. Applied once, on mount and whenever it CHANGES, so a
+   * deep link (the chart's clock → this worker's triggers) lands where it meant
+   * to without pinning the human there afterwards.
+   */
+  initialTab?: TabKey
 }
 
 /**
@@ -72,6 +78,7 @@ export default function WorkersPage({
   projectBaseImage,
   onOpenSession,
   enableChat = true,
+  initialTab,
   ...apiOptions
 }: WorkersPageProps) {
   const { workers, loading, error, loadError, save, remove, reload } = useWorkers(apiOptions)
@@ -87,7 +94,15 @@ export default function WorkersPage({
   const [internalSelected, setInternalSelected] = useState<string | null>(() =>
     urlEnabled ? workerFromSearch(window.location.search) : null,
   )
-  const [tab, setTab] = useState<TabKey>('config')
+  const [tab, setTab] = useState<TabKey>(initialTab ?? 'config')
+  // Follow a CHANGE of the requested tab, not its presence: render-phase and
+  // keyed on the value, so a deep link switches the tab without an effect
+  // painting the wrong one first — and without trapping the human on it.
+  const [lastRequestedTab, setLastRequestedTab] = useState<TabKey | undefined>(initialTab)
+  if (initialTab !== undefined && initialTab !== lastRequestedTab) {
+    setLastRequestedTab(initialTab)
+    setTab(initialTab)
+  }
   const [saving, setSaving] = useState(false)
   // Fold-to-version (design §7.1): `folded` is history being read, `restoring`
   // is history being written forward. Never both, and both drop on selection

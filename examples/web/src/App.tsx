@@ -4,19 +4,21 @@ import {
   AgentChatProvider,
   AgentChat,
   AgentSessionList,
-  AutomationPage,
+  ActivityPage,
   CredentialModeBadge,
   DeskPage,
-  EventsPage,
   MemoryBrowserPage,
+  NAV_LABELS,
   OrgChartPage,
   ProjectSettingsPage,
   WorkersPage,
-  buildScheduleSearch,
+  navRevealSentence,
   projectIdFromLocation,
   useAsksCount,
+  useNavReveal,
+  usePrefersReducedMotion,
   useSessionPermalink,
-  useWorkers,
+  type NavEntry,
 } from "@agentkit/chat-ui";
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
 import LoginScreen from "./LoginScreen";
@@ -29,11 +31,15 @@ const API = import.meta.env.VITE_API ?? ""; // "" → same origin (nginx proxy)
 // What a project view can show. Deliberately a state machine and not a router:
 // the library must not impose react-router on hosts, and the permalink hook
 // already owns the one URL that matters (the session).
-// Desk is first because it is the landing view (design decision K1): the
-// question "does anything want me?" is the one an operator arrives with.
-// Chart sits between Desk and Workers: it is the same fleet, seen as a shape
-// rather than as a list.
-type View = "desk" | "chart" | "chat" | "workers" | "memory" | "events" | "automation" | "settings";
+//
+// The set IS the library's `NavEntry` since K9 (doc 28 §3): the nav is
+// progressive, so which of these a project actually shows is decided by
+// `useNavReveal` from what the project contains, not hardcoded here. Desk still
+// lands (K1) — its first-run panel is the onboarding screen.
+//
+// `events` and `automation` are gone: the first is now Activity (one rail
+// instead of five tabs) and the second is a tab on the worker it belongs to.
+type View = NavEntry;
 
 // How often the two live surfaces re-fetch. The library defaults `refreshMs` to
 // 0 — no timer — because a component library that starts polling the moment it
@@ -236,11 +242,16 @@ function ProjectWorkspace({
 }) {
   const [view, setView] = useState<View>("desk");
 
-  // Worker names for the subscription/schedule pickers. Fetched here because
-  // AutomationPage takes them as a prop — a library page never fetches another
-  // page's collection for itself.
-  const { workers } = useWorkers();
-  const workerOptions = useMemo(() => workers.map((w) => w.name), [workers]);
+  // Which nav entries this project has earned (K9). Day one is four; Memory
+  // arrives with the first memory, Activity with the first event, Chart with
+  // the first SUBSCRIPTION — because five workers with nothing wired between
+  // them have no shape worth drawing.
+  const { visible, appeared, acknowledge } = useNavReveal({ projectId: project });
+
+  // A view can stop being visible only by the project changing under us (a
+  // reveal is sticky), but a stale `view` would render a hidden surface — so
+  // fall back to the Desk, which is always there.
+  const shownView = visible.includes(view) ? view : "desk";
 
   // The only number in the chrome (design §3.5): how many things are asking for
   // you — through useAsksCount, which applies the very join the Asks stack
@@ -275,19 +286,19 @@ function ProjectWorkspace({
   }
 
   // A clock on the chart is a link to the schedule it draws (K3: clocks render
-  // on the canvas but are never edited there). The id has to survive the view
-  // switch, and AutomationPage initialises its own tab and selection from the
-  // URL as it mounts — so write the URL first, then switch, and it opens on the
-  // Schedules tab with that row selected.
+  // on the canvas but are never edited there). Since K9 that schedule lives on
+  // its worker's Triggers tab rather than on a project-wide Automation page, so
+  // the link selects the worker and asks for that tab.
   //
-  // Not via its `tab`/`selected` props: passing either makes it *controlled*,
-  // and with no matching onTabChange/onSelect the human could never leave the
-  // row we sent them to. Controlling them also turns the page's own URL sync
-  // off, which is what makes a schedule link shareable in the first place.
-  const openScheduleFromChart = useCallback((scheduleId: string) => {
-    const search = buildScheduleSearch(window.location.search, scheduleId);
-    window.history.pushState(null, "", window.location.pathname + search + window.location.hash);
-    setView("automation");
+  // `initialTab` is applied on CHANGE rather than held, so the human is free to
+  // walk to Configuration afterwards — a deep link should land you somewhere,
+  // not pin you there.
+  const [workerFromChart, setWorkerFromChart] = useState<string | null>(null);
+  const [triggersFromChart, setTriggersFromChart] = useState(false);
+  const openScheduleFromChart = useCallback((_scheduleId: string, worker: string) => {
+    setWorkerFromChart(worker);
+    setTriggersFromChart(true);
+    setView("workers");
   }, []);
 
   // A job row in the workers view is a link to the session that ran it — open
@@ -309,7 +320,8 @@ function ProjectWorkspace({
         <Box sx={{ px: 1.5, pt: 1.5 }}>
           <CredentialModeBadge mode={credentialMode} />
         </Box>
-        <ViewNav view={view} onChange={setView} asks={openAsks} />
+        <ViewNav view={shownView} entries={visible} onChange={setView} asks={openAsks} />
+        <RevealNotice appeared={appeared} onDismiss={acknowledge} />
         {/* The sidebar stays mounted in every view: it carries the project
             switcher and the session list, which are how you leave a view. */}
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -318,7 +330,7 @@ function ProjectWorkspace({
       </Box>
 
       <Box sx={{ flex: 1, minWidth: 0, overflowY: "auto" }}>
-        {view === "desk" && (
+        {shownView === "desk" && (
           <DeskPage
             projectId={project}
             refreshMs={LIVE_REFRESH_MS}
@@ -330,61 +342,108 @@ function ProjectWorkspace({
         )}
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link
             to the row on Automation. */}
-        {view === "chart" && (
+        {shownView === "chart" && (
           <OrgChartPage projectId={project} onOpenAutomation={openScheduleFromChart} />
         )}
-        {view === "chat" && <AgentChat />}
-        {view === "workers" && <WorkersPage projectId={project} onOpenSession={showSession} />}
+        {shownView === "chat" && <AgentChat />}
+        {shownView === "workers" && (
+          <WorkersPage
+            projectId={project}
+            onOpenSession={showSession}
+            selected={workerFromChart}
+            onSelect={setWorkerFromChart}
+            initialTab={triggersFromChart ? "triggers" : undefined}
+          />
+        )}
         {/* No fetchConfigEvents: GET /agent/config-events is mounted, so the
             changelog tab reads the route directly. */}
-        {view === "memory" && <MemoryBrowserPage onOpenSession={showSession} />}
-        {/* Bench reads a dropped report file and has no backend: it is
-            measurement apparatus for us, not a surface an operator of this
-            project has any use for (design 15 §14, K9's folds). One prop from
-            returning. */}
-        {view === "events" && (
-          <EventsPage
+        {shownView === "memory" && <MemoryBrowserPage onOpenSession={showSession} />}
+        {shownView === "activity" && (
+          <ActivityPage
             projectId={project}
             refreshMs={LIVE_REFRESH_MS}
             onOpenSession={showSession}
-            enableBench={false}
           />
         )}
-        {view === "automation" && <AutomationPage projectId={project} workerOptions={workerOptions} />}
-        {view === "settings" && <ProjectSettingsPage />}
+        {shownView === "settings" && <ProjectSettingsPage />}
       </Box>
     </Box>
   );
 }
 
-/** The view switch. Desk first, and it carries the one badge in the chrome. */
-function ViewNav({ view, onChange, asks }: { view: View; onChange: (v: View) => void; asks: number }) {
-  const item = (key: View, label: string, badge = 0) => (
-    <Button
-      key={key}
-      size="small"
-      variant={view === key ? "contained" : "text"}
-      onClick={() => onChange(key)}
-      data-testid={`nav-${key}`}
-      sx={{ textTransform: "none", flexGrow: 1, minWidth: 0 }}
+/**
+ * The reveal, announced in words rather than by a pulsing badge (design 28
+ * §3.2). Colour in this console is never spent on chrome, and the asks badge is
+ * the only number the design allows there — so a new nav entry says what it is
+ * for, once, and then gets out of the way.
+ */
+function RevealNotice({ appeared, onDismiss }: { appeared: NavEntry[]; onDismiss: () => void }) {
+  const reduced = usePrefersReducedMotion();
+  if (appeared.length === 0) return null;
+  return (
+    <Box
+      role="status"
+      data-testid="nav-reveal-notice"
+      sx={{
+        mx: 1,
+        mb: 1,
+        p: 1,
+        borderLeft: 2,
+        borderColor: "secondary.main",
+        fontSize: 12,
+        lineHeight: 1.5,
+        // The whole motion budget for this feature.
+        transition: reduced ? "none" : "opacity 180ms ease-out",
+      }}
     >
-      {badge > 0 ? `${label} ${badge}` : label}
-    </Button>
+      {appeared.map((entry) => (
+        <Box key={entry} sx={{ mb: 0.5 }}>
+          {navRevealSentence(entry)}
+        </Box>
+      ))}
+      <Button size="small" onClick={onDismiss} sx={{ textTransform: "none", fontSize: 11, minWidth: 0, p: 0 }}>
+        Got it
+      </Button>
+    </Box>
   );
-  // Seven views no longer fit one 280px row (the Wave-4 screenshot pass caught
-  // the labels colliding), so the nav wraps: reading order keeps Desk first.
+}
+
+/**
+ * The view switch. Draws only what the project has revealed (K9), in the
+ * library's canonical order — items appear IN PLACE and the list never
+ * reorders, because a control that moves is worse than one that appears.
+ */
+function ViewNav({
+  view,
+  entries,
+  onChange,
+  asks,
+}: {
+  view: View;
+  entries: NavEntry[];
+  onChange: (v: View) => void;
+  asks: number;
+}) {
   return (
     <Box
       sx={{ p: 1, borderBottom: 1, borderColor: "divider", display: "flex", flexWrap: "wrap", gap: 0.5 }}
     >
-      {item("desk", "Desk", asks)}
-      {item("chart", "Chart")}
-      {item("chat", "Chat")}
-      {item("workers", "Workers")}
-      {item("memory", "Memory")}
-      {item("events", "Events")}
-      {item("automation", "Automation")}
-      {item("settings", "Settings")}
+      {entries.map((key) => {
+        // Desk carries the one badge the design allows in the chrome (§3.5).
+        const badge = key === "desk" ? asks : 0;
+        return (
+          <Button
+            key={key}
+            size="small"
+            variant={view === key ? "contained" : "text"}
+            onClick={() => onChange(key)}
+            data-testid={`nav-${key}`}
+            sx={{ textTransform: "none", flexGrow: 1, minWidth: 0 }}
+          >
+            {badge > 0 ? `${NAV_LABELS[key]} ${badge}` : NAV_LABELS[key]}
+          </Button>
+        );
+      })}
     </Box>
   );
 }
