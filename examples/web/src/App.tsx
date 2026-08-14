@@ -12,6 +12,7 @@ import {
   OrgChartPage,
   ProjectSettingsPage,
   WorkersPage,
+  buildScheduleSearch,
   projectIdFromLocation,
   useAsksCount,
   useSessionPermalink,
@@ -273,6 +274,22 @@ function ProjectWorkspace({
     setView("chat");
   }
 
+  // A clock on the chart is a link to the schedule it draws (K3: clocks render
+  // on the canvas but are never edited there). The id has to survive the view
+  // switch, and AutomationPage initialises its own tab and selection from the
+  // URL as it mounts — so write the URL first, then switch, and it opens on the
+  // Schedules tab with that row selected.
+  //
+  // Not via its `tab`/`selected` props: passing either makes it *controlled*,
+  // and with no matching onTabChange/onSelect the human could never leave the
+  // row we sent them to. Controlling them also turns the page's own URL sync
+  // off, which is what makes a schedule link shareable in the first place.
+  const openScheduleFromChart = useCallback((scheduleId: string) => {
+    const search = buildScheduleSearch(window.location.search, scheduleId);
+    window.history.pushState(null, "", window.location.pathname + search + window.location.hash);
+    setView("automation");
+  }, []);
+
   // A job row in the workers view is a link to the session that ran it — open
   // it *and* show it, since resuming a session behind a hidden tab would look
   // like nothing happened.
@@ -314,15 +331,24 @@ function ProjectWorkspace({
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link
             to the row on Automation. */}
         {view === "chart" && (
-          <OrgChartPage projectId={project} onOpenAutomation={() => setView("automation")} />
+          <OrgChartPage projectId={project} onOpenAutomation={openScheduleFromChart} />
         )}
         {view === "chat" && <AgentChat />}
         {view === "workers" && <WorkersPage projectId={project} onOpenSession={showSession} />}
         {/* No fetchConfigEvents: GET /agent/config-events is mounted, so the
             changelog tab reads the route directly. */}
         {view === "memory" && <MemoryBrowserPage onOpenSession={showSession} />}
+        {/* Bench reads a dropped report file and has no backend: it is
+            measurement apparatus for us, not a surface an operator of this
+            project has any use for (design 15 §14, K9's folds). One prop from
+            returning. */}
         {view === "events" && (
-          <EventsPage projectId={project} refreshMs={LIVE_REFRESH_MS} onOpenSession={showSession} />
+          <EventsPage
+            projectId={project}
+            refreshMs={LIVE_REFRESH_MS}
+            onOpenSession={showSession}
+            enableBench={false}
+          />
         )}
         {view === "automation" && <AutomationPage projectId={project} workerOptions={workerOptions} />}
         {view === "settings" && <ProjectSettingsPage />}
