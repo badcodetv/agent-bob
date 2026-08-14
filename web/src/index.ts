@@ -804,6 +804,10 @@ export type {
   CredentialMode,
 } from './components/CredentialModeBadge.js'
 export { default as EventReplayPanel } from './components/EventReplayPanel.js'
+// The emit flow, extracted so the org chart's propagation panel and the legacy
+// replay panel share one dialog and one wire format (doc 28 §4.2).
+export { default as EmitEventControl } from './components/EmitEventControl.js'
+export type { EmitEventControlProps } from './components/EmitEventControl.js'
 export type { EventReplayPanelProps } from './components/EventReplayPanel.js'
 export { default as ChangelogView, ACTION_FILTERS, DiffBlock } from './components/ChangelogView.js'
 export type { ChangelogViewProps, DiffBlockProps } from './components/ChangelogView.js'

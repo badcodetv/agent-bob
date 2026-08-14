@@ -1,11 +1,17 @@
 // EventsPage — the observability surface that replaces the deleted watchapi
 // cockpit (work-plan F1): recent events, the deliveries they produced, the jobs
-// those became, a config-time subscription test, and the changelog (§15.10).
+// those became, and the changelog (§15.10).
 //
-// Read-only but for one button. Every fetch this page makes on its own is a GET
-// (the two E1 added plus the subscriptions list); the single write is the replay
-// tab's confirmed "Emit this event" (F1/RD17), which a host can switch off with
-// `enableEmit={false}`. Editing subscriptions and schedules is F2.
+// **Read-only, entirely.** Every fetch this page makes is a GET. Its one write —
+// the replay tab's confirmed "Emit this event" — moved to the org chart's
+// propagation panel (doc 28 §4.2, work plan 29 C1), where the answer to "what
+// would this wake?" renders on the shape rather than as a second list beside a
+// canvas already drawing those subscriptions. Editing subscriptions and
+// schedules is F2.
+//
+// Its Events, Jobs and Changelog tabs are themselves superseded by ActivityPage,
+// which folds all three onto one rail; this page stays exported for hosts that
+// still mount it (see doc 29 D2).
 //
 // Router-free, F3's way: the selected event is one query parameter written
 // through the History API, so a host that already has a router passes
@@ -22,7 +28,6 @@ import usePrefersReducedMotion from '../useReducedMotion.js'
 import EventList from './EventList.js'
 import EventDetail from './EventDetail.js'
 import EventJobHistory from './EventJobHistory.js'
-import EventReplayPanel from './EventReplayPanel.js'
 import ChangelogView from './ChangelogView.js'
 import BenchReportView from './BenchReportView.js'
 import { PauseLiveUpdates } from './FeedLiveness.js'
@@ -50,12 +55,6 @@ export interface EventsPageProps extends UseEventsOverviewOptions {
    * true. It has no backend at all: a report is a dropped file.
    */
   enableBench?: boolean
-  /**
-   * Offer the replay tab's "Emit this event" button (F1/RD17). Default true —
-   * it is the only way to trigger the first job from the console. False keeps
-   * the tab dry-run-only.
-   */
-  enableEmit?: boolean
   /** How many job rows fetch their token totals unprompted. Default 10. */
   tokenAutoLoad?: number
   /**
@@ -73,7 +72,7 @@ export interface EventsPageProps extends UseEventsOverviewOptions {
   showPauseToggle?: boolean
 }
 
-type TabKey = 'events' | 'jobs' | 'replay' | 'changelog' | 'bench'
+type TabKey = 'events' | 'jobs' | 'changelog' | 'bench'
 
 export default function EventsPage({
   projectId,
@@ -83,7 +82,6 @@ export default function EventsPage({
   onOpenSession,
   enableChangelog = true,
   enableBench = true,
-  enableEmit = true,
   tokenAutoLoad,
   fetchConfigEvents,
   refreshMs = 0,
@@ -189,7 +187,6 @@ export default function EventsPage({
       <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)} sx={{ px: 2 }}>
         <Tab value="events" label="Events" />
         <Tab value="jobs" label="Jobs" />
-        <Tab value="replay" label="Replay" />
         {enableChangelog && <Tab value="changelog" label="Changelog" />}
         {enableBench && <Tab value="bench" label="Bench" />}
         {showPause && (
@@ -259,18 +256,6 @@ export default function EventsPage({
               truncated={truncated}
               tokenAutoLoad={tokenAutoLoad}
               nowSeconds={nowSeconds}
-              {...apiOptions}
-            />
-          </Box>
-        )}
-
-        {tab === 'replay' && (
-          <Box sx={{ height: '100%', overflowY: 'auto' }}>
-            <EventReplayPanel
-              subscriptions={subscriptions}
-              selectedEvent={current}
-              enableEmit={enableEmit}
-              onEmitted={() => void overview.reload()}
               {...apiOptions}
             />
           </Box>

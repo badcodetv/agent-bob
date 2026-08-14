@@ -72,15 +72,18 @@ import type { ConfigApiOptions } from '../configApi.js'
 import useEventsOverview from '../useEvents.js'
 import useSchedules from '../useSchedules.js'
 import useSubscriptions from '../useSubscriptions.js'
+import EmitEventControl from './EmitEventControl.js'
 import useWorkers from '../useWorkers.js'
 import { newSubscriptionDraft } from '../subscriptions.js'
 import { FROZEN_SENTENCE, type Worker } from '../workers.js'
 import {
   EVENT_DRAFT_TEMPLATE,
   blankEnvelope,
+  matchSubscriptions,
   parseEventDraft,
   type JobRow,
   type MatchableEvent,
+  type Subscription,
 } from '../events.js'
 import {
   CONVENTION_CAVEAT,
@@ -162,6 +165,14 @@ export interface OrgChartPageProps extends ConfigApiOptions {
    * schedule it draws; without one it stays a dial and says where to go.
    */
   onOpenAutomation?: (scheduleId: string, worker: string) => void
+  /**
+   * Offer "Emit this event" in the propagation panel. Default true.
+   *
+   * It is the ONE real mutation on a surface whose rule is that every gesture
+   * is a proposal — and it is irreversible — so a host that does not want a
+   * canvas able to wake real workers turns it off here.
+   */
+  enableEmit?: boolean
 }
 
 export default function OrgChartPage({
@@ -170,6 +181,7 @@ export default function OrgChartPage({
   nowSeconds,
   title = 'Org chart',
   onOpenAutomation,
+  enableEmit = true,
   ...apiOptions
 }: OrgChartPageProps) {
   const theme = useTheme()
@@ -498,6 +510,10 @@ export default function OrgChartPage({
         onTraceDraft={traceDraft}
         onTracePip={tracePip}
         theme={theme}
+        subscriptions={overview.subscriptions}
+        enableEmit={enableEmit}
+        onEmitted={() => void overview.reload()}
+        apiOptions={apiOptions}
       />
       {projectId !== undefined && projectId !== '' && (
         <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 2 }}>
@@ -667,6 +683,14 @@ interface CanvasProps {
   onCutWire: (wire: OrgChartWire) => void
   onToggleWorker: (name: string, field: 'enabled' | 'frozen') => void
   onOpenAutomation?: (scheduleId: string, worker: string) => void
+  /**
+   * Offer "Emit this event" in the propagation panel. Default true.
+   *
+   * It is the ONE real mutation on a surface whose rule is that every gesture
+   * is a proposal — and it is irreversible — so a host that does not want a
+   * canvas able to wake real workers turns it off here.
+   */
+  enableEmit?: boolean
 }
 
 /** The breathe (§5 M2) and the trace draw-in (§5 M3), as one stylesheet.
@@ -2066,6 +2090,10 @@ function Propagation({
   onTraceDraft,
   onTracePip,
   theme,
+  subscriptions,
+  enableEmit,
+  onEmitted,
+  apiOptions,
 }: {
   pips: OrgChartPip[]
   tracedLabel: string | null
@@ -2076,9 +2104,19 @@ function Propagation({
   onTraceDraft: () => void
   onTracePip: (pip: OrgChartPip) => void
   theme: Theme
+  subscriptions: Subscription[]
+  enableEmit: boolean
+  onEmitted: () => void
+  apiOptions: ConfigApiOptions
 }) {
   const ember = token(theme, 'ember')
   const fault = token(theme, 'fault')
+  // Parsed here rather than threaded down: emitting needs the same draft the
+  // trace button reads, and two parses of one textarea is how they drift.
+  const parsedDraft = parseEventDraft(draft)
+  const matchedCount = parsedDraft.ok
+    ? matchSubscriptions(parsedDraft.event, subscriptions).filter((m) => m.matched).length
+    : 0
   const byDepth = new Map((propagation?.hops ?? []).map((hop) => [hop.depth, hop]))
   const ended = propagation === null ? -1 : propagation.hops[propagation.hops.length - 1].depth
 
@@ -2119,9 +2157,29 @@ function Propagation({
             size="small"
             slotProps={{ htmlInput: { style: { fontFamily: MONO, fontSize: 12 } } }}
           />
-          <Button size="small" onClick={onTraceDraft} sx={{ mt: 1 }}>
-            Trace this event
-          </Button>
+          {/* Replay's two contributions (design 28 §4.2): a template to start
+              from, and emitting for real. Its third part — a textual match list
+              — is deliberately NOT here: the answer renders on the shape, and
+              keeping the list would keep the duplicate the merge removes. */}
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, flexWrap: 'wrap' }}>
+            <Button size="small" variant="contained" onClick={onTraceDraft}>
+              Trace this event
+            </Button>
+            <Button size="small" onClick={() => onDraftChange(EVENT_DRAFT_TEMPLATE)}>
+              Reset to template
+            </Button>
+            {enableEmit && (
+              <Box sx={{ ml: 'auto' }}>
+                <EmitEventControl
+                  event={parsedDraft.ok ? parsedDraft.event : null}
+                  subscriptions={subscriptions}
+                  matchedCount={matchedCount}
+                  onEmitted={onEmitted}
+                  {...apiOptions}
+                />
+              </Box>
+            )}
+          </Stack>
           {draftError !== null && (
             <Typography
               variant="caption"
