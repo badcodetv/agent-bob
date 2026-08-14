@@ -15,8 +15,8 @@ import type { ConfigApiOptions } from '../configApi.js'
 import { buildWorkerSearch, newWorkerDraft, workerFromSearch, type WorkerDraft } from '../workers.js'
 import WorkerList from './WorkerList.js'
 import WorkerEditor from './WorkerEditor.js'
-import WorkerJobHistory from './WorkerJobHistory.js'
-import WorkerLineage, { type LineageVersion } from './WorkerLineage.js'
+import WorkerHistory, { type HistoryVersion } from './WorkerHistory.js'
+import WorkerTriggers, { WokenBy } from './WorkerTriggers.js'
 import WorkerPromptVersion, { restoreRationale } from './WorkerPromptVersion.js'
 import WorkerChatPanel from './WorkerChatPanel.js'
 import TopologyOnboarding from './TopologyOnboarding.js'
@@ -54,7 +54,14 @@ export interface WorkersPageProps extends ConfigApiOptions {
   enableChat?: boolean
 }
 
-type TabKey = 'config' | 'jobs' | 'lineage' | 'chat'
+/**
+ * The four facets of one worker: what is it, what makes it run, what has it
+ * done and how has it changed, and let me talk to it.
+ *
+ * `jobs` and `lineage` were separate tabs until doc 28 §2.3 — "what it did" and
+ * "how it changed" are one story told in time, and two tabs is what hid it.
+ */
+type TabKey = 'config' | 'triggers' | 'history' | 'chat'
 
 export default function WorkersPage({
   projectId,
@@ -85,8 +92,8 @@ export default function WorkersPage({
   // Fold-to-version (design §7.1): `folded` is history being read, `restoring`
   // is history being written forward. Never both, and both drop on selection
   // change — a version of one worker means nothing on another.
-  const [folded, setFolded] = useState<LineageVersion | null>(null)
-  const [restoring, setRestoring] = useState<LineageVersion | null>(null)
+  const [folded, setFolded] = useState<HistoryVersion | null>(null)
+  const [restoring, setRestoring] = useState<HistoryVersion | null>(null)
 
   const selected = controlled ? controlledSelected! : internalSelected
 
@@ -229,8 +236,8 @@ export default function WorkersPage({
           <>
             <Tabs value={tab} onChange={(_e, v: TabKey) => setTab(v)} sx={{ px: 2 }}>
               <Tab value="config" label="Configuration" />
-              <Tab value="jobs" label="Jobs" />
-              <Tab value="lineage" label="Lineage" />
+              <Tab value="triggers" label="Triggers" />
+              <Tab value="history" label="History" />
               {enableChat && <Tab value="chat" label="Chat" />}
             </Tabs>
             <Divider />
@@ -267,19 +274,25 @@ export default function WorkersPage({
                 decides it. */}
             {tab === 'config' && current !== null && folded === null && (
               <Box sx={{ px: 3, pb: 3 }}>
+                {/* The arrival question, answered without a click (doc 28 §2.2).
+                    Read-only here; the Triggers tab is where it is edited. */}
+                <WokenBy
+                  workerName={current.name}
+                  onEditTriggers={() => setTab('triggers')}
+                  {...apiOptions}
+                />
                 <BriefingPreview worker={current} {...apiOptions} />
               </Box>
             )}
-            {tab === 'jobs' && current && (
-              <WorkerJobHistory
+            {tab === 'triggers' && current && (
+              <WorkerTriggers
                 workerName={current.name}
-                projectId={projectId}
-                onOpenSession={onOpenSession}
+                workerOptions={workers.map((w) => w.name)}
                 {...apiOptions}
               />
             )}
-            {tab === 'lineage' && current && (
-              <WorkerLineage
+            {tab === 'history' && current && (
+              <WorkerHistory
                 workerName={current.name}
                 projectId={projectId}
                 onOpenSession={onOpenSession}

@@ -6,7 +6,12 @@
 // adjacency is what BeforeAfterView currently re-joins by hand.
 
 import { describe, it, expect } from 'vitest'
-import { buildWorkerHistory, runsAround, type BuildWorkerHistoryInput } from './workerHistory.js'
+import {
+  buildWorkerHistory,
+  runsAround,
+  type BuildWorkerHistoryInput,
+  type WorkerJobRow,
+} from './workerHistory.js'
 import { coerceConfigEvent, type ConfigEvent } from './configLog.js'
 import {
   coerceDelivery,
@@ -20,6 +25,15 @@ import {
 const NOW = 1_789_000_000
 const NOW_MS = NOW * 1000
 const WORKER = 'email-answerer'
+
+const job = (over: Partial<WorkerJobRow> = {}): WorkerJobRow => ({
+  id: 'sess-1',
+  created_at: NOW - 3600,
+  title: '',
+  status: 'ok',
+  worker: WORKER,
+  ...over,
+})
 
 const delivery = (over: Partial<EventDelivery> = {}): EventDelivery =>
   coerceDelivery({
@@ -72,6 +86,7 @@ const promptWrite = (over: Partial<ConfigEvent> = {}): ConfigEvent =>
 
 const input = (over: Partial<BuildWorkerHistoryInput> = {}): BuildWorkerHistoryInput => ({
   workerName: WORKER,
+  jobs: [],
   deliveries: [],
   events: [],
   subscriptions: [],
@@ -82,53 +97,36 @@ const input = (over: Partial<BuildWorkerHistoryInput> = {}): BuildWorkerHistoryI
 })
 
 describe('the merge — runs and rewrites on one rail', () => {
-  it('puts a rewrite between the run before it and the run after it', () => {
-    const history = buildWorkerHistory(
-      input({
-        events: [projectEvent()],
-        deliveries: [
-          delivery({ id: 'd-before', created_at: NOW - 600 }),
-          delivery({ id: 'd-after', created_at: NOW - 60 }),
-        ],
-        configEvents: [
-          promptWrite({ id: 'c0', created_at: (NOW - 9000) * 1000, payload: { name: WORKER, prompt: 'Old.' } }),
-          promptWrite({ id: 'c1', created_at: (NOW - 300) * 1000 }),
-        ],
-      }),
-    )
+  const withRunsAndRewrites = (): Partial<BuildWorkerHistoryInput> => ({
+    jobs: [
+      job({ id: 'sess-before', created_at: NOW - 600 }),
+      job({ id: 'sess-after', created_at: NOW - 60 }),
+    ],
+    configEvents: [
+      promptWrite({ id: 'c0', created_at: (NOW - 9000) * 1000, payload: { name: WORKER, prompt: 'Old.' } }),
+      promptWrite({ id: 'c1', created_at: (NOW - 300) * 1000 }),
+    ],
+  })
 
+  it('puts a rewrite between the run before it and the run after it', () => {
+    const history = buildWorkerHistory(input(withRunsAndRewrites()))
     expect(history.records.map((r) => r.id)).toEqual([
-      'job:d-after',
+      'job:sess-after',
       'change:c1',
-      'job:d-before',
+      'job:sess-before',
       'change:c0',
     ])
   })
 
   it('reads the runs either side of a version straight off the rail', () => {
-    const history = buildWorkerHistory(
-      input({
-        events: [projectEvent()],
-        deliveries: [
-          delivery({ id: 'd-before', created_at: NOW - 600 }),
-          delivery({ id: 'd-after', created_at: NOW - 60 }),
-        ],
-        configEvents: [
-          promptWrite({ id: 'c0', created_at: (NOW - 9000) * 1000, payload: { name: WORKER, prompt: 'Old.' } }),
-          promptWrite({ id: 'c1', created_at: (NOW - 300) * 1000 }),
-        ],
-      }),
-    )
-
+    const history = buildWorkerHistory(input(withRunsAndRewrites()))
     const { before, after } = runsAround(history.records, 'change:c1')
-    expect(before?.id).toBe('job:d-before')
-    expect(after?.id).toBe('job:d-after')
+    expect(before?.id).toBe('job:sess-before')
+    expect(after?.id).toBe('job:sess-after')
   })
 
   it('says nothing rather than inventing a run that has not happened yet', () => {
-    const history = buildWorkerHistory(
-      input({ configEvents: [promptWrite()] }),
-    )
+    const history = buildWorkerHistory(input({ configEvents: [promptWrite()] }))
     const { before, after } = runsAround(history.records, 'change:c1')
     expect(before).toBeNull()
     expect(after).toBeNull()
@@ -140,39 +138,56 @@ describe('the merge — runs and rewrites on one rail', () => {
   })
 })
 
-describe('scoping', () => {
-  it('keeps another worker’s job off this rail even if the caller over-fetches', () => {
-    const history = buildWorkerHistory(
-      input({
-        events: [projectEvent()],
-        deliveries: [delivery({ id: 'd-mine' }), delivery({ id: 'd-theirs', worker: 'archivist' })],
-      }),
-    )
-    expect(history.records.map((r) => r.id)).toEqual(['job:d-mine'])
+describe('runs come from the session route, deliveries only enrich', () => {
+  it('shows a run that has no delivery at all — started by hand or by a clock', () => {
+    // The reason sessions are the source: a scheduled or hand-started run has
+    // no event and may have no delivery in the fetched window, and it is still
+    // something this worker did.
+    const history = buildWorkerHistory(input({ jobs: [job({ id: 'sess-manual' })] }))
+    expect(history.records.map((r) => r.id)).toEqual(['job:sess-manual'])
     expect(history.jobs).toBe(1)
   })
 
-  it('falls back to the subscription join for rows written before migration 024', () => {
+  it('names the event and the duration when a delivery is there to say so', () => {
     const history = buildWorkerHistory(
       input({
+        jobs: [job({ id: 'sess-1' })],
+        deliveries: [delivery({ session_id: 'sess-1' })],
         events: [projectEvent()],
-        deliveries: [delivery({ id: 'd-old', worker: '' })],
-        subscriptions: [
-          coerceSubscription({
-            id: 's1',
-            project: 'acme',
-            event_type: 'email.received',
-            filter: {},
-            worker: WORKER,
-            max_firings_per_hour: 0,
-            enabled: true,
-            created_at: 0,
-            updated_at: 0,
-          }) as Subscription,
-        ],
       }),
     )
-    expect(history.records.map((r) => r.id)).toEqual(['job:d-old'])
+    expect(history.records[0]!.headline).toBe('email.received woke email-answerer')
+    expect(history.records[0]!.meta).toBe('ran 41s')
+  })
+
+  it('still lists the run when the delivery window does not reach it', () => {
+    // A busy project's recent-deliveries page may hold none of this worker's
+    // rows. Before sessions were the source, this run vanished.
+    const history = buildWorkerHistory(
+      input({
+        jobs: [job({ id: 'sess-old', created_at: NOW - 90_000, title: 'the nightly sweep' })],
+        deliveries: [delivery({ session_id: 'sess-someone-else' })],
+      }),
+    )
+    expect(history.records.map((r) => r.id)).toEqual(['job:sess-old'])
+    expect(history.records[0]!.headline).toBe('email-answerer ran a job')
+    // The title rides on the record, for the permalink's text — printing it in
+    // the headline as well would be the duplicated label again.
+    expect(history.records[0]!.title).toBe('the nightly sweep')
+  })
+
+  it('keeps another worker’s run off this rail', () => {
+    const history = buildWorkerHistory(
+      input({
+        jobs: [job({ id: 'sess-mine' }), job({ id: 'sess-theirs', worker: 'archivist' })],
+      }),
+    )
+    expect(history.records.map((r) => r.id)).toEqual(['job:sess-mine'])
+  })
+
+  it('keeps a run that names nobody — an unlabelled row is still ours', () => {
+    const history = buildWorkerHistory(input({ jobs: [job({ id: 'sess-plain', worker: '' })] }))
+    expect(history.records.map((r) => r.id)).toEqual(['job:sess-plain'])
   })
 
   it('ignores another worker’s config events', () => {
@@ -201,9 +216,18 @@ describe('versions and counts come from the one counter', () => {
     )
     expect(history.versions).toBe(3)
     expect(history.rewrites).toBe(2)
-    // Newest first, so v3 leads.
     expect(history.records.map((r) => r.version)).toEqual([3, 2, 1])
-    expect(history.records[0]!.meta).toContain('v3')
+    // The number is carried by `version`, not printed into `meta` — the row
+    // renders it once, as a chip (doc 21 X4: no duplicated labels).
+    expect(history.records[0]!.meta).not.toContain('v3')
+  })
+
+  it('passes the lineage through so the banner and the counts cannot disagree', () => {
+    const history = buildWorkerHistory(
+      input({ configEvents: [promptWrite({ id: 'c1' })] }),
+    )
+    expect(history.lineage.versions).toBe(history.versions)
+    expect(history.lineage.workerName).toBe(WORKER)
   })
 
   it('marks churn — a rewrite whose text is byte-identical to the one before', () => {
@@ -242,22 +266,24 @@ describe('authorship and honesty', () => {
     expect(byId.get('change:c-human')!.detail).toBe('(no reason given)')
   })
 
-  it('says so when a failed job records no reason', () => {
+  it('says so when a failed run records no reason', () => {
     const history = buildWorkerHistory(
       input({
+        jobs: [job({ id: 'sess-1' })],
+        deliveries: [delivery({ session_id: 'sess-1', status: 'failed', failure_reason: '' })],
         events: [projectEvent()],
-        deliveries: [delivery({ status: 'failed', failure_reason: '' })],
       }),
     )
     expect(history.records[0]!.glyph).toBe('failure')
     expect(history.records[0]!.detail).toContain('No reason is recorded')
   })
 
-  it('draws a parked job as waiting, not as a completed run', () => {
+  it('draws a parked run as waiting, not as a completed one', () => {
     const history = buildWorkerHistory(
       input({
+        jobs: [job({ id: 'sess-1' })],
+        deliveries: [delivery({ session_id: 'sess-1', status: 'awaiting_human', ended_at: 0 })],
         events: [projectEvent()],
-        deliveries: [delivery({ status: 'awaiting_human', ended_at: 0 })],
       }),
     )
     expect(history.records[0]!.kind).toBe('ask')
@@ -266,15 +292,14 @@ describe('authorship and honesty', () => {
 })
 
 describe('J1 holds here too', () => {
-  it('sorts a millisecond-stamped rewrite against a second-stamped job correctly', () => {
+  it('sorts a millisecond-stamped rewrite against a second-stamped run correctly', () => {
     const history = buildWorkerHistory(
       input({
-        events: [projectEvent()],
-        deliveries: [delivery({ id: 'd1', created_at: NOW - 10 })],
+        jobs: [job({ id: 'sess-1', created_at: NOW - 10 })],
         configEvents: [promptWrite({ id: 'c1', created_at: (NOW - 9) * 1000 })],
       }),
     )
-    expect(history.records.map((r) => r.id)).toEqual(['change:c1', 'job:d1'])
+    expect(history.records.map((r) => r.id)).toEqual(['change:c1', 'job:sess-1'])
   })
 
   it('is empty for a worker with no history rather than throwing', () => {

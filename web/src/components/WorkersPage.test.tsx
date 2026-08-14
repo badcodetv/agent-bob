@@ -445,24 +445,22 @@ describe('worker editor', () => {
   })
 })
 
-describe('job history', () => {
+describe('history (runs and rewrites on one rail)', () => {
   it('shows only this worker’s sessions, newest first', async () => {
     renderPage()
     await userEvent.click(await screen.findByText('email-answerer'))
-    await userEvent.click(await screen.findByRole('tab', { name: /jobs/i }))
+    await userEvent.click(await screen.findByRole('tab', { name: /history/i }))
 
-    // The second list on the page is the job history (the first is the worker list).
-    const lists = await screen.findAllByRole('list')
-    const jobs = lists[lists.length - 1]!
-    expect(within(jobs).getByText('Answered a mail')).toBeInTheDocument()
-    expect(within(jobs).queryByText('Edited copy')).not.toBeInTheDocument()
-    expect(within(jobs).queryByText('Plain chat')).not.toBeInTheDocument()
+    const rail = await screen.findByTestId('history-rail')
+    expect(within(rail).getByText('Answered a mail')).toBeInTheDocument()
+    expect(within(rail).queryByText('Edited copy')).not.toBeInTheDocument()
+    expect(within(rail).queryByText('Plain chat')).not.toBeInTheDocument()
   })
 
   it('links each job at its canonical session permalink', async () => {
     renderPage()
     await userEvent.click(await screen.findByText('email-answerer'))
-    await userEvent.click(await screen.findByRole('tab', { name: /jobs/i }))
+    await userEvent.click(await screen.findByRole('tab', { name: /history/i }))
 
     const link = await screen.findByRole('link', { name: /answered a mail/i })
     expect(link).toHaveAttribute('href', '/p/acme/s/s1')
@@ -472,7 +470,7 @@ describe('job history', () => {
     const onOpenSession = vi.fn()
     renderPage({ onOpenSession })
     await userEvent.click(await screen.findByText('email-answerer'))
-    await userEvent.click(await screen.findByRole('tab', { name: /jobs/i }))
+    await userEvent.click(await screen.findByRole('tab', { name: /history/i }))
     await userEvent.click(await screen.findByText('Answered a mail'))
     expect(onOpenSession).toHaveBeenCalledWith('s1')
   })
@@ -481,8 +479,10 @@ describe('job history', () => {
     sessions = []
     renderPage()
     await userEvent.click(await screen.findByText('email-answerer'))
-    await userEvent.click(await screen.findByRole('tab', { name: /jobs/i }))
-    expect(await screen.findByText(/no jobs yet for this worker/i)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('tab', { name: /history/i }))
+    expect(
+      await screen.findByText(/has not run and has not been changed/i),
+    ).toBeInTheDocument()
   })
 })
 

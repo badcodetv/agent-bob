@@ -26,7 +26,12 @@ import {
   toMs,
   type ActivityRecord,
 } from './activity.js'
-import { buildChangelog, workerLineage, type ConfigEvent } from './configLog.js'
+import {
+  buildChangelog,
+  workerLineage,
+  type ConfigEvent,
+  type WorkerLineage as PromptLineage,
+} from './configLog.js'
 import {
   deliveryDurationSeconds,
   formatDuration,
@@ -54,17 +59,47 @@ export interface WorkerHistoryRecord extends ActivityRecord {
    * a worker that keeps "rewriting" a prompt to itself is a finding.
    */
   duplicate: boolean
+  /**
+   * The session's own title, for the permalink's text. '' on a change row, and
+   * on a run that never got one.
+   */
+  title: string
+}
+
+/**
+ * One run, as `GET /agent/sessions?worker=` returns it.
+ *
+ * Structural rather than the full `AgentSessionListItem`, so the fold stays a
+ * pure function over the few fields it actually reads.
+ */
+export interface WorkerJobRow {
+  id: string
+  created_at: number
+  title?: string
+  status?: string
+  /** Absent on plain sessions; only ever used to exclude a foreign row. */
+  worker?: string
 }
 
 export interface BuildWorkerHistoryInput {
   /** The worker this rail belongs to. */
   workerName: string
   /**
-   * Deliveries to consider. The caller supplies whatever it fetched; this fold
-   * filters to the worker itself rather than trusting the query, so a page that
-   * over-fetches cannot put another worker's job on this rail.
+   * This worker's runs, from `GET /agent/sessions?worker=`.
+   *
+   * That route filters IN THE DATABASE, which is why it is the source rather
+   * than the delivery list: deliveries come back as a recent window over the
+   * whole project, so on a busy project a given worker's runs may not appear in
+   * it at all. Using deliveries as the source would have quietly shortened
+   * every worker's history — the coverage the old Jobs tab had, lost.
    */
-  deliveries: EventDelivery[]
+  jobs: WorkerJobRow[]
+  /**
+   * Deliveries, used only to ENRICH a run with what a session row does not
+   * carry: how long it took, and why it failed. Joined on session id, so a run
+   * with no matching delivery still appears — just without the extra.
+   */
+  deliveries?: EventDelivery[]
   /** For naming the event that woke each job; optional. */
   events?: ProjectEvent[]
   /** Fallback worker lookup for delivery rows written before migration 024. */
@@ -86,6 +121,16 @@ export interface WorkerHistory {
   rewrites: number
   /** Jobs on the rail, after filtering. */
   jobs: number
+  /**
+   * The prompt lineage this fold consumed, passed through rather than recomputed.
+   *
+   * The "changes since your last review" banner is a function of the lineage and
+   * the watermark, and it survives the Jobs/Lineage merge — so the component
+   * needs the same object the counts came from. Building the changelog twice to
+   * get it would be the seam where two counters start to disagree, which is
+   * exactly the defect doc 21 filed as X5.
+   */
+  lineage: PromptLineage
 }
 
 /**
@@ -105,7 +150,9 @@ export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistor
     const { entry } = row
     const actor = row.byWorker ? entry.actorWorker : 'you'
     const noReason = entry.rationale.trim() === ''
-    const versionLabel = row.version === null ? '' : `v${row.version}`
+    // The version number is deliberately NOT in `meta`: the row renders it as a
+    // chip, and printing it twice twenty pixels apart is doc 21's X4 defect
+    // (a duplicated label) reappearing on a different surface.
     const diffLabel = entry.diff ? `+${entry.diff.added} −${entry.diff.removed} lines` : ''
     return {
       id: `change:${entry.id}`,
@@ -117,7 +164,7 @@ export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistor
       headline: `${actor} ${entry.action === 'worker_prompt_write' ? 'rewrote' : 'changed'} ${workerName}`,
       detail: noReason ? '(no reason given)' : entry.rationale,
       detailIsQuote: !noReason,
-      meta: [versionLabel, diffLabel, row.duplicate ? 'no change to the text' : '']
+      meta: [diffLabel, row.duplicate ? 'no change to the text' : '']
         .filter((part) => part !== '')
         .join(' · '),
       worker: workerName,
@@ -128,6 +175,7 @@ export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistor
       version: row.version,
       prompt: row.prompt,
       duplicate: row.duplicate,
+      title: '',
     }
   })
 
@@ -142,61 +190,80 @@ export function buildWorkerHistory(input: BuildWorkerHistoryInput): WorkerHistor
     versions: lineage.versions,
     rewrites: lineage.rewrites,
     jobs: jobRecords.length,
+    lineage,
   }
 }
 
-/** This worker's jobs — the same occurrence collapse `activity.ts` performs. */
+/**
+ * This worker's runs: one row per session, enriched from its delivery.
+ *
+ * A session is the run; the delivery — where there is one — knows what woke it,
+ * how long it took and why it failed. A run started by hand or by a schedule
+ * has no matching delivery and still belongs on the rail, so the join is a
+ * left join in spirit: absent enrichment is quiet, never a dropped row.
+ */
 function buildJobRecords(input: BuildWorkerHistoryInput): WorkerHistoryRecord[] {
-  const { workerName, deliveries, events = [], subscriptions = [], nowMs } = input
+  const { workerName, jobs, deliveries = [], events = [], subscriptions = [], nowMs } = input
   const nowSeconds = Math.floor(nowMs / 1000)
   const eventById = new Map(events.map((e) => [e.id, e]))
   const workerBySubscription = new Map(subscriptions.map((s) => [s.id, s.worker]))
+  const deliveryBySession = new Map(
+    deliveries
+      .filter((d) => d.session_id !== '')
+      .map((d) => [d.session_id, d] as const),
+  )
 
   const out: WorkerHistoryRecord[] = []
-  for (const delivery of deliveries) {
-    // Read the row (migration 024); fall back to the subscription join only for
-    // older rows, which carry ''. Filtering here rather than trusting the query
-    // keeps another worker's job off this rail even if the caller over-fetches.
-    const worker =
-      delivery.worker || workerBySubscription.get(delivery.subscription_id) || ''
-    if (worker !== workerName) continue
+  for (const job of jobs) {
+    // The route filters by worker already; this only rejects a row that
+    // explicitly names a DIFFERENT one, so an over-fetching caller cannot put
+    // another worker's run here and a row that names nobody is still ours.
+    if (job.worker !== undefined && job.worker !== '' && job.worker !== workerName) continue
 
-    const event = eventById.get(delivery.event_id)
+    const delivery = deliveryBySession.get(job.id)
+    const event = delivery ? eventById.get(delivery.event_id) : undefined
     const eventType = event?.type ?? ''
-    const failed = delivery.status === 'failed'
-    const parked = delivery.status === 'awaiting_human'
-    const ran = deliveryDurationSeconds(delivery, nowSeconds)
-    const reason = (delivery.failure_reason ?? '').trim()
+    const status = delivery?.status ?? job.status ?? ''
+    const failed = status === 'failed'
+    const parked = status === 'awaiting_human'
+    const ran = delivery ? deliveryDurationSeconds(delivery, nowSeconds) : null
+    const reason = (delivery?.failure_reason ?? '').trim()
+
+    // The subscription join is the pre-024 fallback for naming the worker; kept
+    // so an enriched row still reads correctly on an old delivery.
+    const named =
+      delivery?.worker || workerBySubscription.get(delivery?.subscription_id ?? '') || workerName
 
     out.push({
-      id: `job:${delivery.id}`,
+      id: `job:${job.id}`,
       kind: parked ? 'ask' : 'job',
       lens: ACTIVITY_HOME.job,
       glyph: parked ? 'attention' : failed ? 'failure' : 'agent',
-      atMs: toMs(
-        delivery.created_at || delivery.started_at || event?.occurred_at || event?.created_at,
-        'seconds',
-      ),
+      atMs: toMs(job.created_at, 'seconds'),
+      // The title is NOT folded into the headline: the row renders it as the
+      // permalink's text, and printing it in both places is the duplicated
+      // label again.
       headline: parked
-        ? `${workerName} is waiting for you`
+        ? `${named} is waiting for you`
         : eventType === ''
-          ? `${workerName} ran a job`
-          : `${eventType} woke ${workerName}`,
+          ? `${named} ran a job`
+          : `${eventType} woke ${named}`,
       detail: failed
         ? reason === ''
           ? 'No reason is recorded on this delivery. The agentd log and the job are where the reason is.'
           : reason
         : '',
       detailIsQuote: false,
-      meta: ran === null ? delivery.status : `ran ${formatDuration(ran)}`,
+      meta: ran === null ? status : `ran ${formatDuration(ran)}`,
       worker: workerName,
-      sessionId: delivery.session_id,
+      sessionId: job.id,
       eventType,
       gapBeforeLabel: '',
       entry: null,
       version: null,
       prompt: null,
       duplicate: false,
+      title: job.title ?? '',
     })
   }
   return out

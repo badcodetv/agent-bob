@@ -511,6 +511,13 @@ export type {
   WorkerHistoryRecord,
 } from './workerHistory.js'
 
+// The worker's History and Triggers tabs (B2, B3) — the runs-and-rewrites rail,
+// and the per-worker home for "what makes this run?".
+export { default as WorkerHistory, WORKER_HISTORY_SURFACE } from './components/WorkerHistory.js'
+export type { WorkerHistoryProps, HistoryVersion } from './components/WorkerHistory.js'
+export { default as WorkerTriggers, WokenBy } from './components/WorkerTriggers.js'
+export type { WorkerTriggersProps } from './components/WorkerTriggers.js'
+
 // Progressive navigation (A3) — which nav entries a project has earned, and the
 // sentence that announces a new one (design 28 §3, decision K9).
 export {

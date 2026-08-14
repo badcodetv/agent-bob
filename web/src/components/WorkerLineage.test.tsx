@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// LN1: the Lineage tab (design §7.1) — the config log filtered to one worker,
+// LN1 (ported to B2): the History tab — the config log filtered to one worker,
 // folding the Configuration tab to a past version, and restoring it forward.
 
 import React from 'react'
@@ -103,34 +103,36 @@ function renderPage() {
   )
 }
 
-const openLineage = async () => {
+const openHistory = async () => {
   renderPage()
   await screen.findByLabelText(/system prompt/i)
-  await userEvent.click(screen.getByRole('tab', { name: 'Lineage' }))
+  await userEvent.click(screen.getByRole('tab', { name: 'History' }))
 }
 
-describe('the lineage tab', () => {
+describe('the history tab', () => {
   it('shows only this worker’s history, numbered, with its rationales', async () => {
-    await openLineage()
+    await openHistory()
     expect(await screen.findByText('v3')).toBeInTheDocument()
     expect(screen.getByText('v2')).toBeInTheDocument()
     expect(screen.getByText('v1')).toBeInTheDocument()
     expect(screen.getByText('narrowing yesterday’s rule')).toBeInTheDocument()
     expect(screen.queryByText('belongs to another worker')).not.toBeInTheDocument()
     // Doc 21, X5: this header used to read "2 rewrites · 3 distinct".
-    expect(screen.getByText('3 versions · 2 rewrites, 2 distinct')).toBeInTheDocument()
+    expect(screen.getByTestId('history-summary').textContent).toContain(
+      '3 versions · 2 rewrites, 2 distinct',
+    )
   })
 
   it('names the worker that decided a rewrite, and the human who did not', async () => {
-    await openLineage()
-    expect(await screen.findByText(/by email-reviewer/)).toBeInTheDocument()
-    expect(screen.getAllByText(/by a human \(UI or API\)/).length).toBeGreaterThan(0)
+    await openHistory()
+    expect(await screen.findByText(/email-reviewer rewrote email-answerer/)).toBeInTheDocument()
+    expect(screen.getAllByText(/you rewrote email-answerer/).length).toBeGreaterThan(0)
   })
 })
 
 describe('fold to a version', () => {
   it('shows the old prompt read-only, banner-marked as history', async () => {
-    await openLineage()
+    await openHistory()
     await userEvent.click(await screen.findByText('v2'))
     const banner = await screen.findByTestId('version-banner')
     expect(banner.textContent).toContain('Viewing v2 as of')
@@ -141,7 +143,7 @@ describe('fold to a version', () => {
   })
 
   it('restores forward: the editor is pre-filled with the old text and a reason', async () => {
-    await openLineage()
+    await openHistory()
     await userEvent.click(await screen.findByText('v2'))
     await userEvent.click(await screen.findByRole('button', { name: 'Restore this version' }))
 
@@ -162,7 +164,7 @@ describe('fold to a version', () => {
   })
 
   it('slides the history in under the banner instead of teleporting (W3)', async () => {
-    await openLineage()
+    await openHistory()
     await userEvent.click(await screen.findByText('v2'))
     const fold = await screen.findByTestId('version-fold')
     // The transition is declared; the entered state arrives on the next frame.
@@ -182,7 +184,7 @@ describe('fold to a version', () => {
       removeListener: () => {},
       dispatchEvent: () => false,
     })) as unknown as typeof window.matchMedia
-    await openLineage()
+    await openHistory()
     await userEvent.click(await screen.findByText('v2'))
     const fold = await screen.findByTestId('version-fold')
     expect(getComputedStyle(fold).transition).toBe('none')
@@ -191,7 +193,7 @@ describe('fold to a version', () => {
   })
 
   it('goes back to the live prompt without writing anything', async () => {
-    await openLineage()
+    await openHistory()
     await userEvent.click(await screen.findByText('v2'))
     await userEvent.click(await screen.findByRole('button', { name: 'Back to the live prompt' }))
     expect(await screen.findByLabelText(/system prompt/i)).toHaveValue('v3 — the live prompt')
