@@ -19,25 +19,39 @@ import { projectClient, TEST_EMAIL, TEST_PASSWORD, uniqueProject } from './api'
  */
 export type View =
   | 'desk'
-  | 'chart'
   | 'chat'
   | 'workers'
   | 'memory'
-  | 'events'
-  | 'automation'
+  | 'activity'
+  | 'chart'
   | 'settings'
 
-/** Every view, in the order the nav renders them. */
+/**
+ * Every view, in the order the nav renders them.
+ *
+ * Since K9 (doc 28 §3) the nav is PROGRESSIVE: this is the full set a mature
+ * project reaches, not what any given project shows. A fresh project shows
+ * `BASE_VIEWS` and earns the rest — so a test that walks this list must first
+ * give the project something to reveal them with.
+ */
 export const ALL_VIEWS: readonly View[] = [
   'desk',
-  'chart',
   'chat',
   'workers',
   'memory',
-  'events',
-  'automation',
+  'activity',
+  'chart',
   'settings',
 ]
+
+/**
+ * What a project with nothing in it shows: four buttons, not eight.
+ *
+ * Memory arrives with the first memory, Activity with the first event, and the
+ * Chart with the first SUBSCRIPTION — a fleet with nothing wired between its
+ * workers has no shape worth drawing.
+ */
+export const BASE_VIEWS: readonly View[] = ['desk', 'chat', 'workers', 'settings']
 
 /**
  * Logs in with the stack-e2e password account, clearing any auth state a

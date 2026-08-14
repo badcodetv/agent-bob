@@ -1,10 +1,19 @@
 import { test, expect, type Page } from '@playwright/test'
-import { ALL_VIEWS, cleanupOpenedProjects, gotoView, openFreshProject } from '../helpers/ui'
+import { BASE_VIEWS, cleanupOpenedProjects, gotoView, openFreshProject } from '../helpers/ui'
 import { projectClient, type ProjectClient } from '../helpers/api'
 import { configEvents, waitForConfigAction } from '../helpers/configlog'
 
-// Browser e2e for the operator console (docs 15/16/21): the Desk, the org
-// chart, and the two write gestures that only exist on the canvas.
+// Browser e2e for the operator console (docs 15/16/21, and the IA change in
+// 28/29): the reveal curve, the Activity rail, the worker's Triggers tab, the
+// Desk, the org chart, and the two write gestures that only exist on the canvas.
+//
+// **UNRUN AT AUTHORING TIME (2026-08-14).** Rewritten for the new IA by the D1
+// executor, who found a compose stack already running and serving a pre-change
+// web image. Rebuilding it (`docker compose up -d --build web`) would have
+// changed what someone else was looking at, so it was left alone — the same
+// call, and the same note, as the F1 executor left on the emit test below.
+// **Someone with the stack to themselves must run this.** It typechecks; that
+// is all that is currently proved.
 //
 // Everything here was previously proved only by unit tests and by a human
 // looking at screenshots. The live pass (doc 21) drove READS; what had never
@@ -79,7 +88,7 @@ test.describe('operator console', () => {
   // page that throws on an empty project. A view that crashes renders nothing
   // and the nav button stays unselected, so "is the button now contained" is
   // a real assertion about the page having mounted.
-  test('all eight views render for a fresh project, and the Desk shows its first run', async ({ page }) => {
+  test('a fresh project shows FOUR views, and the Desk shows its first run', async ({ page }) => {
     await openFreshProject(page, 'e2e-cx-nav')
 
     // The Desk is the landing view (App.tsx defaults to it) and an empty
@@ -90,16 +99,106 @@ test.describe('operator console', () => {
     const pageErrors: string[] = []
     page.on('pageerror', (e) => pageErrors.push(String(e)))
 
-    for (const view of ALL_VIEWS) {
+    // K9: an empty project shows FOUR buttons, not eight. This is the assertion
+    // the whole IA change exists for — the complaint was "so many pages I get
+    // lost", and a fresh project meeting seven of them was the cause.
+    for (const view of BASE_VIEWS) {
       await gotoView(page, view)
-      // Each nav button is `contained` while its view is open; Playwright sees
-      // that as the MUI class, so assert on what the operator can see instead:
-      // the view switched and the app did not blank out.
       await expect(page.getByTestId(`nav-${view}`)).toBeVisible()
       await expect(page.getByTestId('session-sidebar')).toBeVisible()
     }
 
+    // And the earned ones are genuinely absent, not merely disabled.
+    for (const hidden of ['memory', 'activity', 'chart']) {
+      await expect(page.getByTestId(`nav-${hidden}`)).toHaveCount(0)
+    }
+
     expect(pageErrors, 'no view may throw while rendering an empty project').toEqual([])
+  })
+
+  // ── the reveal curve: entries arrive when the project earns them ───────────
+  test('a second worker reveals the Chart, and an event reveals Activity', async ({ page, request }) => {
+    const project = await openFreshProject(page, 'e2e-cx-reveal')
+    const api = await projectClient(request, project)
+
+    await expect(page.getByTestId('nav-chart')).toHaveCount(0)
+
+    // One worker is not a shape — there is nothing to wire it to.
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
+    await page.reload()
+    await expect(page.getByTestId('nav-workers')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('nav-chart')).toHaveCount(0)
+
+    // Two workers is the first moment there is a PAIR to connect, which is the
+    // first moment the canvas has a job. Gating this on "a subscription exists"
+    // would make the gesture that creates the first subscription unreachable.
+    await api.putWorker(THIRD, { system_prompt: 'You announce finished work.', description: 'announces' })
+    await page.reload()
+    await expect(page.getByTestId('nav-chart')).toBeVisible({ timeout: 30_000 })
+
+    // An event reveals Activity, and the reveal is announced in words rather
+    // than by a badge (design 28 §3.2).
+    await api.postEvent({ type: `${WRITER}.task`, text: 'Write a blurb about the new apples.' })
+    await page.reload()
+    await expect(page.getByTestId('nav-activity')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('nav-reveal-notice')).toContainText(
+      'lists everything this project does',
+    )
+  })
+
+  // ── Activity: one rail carrying more than one kind of record ──────────────
+  test('the Activity rail interleaves a config change and a job in time order', async ({ page, request }) => {
+    const project = await openFreshProject(page, 'e2e-cx-activity')
+    const api = await projectClient(request, project)
+
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
+    await api.postEvent({ type: `${WRITER}.task`, text: 'Write a blurb about the new apples.' })
+    await page.reload()
+
+    await gotoView(page, 'activity')
+    const rail = page.getByTestId('activity-rail')
+    await expect(rail).toBeVisible({ timeout: 30_000 })
+
+    // The worker's creation is a config change; the event is an event. Both are
+    // on ONE rail — that is the merge, and the thing five tabs used to hide.
+    await expect(rail).toContainText(WRITER)
+    await expect(rail).toContainText(`${WRITER}.task`)
+
+    // The chips subset the rail IN PLACE. If a chip re-mounted the list this
+    // would be a rename rather than a merge, so the rail must survive the click.
+    await page.getByTestId('activity-lens-changes').click()
+    await expect(page.getByTestId('activity-rail')).toBeVisible()
+    await expect(page.getByTestId('activity-rail')).not.toContainText(`${WRITER}.task`)
+    await page.getByTestId('activity-lens-all').click()
+    await expect(page.getByTestId('activity-rail')).toContainText(`${WRITER}.task`)
+  })
+
+  // ── Triggers: what wakes a worker is edited on the worker ─────────────────
+  test('a schedule is created from the worker’s Triggers tab, with a reason', async ({ page, request }) => {
+    const project = await openFreshProject(page, 'e2e-cx-triggers')
+    const api = await projectClient(request, project)
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
+
+    await gotoView(page, 'workers')
+    await page.getByText(WRITER, { exact: true }).first().click()
+
+    // Configuration answers "what makes this run?" in zero clicks, before the
+    // tab is even opened (doc 28 §2.2).
+    await expect(page.getByTestId('woken-by')).toContainText('Nothing wakes this worker yet', {
+      timeout: 30_000,
+    })
+
+    await page.getByTestId('edit-triggers').click()
+    await page.getByTestId('new-schedule').click()
+
+    await page.getByLabel(/cron/i).first().fill('0 9 * * 1-5')
+    await page.getByLabel(/what should .* do|input/i).first().fill('Write the morning blurb.')
+    await page.getByLabel(/^Why\??$/).fill('the catalogue goes out at nine')
+    await page.getByRole('button', { name: /save/i }).first().click()
+
+    // The engine, not the screen, is the proof.
+    const schedules = await api.listSchedules()
+    expect(schedules.some((s) => s.worker === WRITER)).toBe(true)
   })
 
   // ── (b) + (c) the topology flow, the chart it draws, and traffic on a wire ──
@@ -172,21 +271,27 @@ test.describe('operator console', () => {
 
     await applyActorCriticViaUI(page)
 
-    // The replay tab of the events view — the one place this package writes.
-    await gotoView(page, 'events')
-    await page.getByRole('tab', { name: 'Replay' }).click()
-
-    const editor = page.getByLabel('Event JSON')
+    // Emitting moved to the chart's propagation panel (doc 28 §4.2): the same
+    // question — "what would this wake?" — answered on the shape instead of as
+    // a list beside a canvas already drawing those subscriptions.
+    await gotoView(page, 'chart')
+    const editor = page.getByLabel('…or paste an event')
     await expect(editor).toBeVisible({ timeout: 30_000 })
     await editor.fill(
       JSON.stringify({ type: `${WRITER}.task`, text: 'Write a blurb about the new apples.' }, null, 2),
     )
 
-    // The dry run agrees something would happen before we commit to it.
-    await expect(page.getByText(/1 of \d+ subscriptions would match/)).toBeVisible({ timeout: 30_000 })
+    // Trace is the primary action, and it is a dry run: it draws the path on
+    // the canvas and writes nothing.
+    await page.getByRole('button', { name: 'Trace this event' }).click()
+    await expect(page.getByTestId('depth-ruler')).toBeVisible({ timeout: 30_000 })
+    expect(
+      await api.listEvents({ type: `${WRITER}.task` }),
+      'tracing must never write an event',
+    ).toHaveLength(0)
 
     // Nothing is written until the confirm is accepted — the footgun guard.
-    await page.getByRole('button', { name: 'Emit this event' }).click()
+    await page.getByTestId('emit-event').click()
     const confirm = page.getByRole('dialog')
     await expect(confirm).toBeVisible({ timeout: 10_000 })
     await expect(confirm).toContainText('wake its worker and start a job')

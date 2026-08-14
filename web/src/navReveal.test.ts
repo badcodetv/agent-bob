@@ -30,10 +30,10 @@ describe('day one', () => {
     expect(revealedNav(counts()).visible).toContain('desk')
   })
 
-  it('reveals nothing on the strength of a worker alone', () => {
-    // A worker that has never run has produced no events, no memories and no
-    // wiring, so there is still nothing behind the other three buttons.
-    expect(revealedNav(counts({ workers: 3 })).visible).toEqual([
+  it('reveals nothing on the strength of ONE worker', () => {
+    // One worker has produced no events, no memories, and has nothing to be
+    // wired to, so there is still nothing behind the other three buttons.
+    expect(revealedNav(counts({ workers: 1 })).visible).toEqual([
       'desk',
       'chat',
       'workers',
@@ -51,13 +51,25 @@ describe('the reveal rules', () => {
     expect(revealedNav(counts({ events: 1 })).visible).toContain('activity')
   })
 
-  it('reveals the Chart on the first SUBSCRIPTION, not on a worker count', () => {
-    expect(revealedNav(counts({ workers: 12 })).visible).not.toContain('chart')
+  it('reveals the Chart on the first subscription', () => {
     expect(revealedNav(counts({ subscriptions: 1 })).visible).toContain('chart')
   })
 
-  it('a working project shows six', () => {
-    const { visible } = revealedNav(counts({ workers: 2, memories: 4, events: 9 }))
+  it('also reveals the Chart at two workers — or the first wire is unreachable', () => {
+    // The canvas is where a wire is DRAWN. Gating it on "a subscription exists"
+    // alone would mean the gesture designed to create the first subscription
+    // only appears after something else already created one.
+    expect(revealedNav(counts({ workers: 2 })).visible).toContain('chart')
+  })
+
+  it('does not reveal the Chart for a schedule', () => {
+    // A clock is a per-worker fact; the Triggers tab renders it better than a
+    // dial on a canvas, and one worker on a clock is still not a shape.
+    expect(revealedNav(counts({ workers: 1, subscriptions: 0 })).visible).not.toContain('chart')
+  })
+
+  it('a working single-worker project shows six', () => {
+    const { visible } = revealedNav(counts({ workers: 1, memories: 4, events: 9 }))
     expect(visible).toEqual(['desk', 'chat', 'workers', 'memory', 'activity', 'settings'])
   })
 

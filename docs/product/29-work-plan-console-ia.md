@@ -188,7 +188,7 @@ components mount them. `desk.ts` is the model to copy — read it before writing
 
 ## D1 — the regression net
 
-- [ ] Rewrite `e2e/features/console.stack.spec.ts` for the new IA. It holds ~94 nav and label
+- [x] *(written, NOT run — see DIL 15)* Rewrite `e2e/features/console.stack.spec.ts` for the new IA. It holds ~94 nav and label
   references and is the single choke point for this whole plan; it is also the only thing standing
   between a fold bug and a silent regression. Cover: the reveal curve (a fresh project shows four
   entries; creating a worker reveals Activity), the Activity rail interleaving three record kinds in
@@ -315,6 +315,24 @@ export is a public-API break that is Kai's call, not an executor's; and doc 27's
 explicit that marking is cheaper than removing and keeps the reasoning visible. `ChangelogView`
 survives untouched and is still mounted by `EventsPage` — Activity's four chips do not yet cover its
 nine lenses, and losing that filtering silently would be a regression rather than a simplification.
+
+**14. The chart's reveal threshold was a bootstrap trap, and writing the e2e caught it.** C3 shipped
+`chart: subscriptions > 0`, straight from doc 28 §4.1's reasoning that five unwired workers have no
+shape. Rewriting the wire test surfaced the contradiction: **the canvas is where a wire is drawn**
+(K3's drag-to-wire), so a chart that appears only once a subscription exists makes the first wire
+unreachable by the gesture designed for it — you would have to create a subscription on the Triggers
+tab to unlock the surface whose job is creating subscriptions. The rule is now
+`subscriptions > 0 || workers >= 2`: two workers is the first moment there is a *pair to connect*.
+Doc 28 §4.1 should be read with this amendment. Worth noting *how* it was found — not by a unit
+test, all of which passed, but by writing down what a human would actually do in order.
+
+**15. D1 is written and typechecks, but is UNRUN.** A compose stack was already running and serving
+a pre-change web image; rebuilding it would have changed what someone else was looking at, so it was
+left alone. The spec carries the same honest banner the F1 executor left on the emit test. **It
+needs a run by someone holding the stack**, with `./e2e/run-stack-e2e.sh up mock` then
+`./e2e/run-stack-e2e.sh test mock -- e2e/features/console.stack.spec.ts`. Everything it asserts is
+proved at unit level; what is unproved is that it all holds together in a browser against real
+agentd.
 
 **13. `cd web && npm run typecheck` is NOT the whole gate — the SHELL's tsconfig is stricter.**
 Removing the Replay tab left `subscriptions` destructured and unused in `EventsPage`. The library

@@ -63,13 +63,9 @@ export interface NavCounts {
   memories: number
   events: number
   /**
-   * Subscriptions — the chart's trigger, and deliberately NOT the worker count.
-   *
-   * Five workers with nothing wired between them have no shape: drawing them
-   * gives five plates in a row, which a list does better. The chart earns its
-   * place when the fleet stops being a list and becomes a graph — when one
-   * worker wakes another. Schedules do not count: a clock is a per-worker fact
-   * and the worker's Triggers tab renders it better than a dial on a canvas.
+   * Subscriptions — one half of the chart's trigger. Schedules deliberately do
+   * not count: a clock is a per-worker fact and the Triggers tab renders it
+   * better than a dial on a canvas.
    */
   subscriptions: number
 }
@@ -78,7 +74,17 @@ export interface NavCounts {
 const REVEAL_RULES: Record<NavConditionalEntry, (counts: NavCounts) => boolean> = {
   memory: (c) => c.memories > 0,
   activity: (c) => c.events > 0,
-  chart: (c) => c.subscriptions > 0,
+  // The chart appears when there is either something WIRED or something TO
+  // wire.
+  //
+  // "First subscription" alone was the original rule and it was a trap: the
+  // canvas is where a wire is DRAWN (K3's drag-to-wire), so a chart that only
+  // appears once a subscription exists makes the first wire unreachable by the
+  // gesture designed for it — you would have to create it on the Triggers tab
+  // to unlock the surface whose job is creating it. Two workers is the moment
+  // the patchbay becomes useful, because it is the first moment there is a pair
+  // to connect.
+  chart: (c) => c.subscriptions > 0 || c.workers >= 2,
 }
 
 export interface NavRevealResult {
