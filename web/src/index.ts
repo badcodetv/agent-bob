@@ -470,6 +470,45 @@ export type {
   DeskTroubleKind,
 } from './desk.js'
 
+// The Activity fold (A1) — the whole project on one rail, in time order
+// (design 28 §1). The unit is the occurrence, not the record, and `toMs` is the
+// single J1 boundary every rail fold normalises through.
+export {
+  ACTIVITY_GAP_THRESHOLD_MS,
+  ACTIVITY_HOME,
+  ACTIVITY_LENSES,
+  buildActivity,
+  oldestShownMs,
+  toMs,
+} from './activity.js'
+export type {
+  ActivityHome,
+  ActivityKind,
+  ActivityLens,
+  ActivityRecord,
+  BuildActivityInput,
+} from './activity.js'
+
+// The worker-history fold (A2) — one worker's runs and rewrites on the same
+// rail, which is what retires the hand-rolled before/after re-join (design 28 §2.3).
+export { buildWorkerHistory, runsAround } from './workerHistory.js'
+export type {
+  BuildWorkerHistoryInput,
+  WorkerHistory,
+  WorkerHistoryRecord,
+} from './workerHistory.js'
+
+// Progressive navigation (A3) — which nav entries a project has earned, and the
+// sentence that announces a new one (design 28 §3, decision K9).
+export {
+  NAV_ALWAYS,
+  NAV_ENTRIES,
+  NAV_LABELS,
+  navRevealSentence,
+  revealedNav,
+} from './navReveal.js'
+export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'
+
 // The Desk (DK2) — the landing view, its data hook, and the attention read
 // route behind the Asks stack.
 export { default as useAttentionRequests } from './useAttentionRequests.js'

@@ -1,0 +1,132 @@
+// A3: progressive navigation — which nav entries a project has earned
+// (docs/product/28-console-ia-design.md §3, decision K9).
+
+import { describe, it, expect } from 'vitest'
+import {
+  NAV_ALWAYS,
+  NAV_ENTRIES,
+  NAV_LABELS,
+  navRevealSentence,
+  revealedNav,
+  type NavCounts,
+  type NavEntry,
+} from './navReveal.js'
+
+const counts = (over: Partial<NavCounts> = {}): NavCounts => ({
+  workers: 0,
+  memories: 0,
+  events: 0,
+  subscriptions: 0,
+  ...over,
+})
+
+describe('day one', () => {
+  it('shows four entries for an empty project', () => {
+    const { visible } = revealedNav(counts())
+    expect(visible).toEqual(['desk', 'chat', 'workers', 'settings'])
+  })
+
+  it('keeps the Desk even though it is empty — its first-run panel is the onboarding', () => {
+    expect(revealedNav(counts()).visible).toContain('desk')
+  })
+
+  it('reveals nothing on the strength of a worker alone', () => {
+    // A worker that has never run has produced no events, no memories and no
+    // wiring, so there is still nothing behind the other three buttons.
+    expect(revealedNav(counts({ workers: 3 })).visible).toEqual([
+      'desk',
+      'chat',
+      'workers',
+      'settings',
+    ])
+  })
+})
+
+describe('the reveal rules', () => {
+  it('reveals Memory on the first memory', () => {
+    expect(revealedNav(counts({ memories: 1 })).visible).toContain('memory')
+  })
+
+  it('reveals Activity on the first event', () => {
+    expect(revealedNav(counts({ events: 1 })).visible).toContain('activity')
+  })
+
+  it('reveals the Chart on the first SUBSCRIPTION, not on a worker count', () => {
+    expect(revealedNav(counts({ workers: 12 })).visible).not.toContain('chart')
+    expect(revealedNav(counts({ subscriptions: 1 })).visible).toContain('chart')
+  })
+
+  it('a working project shows six', () => {
+    const { visible } = revealedNav(counts({ workers: 2, memories: 4, events: 9 }))
+    expect(visible).toEqual(['desk', 'chat', 'workers', 'memory', 'activity', 'settings'])
+  })
+
+  it('a wired fleet shows all seven', () => {
+    const { visible } = revealedNav(
+      counts({ workers: 2, memories: 4, events: 9, subscriptions: 1 }),
+    )
+    expect(visible).toEqual([...NAV_ENTRIES])
+  })
+})
+
+describe('stickiness', () => {
+  it('keeps an entry once revealed, even when the count returns to zero', () => {
+    const first = revealedNav(counts({ memories: 3 }))
+    expect(first.sticky).toEqual(['memory'])
+
+    // Every memory superseded, every worker retired — the history still exists,
+    // so the surface that reads it stays.
+    const later = revealedNav(counts(), first.sticky)
+    expect(later.visible).toContain('memory')
+    expect(later.sticky).toEqual(['memory'])
+  })
+
+  it('deleting the last worker un-reveals nothing', () => {
+    const wired = revealedNav(counts({ workers: 1, events: 5, subscriptions: 1 }))
+    const emptied = revealedNav(counts(), wired.sticky)
+    expect(emptied.visible).toEqual(wired.visible)
+  })
+
+  it('accepts an unknown or stale sticky entry without breaking the order', () => {
+    const { visible } = revealedNav(counts(), ['chart' as NavEntry])
+    expect(visible).toEqual(['desk', 'chat', 'workers', 'chart', 'settings'])
+  })
+})
+
+describe('appeared — what the confirmation gets to name', () => {
+  it('is empty when nothing changed', () => {
+    const first = revealedNav(counts({ events: 1 }))
+    expect(first.appeared).toEqual(['activity'])
+    expect(revealedNav(counts({ events: 2 }), first.sticky).appeared).toEqual([])
+  })
+
+  it('names every entry unlocked in the same evaluation, in canonical order', () => {
+    const { appeared } = revealedNav(counts({ memories: 1, events: 1, subscriptions: 1 }))
+    expect(appeared).toEqual(['memory', 'activity', 'chart'])
+  })
+
+  it('has a sentence for each, written for the operator rather than the schema', () => {
+    for (const entry of NAV_ENTRIES) {
+      const sentence = navRevealSentence(entry)
+      expect(sentence).toContain(NAV_LABELS[entry])
+      expect(sentence.endsWith('.')).toBe(true)
+    }
+    expect(navRevealSentence('chart')).toContain('which worker wakes which')
+  })
+})
+
+describe('order is fixed', () => {
+  it('never reorders, whatever order the sticky set arrives in', () => {
+    const scrambled = revealedNav(counts(), ['chart', 'memory', 'activity'] as NavEntry[])
+    expect(scrambled.visible).toEqual([...NAV_ENTRIES])
+    expect(scrambled.sticky).toEqual(['memory', 'activity', 'chart'])
+  })
+
+  it('every always-on entry is a real entry', () => {
+    for (const entry of NAV_ALWAYS) expect(NAV_ENTRIES).toContain(entry)
+  })
+
+  it('every entry has a label', () => {
+    for (const entry of NAV_ENTRIES) expect(NAV_LABELS[entry]).toBeTruthy()
+  })
+})
