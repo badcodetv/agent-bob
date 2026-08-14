@@ -768,3 +768,54 @@ the ~580 tests in `web/` were written and how these should be.
 
 With K2 decided, **W5 (direct manipulation) is no longer gated on an undecided backend item** —
 B3 becomes a Wave-1 engine task rather than a maybe.
+
+## 14. Decisions (K7–K9) — DECIDED by Kai, 2026-08-14
+
+Taken after a census of every console surface (8 nav views, ~24 distinct screens) prompted by a
+first real login: *"there seems to be a hundred different pages … to the extent where I get lost."*
+The census found almost no iteration debris — every page traces to a decision above — but it found
+that **the console was built for an operator tending a fleet, and met a human who had none.**
+
+- **K7: the chart stays, first-class — it is not a duplicate, it is an altitude.** A proposal to
+  park it (as a page whose contents all appear elsewhere) was **rejected**: *"if we're going to have
+  an org chart, we should just have an org chart."* "What wakes what, across the whole project" is a
+  question the per-worker view structurally cannot answer. Two consequences follow, and they are
+  work, not caveats: doc 21's chart defects (**X1–X4, X9, X10**) become scheduled fixes rather than
+  tolerated debt, and the clock deep link — currently dropping its `scheduleId` in `App.tsx` — gets
+  wired for real. One dividend: `EventReplayPanel` and the chart's propagation panel are
+  near-duplicate answers to "what would this event wake?", so **Replay merges into the chart**.
+- **K8: K3 stands as written — it was never in question.** Parking the chart *would* have removed
+  drag-to-wire, which is why an overrule was drafted; keeping it makes the draft moot, and it is
+  recorded here only so the reasoning is not rediscovered. Note for future readers, since two
+  different things share the word *freeze*: **K3 is a restraint rule about the canvas** (exactly two
+  live gestures — wire, and toggle enabled/frozen; everything else goes to the worker page), while
+  **freezing is the safety catch on the self-improvement loop** (a frozen worker cannot be rewritten
+  by other workers, only by humans; refusals emit `worker.freeze_refused`). The freeze and enabled
+  controls already live on the worker page — `WorkerEditor` calls its freeze control *"the HUMAN
+  path"* — **verified 2026-08-14**, so neither control was ever at risk from the chart decision.
+  K3's *"schedules stay on the row"* keeps its meaning; the row's address becomes the worker's
+  **Triggers** tab (K9).
+- **K9: the nav is progressive, and K1 survives intact.** *"The initial setup of a project is always
+  going to be different to the ongoing maintenance of it."* A nav entry appears when it has content:
+  day one is **Desk · Chat · Workers · Settings**; Memory appears with the first memory, Activity
+  with the first event, the chart at a fleet threshold (open — see below). K1 is **not** overruled —
+  the Desk still lands, because the first-run panel this doc already owed it (§13, K1) *is* the
+  onboarding screen. The day-one problem was never the Desk; it was the other four buttons opening
+  empty rooms.
+
+**The accompanying folds** (structural, no decision outstanding): `AutomationPage` becomes a
+**Triggers** tab on the worker — its own header states the question is per-worker, and every
+subscription targets exactly one worker; `EventsPage`'s Events + Jobs + Changelog tabs become one
+**Activity** view; `BenchReportView` ships `enableBench={false}` as apparatus rather than product.
+Net: ~24 screens → ~16, and day-one exposure 8 buttons → 4. A mature project shows **seven**, one
+fewer than today — counting nav buttons was the wrong metric.
+
+**Open, and owned by the front-end design pass that follows this decision** (not to be settled by
+implementation default): whether Activity is honestly tabbed or genuinely interleaved (one
+occurrence produces an event, a delivery *and* a job row, and the Desk and Events surfaces keep
+separate watermarks); whether Triggers is a fifth Workers tab or a section inside Configuration;
+the reveal choreography and its stickiness rule; and the chart's worker threshold plus the form its
+Replay merge takes.
+
+*Blast radius for the folds: `e2e/features/console.stack.spec.ts` holds ~94 nav and label
+references and is the single choke point.*
