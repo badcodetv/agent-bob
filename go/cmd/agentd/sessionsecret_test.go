@@ -28,6 +28,16 @@ var projectRoutes = []struct{ method, path string }{
 	{http.MethodPost, "/agent/schedules"},
 	{http.MethodPost, "/agent/events"},
 	{http.MethodGet, "/agent/events"},
+	// The memory append route (O7 of design/2026-08-20-agent-wolf.md). It is on
+	// this list for a sharper reason than the others: a memory appended over
+	// HTTP carries EMPTY provenance, which is precisely the mark an embedding
+	// application reads as "the application itself wrote this". If the token a
+	// prompt-injected model can read out of its own environment could reach
+	// this handler, anything inside a container could mint state that looks
+	// like the application's own word. The handler cannot defend itself here —
+	// a session token is indistinguishable from a console JWT once decoded, so
+	// the defence is that it never decodes at all.
+	{http.MethodPost, "/agent/memories"},
 }
 
 // sessionTokenFor mints exactly what the Runner injects into a container:
