@@ -36,6 +36,17 @@ package main
 //
 // ⚠️ A download_url carries a bearer credential. Nothing in this file logs one:
 // every failure message that has to name a URL runs it through redactURL first.
+//
+// PREREQUISITES, and the three ways this test can SKIP. The ticket names two —
+// AGENTKIT_TEST_POSTGRES_URL unset, and Docker unreachable. There is a third it
+// does not, and it is stated here because a silent dependency is worse than a
+// documented one: the container image. The default (curlimages/curl:latest) is
+// PULLED FROM DOCKER HUB if it is not already in the local Docker's image
+// store, so on a machine with Docker and Postgres but no registry egress this
+// test skips rather than runs. On such a machine, pre-pull the image once, or
+// point AGENTKIT_TEST_DATASET_IMAGE at any locally present image carrying
+// curl, cat, wc and test (the Wolf/core installation images all do). Every one
+// of the three skips names what was missing; none of them passes vacuously.
 
 import (
 	"archive/tar"
@@ -332,7 +343,24 @@ func TestDatasetRoundTripLive(t *testing.T) {
 	// O5's non-oracle rule: a token holder probing names must not be able to
 	// tell "not yours" from "not there".
 	seriesHandle := getDataset(t, ctx, tools, caller, map[string]any{"name": seriesName})
-	crossURL := swapDatasetName(t, seriesHandle.DownloadURL, seriesName, binaryName)
+
+	// The minted URL pins ?version=2, and o9-binary only ever reached version 1
+	// — so swapping the name alone would be answered 404 by the VERSION lookup
+	// and the scope check would never be consulted. (That is not hypothetical:
+	// it is how the first cut of this test passed with httpapi's DatasetScope
+	// check deleted outright.) Drop the version so the request asks for the
+	// other dataset's CURRENT version, which exists, and the only thing left
+	// that can produce a 404 is the token's (project, name) pin.
+	currentURL := dropVersionParam(t, seriesHandle.DownloadURL)
+
+	// Control, first: version-less, the token still fetches its OWN dataset.
+	// Without this a 404 below could come from dropping the parameter rather
+	// than from the pin, and the probe would be vacuous in the other direction.
+	if code, _ := getStatus(t, currentURL); code != http.StatusOK {
+		t.Fatalf("the version-less form of %q's own download URL returned %d, want 200 — the cross-dataset probe below would be vacuous", seriesName, code)
+	}
+
+	crossURL := swapDatasetName(t, currentURL, seriesName, binaryName)
 	code, body := getStatus(t, crossURL)
 	if code != http.StatusNotFound {
 		t.Fatalf("a token minted for %q downloaded %q: status = %d, want 404", seriesName, binaryName, code)
@@ -500,14 +528,38 @@ func redactURL(raw string) string {
 }
 
 // swapDatasetName rewrites the dataset NAME in a minted download URL, leaving
-// the token untouched — the "a token for A must not fetch B" probe.
+// the token untouched — the "a token for A must not fetch B" probe. Give it a
+// URL that has been through dropVersionParam: a version pin that the other
+// dataset does not have would be answered 404 by the version lookup, hiding
+// whether the scope check ran at all.
 func swapDatasetName(t *testing.T, minted, from, to string) string {
 	t.Helper()
 	want := "/agent/datasets/" + from + "/download"
 	if !strings.Contains(minted, want) {
 		t.Fatalf("minted URL does not contain %q: %s", want, redactURL(minted))
 	}
+	if u, err := url.Parse(minted); err == nil && u.Query().Get("version") != "" {
+		t.Fatalf("swapDatasetName was given a version-pinned URL (%s); a version the target lacks would produce the 404 on its own", redactURL(minted))
+	}
 	return strings.Replace(minted, want, "/agent/datasets/"+to+"/download", 1)
+}
+
+// dropVersionParam removes ?version= from a minted download URL, leaving the
+// token and every other parameter untouched. Absent, the route resolves the
+// dataset's current version (httpapi/datasets.go:292-296).
+func dropVersionParam(t *testing.T, minted string) string {
+	t.Helper()
+	u, err := url.Parse(minted)
+	if err != nil {
+		t.Fatalf("parse minted URL %s: %v", redactURL(minted), err)
+	}
+	q := u.Query()
+	if q.Get("version") == "" {
+		t.Fatalf("minted URL carries no ?version= to drop: %s", redactURL(minted))
+	}
+	q.Del("version")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // getStatus issues a bare GET — no X-API-Key, no Authorization — and returns
