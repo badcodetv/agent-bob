@@ -283,6 +283,23 @@ type Runner interface {
 	// before snapshotting a session as an image.
 	WriteWorkspaceFile(ctx context.Context, ref SessionRef, relPath string, content []byte) error
 
+	// ExecInSession runs a one-off command inside a session's running instance
+	// and returns the raw result. cmd is ARGV — there is no shell, so nothing a
+	// caller puts in an argument can become a command (the workspace pull
+	// pipeline in cmd/agentd hands it attacker-supplied paths).
+	//
+	// It is the read counterpart of WriteWorkspaceFile, and the reason it is
+	// exported: nothing else on this interface can turn a session id into a
+	// runnable exec, so a host-side tool that has to get a file OUT of a
+	// container had no seam at all.
+	//
+	// ExitCode is NOT interpreted here. A command that ran and failed is a
+	// successful exec with a non-zero code, and only the caller knows whether
+	// that is an error — `test -f` exiting 1 is an answer, `cat` exiting 1 is a
+	// failure.
+	ExecInSession(ctx context.Context, ref SessionRef, cmd []string,
+		opts execenv.ExecOptions) (*execenv.ExecResult, error)
+
 	// Status reports combined runtime + durable state.
 	Status(ctx context.Context, ref SessionRef) (*SessionStatus, error)
 

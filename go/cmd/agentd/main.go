@@ -304,6 +304,16 @@ func main() {
 	// is already being branched on for those.
 	log.Printf("[agentd] %s", gc.describeDatasetReap(agentDB != nil))
 
+	// The per-write dataset byte cap (O6b). Read ONCE here rather than from
+	// inside the dataset_put handler — a tool must never read the environment —
+	// and a nonsense value is a boot error naming the variable rather than a
+	// silent fallback to the default an operator did not choose. Parsed
+	// unconditionally, even on the sqlite fallback where the tools are never
+	// mounted, so a typo is reported on the host that has it and not only on the
+	// one that happens to run Postgres.
+	datasetMaxBytes, err := parseDatasetMaxBytes(os.Getenv(datasetMaxBytesVar))
+	must(err)
+
 	runner, err := agentkit.NewRunner(agentkit.Deps{
 		Fleet:          f,
 		Registry:       registry,
@@ -595,6 +605,13 @@ func main() {
 		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks).tools()...)
 		mcpSrv.register(newConfigLogTools(agentDB, permalinks).tools()...)
 		mcpSrv.register(newSessionTools(agentDB, permalinks).tools()...)
+		// The dataset tools (O6b). They take the Runner for its exec seam
+		// (dataset_put pulls the named file out of the CALLING session's
+		// container), the process-wide BlobStore that httpapi.Config.DatasetBlobs
+		// and the reaper also hold, the API-class secret their download tokens
+		// are signed with, and selfURL — how a nested container reaches agentd,
+		// never the public base URL, which is unreachable from in there.
+		mcpSrv.register(newDatasetTools(agentDB, runner, blobs, jwtSecret, selfURL, datasetMaxBytes).tools()...)
 		root.Handle(coreMCPPath, mcpSrv)
 		// Some MCP clients normalise the endpoint with a trailing slash; both
 		// spellings must reach the same server or the tools simply vanish.

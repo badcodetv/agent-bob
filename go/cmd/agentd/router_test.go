@@ -22,6 +22,7 @@ import (
 	agentkit "github.com/binocarlos/badcode-agent-orange"
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/binocarlos/badcode-agent-orange/execenv"
 	"github.com/binocarlos/badcode-agent-orange/imageregistry"
 )
 
@@ -1348,6 +1349,12 @@ func (r *stubRunner) Snapshot(context.Context, agentkit.SessionRef) (imageregist
 }
 func (r *stubRunner) WriteWorkspaceFile(context.Context, agentkit.SessionRef, string, []byte) error {
 	return nil
+}
+
+// ExecInSession exists because agentkit.Runner grew it (O6b, the dataset MCP
+// tools). The router never execs into a session, so the stub is inert.
+func (r *stubRunner) ExecInSession(context.Context, agentkit.SessionRef, []string, execenv.ExecOptions) (*execenv.ExecResult, error) {
+	return &execenv.ExecResult{}, nil
 }
 func (r *stubRunner) Status(context.Context, agentkit.SessionRef) (*agentkit.SessionStatus, error) {
 	return nil, nil
