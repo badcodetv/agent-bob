@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R95. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R97. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -2163,7 +2163,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   **R36**; W2/W5/W8/W9/W10 must expect 201. A `project` key in the body is ignored rather than
   refused (the criterion reads both ways). Note **R42**: this branch also contains O1's commit.
 
-### O8: Dataset reaper, orphan sweep, compose and project map   [Status: pending | Model: opus]
+### O8: Dataset reaper, orphan sweep, compose and project map   [Status: done | Model: sonnet]
 - **Scope:** Run the dataset **version reaper** and the **orphan blob sweep** on their own ticker
   **inside `cmd/agentd`**, started from `main.go` after the store is built and cancelled on
   shutdown — and make every credential and knob this integration needs actually reach `agentd`.
@@ -2258,9 +2258,30 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **Depends on:** O3 *(the version reaper, `ListOrphanBlobPaths` and `agentdb.DatasetBlobPrefix` are
   all O3's deliverables). Strictly serial with O6b on `go/cmd/agentd/main.go`, in either order;
   `AGENTKIT_DATASET_MAX_BYTES` is O6b's knob and this ticket only forwards its name.*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 18/18 criteria, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 18 of 18 criteria PASS, zero fix
+  rounds.** Branch `O8-dataset-reaper-compose`, commit `8851d8a`, merged to `main`. Reaper and
+  orphan sweep run on one ticker in `datasetreaper.go`, started from `main.go` beside the
+  router/scheduler/attention sweep and only when `agentDB != nil`. The two knobs deliberately
+  differ in what `0` means and the boot log says so: `AGENTKIT_DATASET_REAP_INTERVAL` reuses
+  `parseGCDuration` (so `off|0|none|never|disabled` and the `[1m,720h]` bounds apply unchanged),
+  while `AGENTKIT_DATASET_KEEP_VERSIONS` is a new `parseKeepVersions` where **`0` means keep
+  EVERYTHING** — the opposite. `TestGCConfigBootLines` asserts the keep-versions=0 line contains
+  "every" and never "DISABLED", which is the line that stops an operator reading one knob's `0`
+  through the other's meaning. **O3's inert `minAge` is handled at the caller**, per R47: a blob
+  path must be reported orphaned on **two** sweeps at least 1h apart before deletion, and a path
+  that stops being reported is forgotten rather than deleted later on stale evidence.
+  `agentdb.DatasetBlobPrefix` is re-asserted immediately before **every** delete, and a test proves
+  an `_artifacts/bytes/` path reported as orphaned is never deleted. Compose forwards all six
+  variables into `agentd`; `.env.example` documents five plus a worked object-form
+  `AGENTKIT_PROJECT_MAP`, which `TestProjectMapExample` **parses out of the file itself** rather
+  than trusting the prose. R82 held: the Validation ran through the `dcc` redactor and no value was
+  printed. Two minor defects accepted, both for O10 (**R97**): the worked `AGENTKIT_MCP_ENV` value
+  sits in an *indented* prose comment while the column-0 declaration line is still empty, so an
+  operator who uncomments the wrong one gets an empty allowlist and `WOLF_MCP_TOKEN` silently never
+  reaches a session container; and `TestProjectMapExample` asserts the wolf origin *validates* but
+  never that it equals `http://localhost:8081`, so a typo'd port would keep the test green while
+  the embed CSP refuses to frame wolf-web. 10 guesses. Found **R96**.
 ### O9: Dataset round-trip integration test   [Status: pending | Model: opus]
 - **Scope:** The only test that exercises the `Exec` + `cat` pull and the `?token=` download against
   a **real container**. Everything under it is unit-tested with fakes; this is the single place
@@ -4880,3 +4901,5 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R93** | **`prompts/researcher-preamble.md` contains the method-body marker TWICE as a substring, and W9's splitter must be line-anchored.** The literal `<!-- WOLF:METHOD-BODY -->` appears once as prose inside backticks near the top of the file (usefully — it documents the boundary) and once as the real boundary line. A splitter using `indexOf` or a bare-substring `split` cuts at the prose occurrence and **silently makes most of the locked preamble mutable**, which is the whole thing the locked preamble exists to prevent. W12 shipped a test pinning "appears as a whole line exactly once" so a future edit cannot break the assumption unnoticed. **W9's ticket now states the requirement explicitly**: `split("\n")` then `line.trim() === marker`, never `indexOf`. | **Resolved** — W9, W12 |
 | **R94** | **Two files that tickets actually edit were on no ownership row: `prompts/*.md` and `api/src/config.test.ts`.** W12 authors the four prompts and W25 rewrites the report-authoring half, with nothing serialising them; and W12 landed 68 lines in `api/src/config.test.ts`, a file on no Files line and no ownership row, so a concurrent `config.ts` ticket could collide there unserialised. Both rows added. Same root cause as **R86** and **R81**: the ownership table is maintained by hand and nothing cross-checks it against the Files lines it is supposed to summarise. Three separate waves have now found a missing row. **A mechanical check — every path in any Files line either appears in the table or is created by exactly one ticket — would end this class.** | **Resolved** (rows added) — the mechanical check remains unbuilt |
 | **R95** | **A wave that runs several tickets concurrently leaves throwaway containers behind, because house rule 9 forbids workers removing them.** Wave 4 ended with six `agentkit-testpg-*` instances on ports 5433–5438 plus a verifier's DinD: agents correctly created their own rather than colliding, correctly refused to `docker rm` anything, and correctly reported what they left. The rule is right — an agent removing a sibling's database mid-run is far worse than an idle container — but the sweep has no owner. **The orchestrator should sweep between waves**, and did. | **Informational** — orchestrator housekeeping |
+| **R96** | **O8's Validation named a path that does not exist.** The ticket said `TestProjectMapExample` reads the `AGENTKIT_PROJECT_MAP` line out of `../../.env.example` from `go/cmd/agentd/` — two `..` segments, which resolves to `go/.env.example`. `.env.example` is at the repo root, **three** levels up, matching the existing convention in `cmd/hypolabgen`, `cmd/triagelabgen` and `cmd/gauntletgen`, all of which use `filepath.Join("..","..","..", …)`. A strict literal reading would have produced a test that cannot open its own fixture. The executor implemented three segments and reported the discrepancy. Same family as **R87**: a path or argv written by hand in the plan and never executed. | **Resolved** — O8 |
+| **R97** | **Two operator traps O8 surfaced and correctly left for O10.** (1) `.env.example` now carries the worked `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` value only as an **indented in-prose comment** inside the Wolf block, while the file's column-0 declaration line `# AGENTKIT_MCP_ENV=` remains empty. An operator who uncomments the declaration gets an empty allowlist and `WOLF_MCP_TOKEN` **silently never reaches a session container** — the failure mode is a tool that is configured, mounted and inert. (2) `TestProjectMapExample` asserts the wolf project has exactly one allowed origin and that `validateOrigin` accepts it, but never that it **equals** `http://localhost:8081`; a typo'd port keeps the test green while the embed page's `frame-ancestors` CSP silently refuses to frame wolf-web. Both are one line each. Separately, `.env.example` now shows **two** `AGENTKIT_PROJECT_MAP` examples — the legacy flat form O8 does not own, and the new object form — with nothing inline explaining the relationship. | **Open** — O10 |

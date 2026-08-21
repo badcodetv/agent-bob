@@ -4,9 +4,9 @@ Every place a wave-4 implementer had to decide something `design/2026-08-20-agen
 did not decide for it. Collected from the implementers' own structured returns (initial pass
 **and** fix rounds), deduplicated by decision. Recorded 2026-08-21.
 
-**Total: 72 guesses** — O5 23, O6a 8, W5 28, W12 13.
+**Total: 82 guesses** — O5 23, O6a 8, W5 28, W12 13, O8 10.
 
-Wave 4 = O5, O6a, W5, W12 (phase A). O8 runs in phase B and appends to this file.
+Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go/cmd/agentd/main.go`).
 
 ## O5 — 23 guesses
 
@@ -446,5 +446,68 @@ Wave 4 = O5, O6a, W5, W12 (phase A). O8 runs in phase B and appends to this file
 
 - **Plan said:** House rule 5 says one commit unless the work genuinely splits; the fix-round brief says "add commits on top"
 - **Assumed:** The fix-round brief wins: the branch now carries two commits (889a961 the original, a9c79e6 the fix round). Squash if the orchestrator prefers one.
+- **Reversibility:** trivial
+
+
+## O8 — 10 guesses
+
+### O8.1 Where the two new duration-knob boot-log test cases should live
+
+- **Plan said:** "new boot-log cases extend TestGCConfigBootLines"
+- **Assumed:** Added the dataset-reap boot-line assertions as additional statements inside the existing TestGCConfigBootLines function body (not a sibling test function), so a -run filter on that exact name still exercises them.
+- **Reversibility:** trivial
+
+### O8.2 The exact wording and format of describeDatasetReap's active-state message
+
+- **Plan said:** "names both variables in describeReapInterval's style" -- but describeReapInterval's own active line does NOT name its variable, only describeIdleTimeout does implicitly via context
+- **Assumed:** Made the active dataset-reap line explicitly print both AGENTKIT_DATASET_REAP_INTERVAL and AGENTKIT_DATASET_KEEP_VERSIONS by name (not just their values), since the criterion says "names both variables" and an operator reading the log benefits from it -- my first draft omitted the names and I corrected it after my own test caught it.
+- **Reversibility:** trivial
+
+### O8.3 Relative path depth from go/cmd/agentd/ to the repo-root .env.example in TestProjectMapExample
+
+- **Plan said:** the ticket's literal text says the test reads the line "out of ../../.env.example" (two ../ levels)
+- **Assumed:** That literal path is a plan defect -- go/cmd/agentd/ is three directory levels below the repo root (agentd -> cmd -> go -> root), so I used "../../../.env.example" (filepath.Join("..","..","..",".env.example")), matching the depth convention already used by cmd/hypolabgen, cmd/triagelabgen and cmd/gauntletgen's own test fixtures. Verified go/.env.example does not exist and .../O8/.env.example does, and the test only passes with three levels. Reporting as a discovered issue below since I cannot edit the plan.
+- **Reversibility:** trivial
+
+### O8.4 How to distinguish the two AGENTKIT_PROJECT_MAP example lines .env.example now contains (the pre-existing legacy flat form and O8's new object form) when writing a test that must read "the" line
+
+- **Plan said:** nothing -- the ticket assumes there is one line to read, but the pre-existing legacy example ("kaiyadavenport@gmail.com":["*"]) was already in the file and I judged it out of scope to remove or replace (a different ticket/section owns it)
+- **Assumed:** Kept both lines and made TestProjectMapExample select the one containing the substring \"wolf\" (unique to the object-form worked example), also asserting exactly one such line exists so a future edit that duplicates or drops it fails loudly rather than silently reading the wrong one.
+- **Reversibility:** moderate
+
+### O8.5 Whether to also update the pre-existing generic AGENTKIT_MCP_ENV=/GMAIL_API_KEY=/NOTION_AUTH= placeholder block further down .env.example to reference WOLF_MCP_TOKEN
+
+- **Plan said:** "sets AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN in its worked example" without saying exactly where
+- **Assumed:** Left the pre-existing generic MCP-credentials placeholder block untouched (it is a template for arbitrary future credentials, not Wolf-specific) and instead added the AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN worked line inside the new Wolf-credentials section next to WOLF_MCP_TOKEN's own comment, where it reads as a concrete instruction rather than a generic template.
+- **Reversibility:** trivial
+
+### O8.6 Exact narrow interface shape for the reaper's store and blob dependencies (for testability with fakes)
+
+- **Plan said:** nothing -- only named the two agentdb.Store methods and 'a fake extension.BlobStore and a fake store' for the tests
+- **Assumed:** Declared datasetReapStore (ReapDatasetVersions + ListOrphanBlobPaths) and datasetReapBlobs (Delete + List) as package-local narrow interfaces in datasetreaper.go, mirroring the existing agentdb.DatasetBlobDeleter/DatasetBlobLister split-interface convention, rather than depending on *agentdb.Store or extension.BlobStore concretely.
+- **Reversibility:** trivial
+
+### O8.7 How to make the two-pass >=1h orphan safety unit-testable without a real 1-hour wait
+
+- **Plan said:** nothing about test mechanics for timing
+- **Assumed:** Added an injectable `now func() time.Time` field on datasetReaper (defaulting to time.Now, overridden with a fakeClock in tests) rather than real sleeps or a wall-clock-dependent test.
+- **Reversibility:** trivial
+
+### O8.8 What happens to a tracked orphan-sighting entry when the belt-and-braces prefix check fails on its second sighting
+
+- **Plan said:** nothing -- the prefix guard is described only for the version reaper's candidate loop (skip, don't delete, don't count)
+- **Assumed:** For the orphan sweep specifically, a path that fails the prefix check on its second-sighting pass is dropped from the tracking map entirely (never retried), on the reasoning that a foreign-prefix path reported by ListOrphanBlobPaths is either a lister bug or a genuinely foreign key this reaper has no business remembering across passes.
+- **Reversibility:** moderate
+
+### O8.9 Log line phrasing for individual delete-failure lines vs. the one pinned per-pass summary line
+
+- **Plan said:** pins only the per-pass summary line's exact shape
+- **Assumed:** Added an additional per-failure log line ('[agentd] datasets: delete orphan blob %q: %v') beyond the pinned summary, so an operator can see which path failed, not just the count.
+- **Reversibility:** trivial
+
+### O8.10 Whether the dataset reaper's boot-availability log line should sit beside the idle/reap lines (before Runner construction) or later, beside the loop's actual start
+
+- **Plan said:** nothing about ordering, only that the loop itself starts 'after the store is built and cancelled on shutdown'
+- **Assumed:** Split it: the descriptive boot line logs early (grouped with describeIdleTimeout/describeReapInterval, before Runner construction, since gc is resolved there and agentDB's nilness is already known) while the actual goroutine start happens later, inside the `if agentDB != nil` block beside router/scheduler/attention -- because gc.datasetReapInterval and gc.datasetKeepVersions are available immediately but `blobs` and the dispatcher/router setup context are only ready in that later block.
 - **Reversibility:** trivial
 
