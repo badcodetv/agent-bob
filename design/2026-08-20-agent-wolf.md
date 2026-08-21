@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R110. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R115. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -2315,7 +2315,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   reaches a session container; and `TestProjectMapExample` asserts the wolf origin *validates* but
   never that it equals `http://localhost:8081`, so a typo'd port would keep the test green while
   the embed CSP refuses to frame wolf-web. 10 guesses. Found **R96**.
-### O9: Dataset round-trip integration test   [Status: pending | Model: opus]
+### O9: Dataset round-trip integration test   [Status: done | Model: opus]
 - **Scope:** The only test that exercises the `Exec` + `cat` pull and the `?token=` download against
   a **real container**. Everything under it is unit-tested with fakes; this is the single place
   where a `download_url` built on the wrong base, a shell-quoting bug, a mis-scoped token or a
@@ -2391,8 +2391,17 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **Depends on:** O5, O6b *(O6b brings O5 transitively, but O5 is named because this test drives
   O5's download route through the middleware directly — without that stated, the ticket reads as
   if it only needed the tools)*
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Wave 6, 2026-08-21 — passed 8/8 after one fix round.** `5698703`, one file, 821 lines, no
+  production code touched. The verifier found one **blocking** defect the implementer's own report had
+  graded a pass: the cross-dataset-token probe swapped only the dataset NAME onto a URL still carrying
+  the minted `?version=2`, and the target dataset only ever reaches version 1 — so the asserted 404 came
+  from the version lookup and `httpapi.DownloadDataset`'s `DatasetScope` pin was never consulted. It was
+  proved by **deleting that check outright and watching the whole test stay green**. The fix strips
+  `?version=` (absent means "current version"), adds a positive control so the 404 cannot be blamed on
+  dropping the parameter, and makes `swapDatasetName` fatal if handed a version-pinned URL so the trap
+  cannot come back silently. Five criteria are now mutation-proved. Re-run by the orchestrator on merged
+  `main`: `--- PASS: TestDatasetRoundTripLive (4.00s)`, zero leaked containers.
 
 ### O10: Document datasets and the memory append route   [Status: pending | Model: sonnet]
 - **Scope:** `docs/20-datasets.md`, plus the cross-references that keep the existing docs true —
@@ -3814,7 +3823,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   The executor added an explicit check reusing the guard's own `notSignedInError` so the body shape
   stays identical, and reported the imprecision rather than working around it silently. Same
   handling as O6a gave **R87**. Found **R102**, **R103**. 9 guesses.
-### W9: Go-live provisioning and ordered teardown   [Status: pending | Model: opus]
+### W9: Go-live provisioning and ordered teardown   [Status: done | Model: opus]
 - **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live reads the
   candidate spec, validates it, writes it as a trusted locked memory, composes the researcher
   prompt as `locked preamble + method body`, and creates `researcher-<id>` plus the daily schedule.
@@ -3916,8 +3925,17 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     — and at least three of the criteria above (`422`, the `401` gate, the verdict snapshot) live in
     `routes/hypotheses.test.ts`, which the previous single-path filter never executed.
 - **Depends on:** W8, W12 *(the locked-preamble template is a W12 deliverable)*
-- [ ] done
-- Notes: The report layer's amendment table gives W9 a "refuse go-live unless a `report-template`
+- [x] done
+- Notes: The report layer's amendment table gives W9 a "refuse go-live unless a `report-template` **Wave 6, 2026-08-21 — passed, zero fix rounds.** `6e59d32`, 10 files, +2583. The verifier
+  drove rather than read: it swapped the schedule-delete and drain blocks and watched the ordered
+  assertion go red (so teardown order is genuinely load-bearing, not a set-equality test wearing a
+  sequence's clothes), and injected a `retracts` append into `rollback()` to confirm the "step 1's locked
+  spec is NOT withdrawn" rule is pinned by the real mechanism. It also ran W3's validator itself against
+  the broken candidate and confirmed five errors each with a real JSON path. Two **minor** defects stand,
+  neither blocking: the drain reads a single 200-row page of deliveries with no offset loop, and one
+  config test asserts less than its name claims. Five criteria are honestly reported **unproven** — all
+  five need a live stack, which is X1's job; see R112 for the one that is a plan contradiction rather
+  than a coverage gap.
   exists" gate. **It is deliberately not folded in here**: nothing writes a `report-template` until
   W21, and W21 depends on W11 → W9, so implementing it now would both create a dependency cycle and
   make every go-live — including X1's — fail. Recorded for the owner in this ticket's unresolved
@@ -4543,7 +4561,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - [ ] done
 - Notes:
 
-### W18: Series selection and injection payload   [Status: pending | Model: sonnet]
+### W18: Series selection and injection payload   [Status: done | Model: sonnet]
 - **Scope:** `buildSeriesPayload` — choose metrics, downsample, shape the payload.
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/series.ts`, `api/src/report/series.test.ts`.
@@ -4563,8 +4581,17 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/report/series && yarn typecheck`
 - **Depends on:** W15
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Wave 6, 2026-08-21 — passed, zero fix rounds.** `ba2ab35`, two new files, nothing
+  modified. Five mutations (leak non-spec datasets; drop the last point; drop the first point; omit the
+  missing-dataset key; bare `JSON.stringify`) each turned the suite red; the verifier additionally
+  checked the `</script>` defence at real HTML-parser level with jsdom (escaped → 1 script / 0 img; the
+  bare-`JSON.stringify` control → 1 img, i.e. the naive path really does break out), confirmed `tMs`
+  carries 13-digit epoch milliseconds rather than seconds in a millisecond-named field, and fuzzed the
+  downsampler 2000 times with zero cap overshoot. Two **minor** items, neither blocking: the escaper
+  neutralises `</script` but not the `<!--<script>` tokenizer state, which belongs to **W19** since W19
+  owns the injection site; and the per-metric-budget test uses a single metric, so it would not catch an
+  implementation that divided `maxPoints` across all metrics.
 
 ### W19: Frame composition and the CSP value   [Status: pending | Model: opus]
 - **Scope:** `composeFrame` — assemble the document, produce the CSP string.
@@ -5175,3 +5202,9 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R109** | **No test anywhere asserts that any Orange client route sends `X-API-Key`.** W2's shared `intercept` test helper (`api/src/orange/client.test.ts:42-70`) captures path and body only, and the sole grep hit for the header name is a `describe` **title** whose two cases prove only that the key is absent from errors and logs — the opposite property. So the client's single authentication mechanism, shared by all twenty-three routes, is ungated: a change that dropped the header would keep the entire suite green and fail only against a live agentd, which no unit test reaches. W2b's verifier proved the header is sent by writing a throwaway test, then deleted it as house rules require. **One assertion in the shared helper closes it for every route at once.** Pre-existing from W2; inherited by W2b; owned by nobody. **Closed 2026-08-21 in the wave-6 pre-flight (`7375e09`)**: `intercept` now captures the request's `X-API-Key` and an `afterEach` asserts every dispatched request carried it, gating all twenty-three routes rather than the one a single test would; teardown moved into a `finally` so a failing assertion cannot leak the mock dispatcher into the next test. **Verified load-bearing** — renaming the header in `client.ts` fails **63 of 65** tests in the file, where before the change all 65 passed. | **Resolved** — trunk fix |
 
 | **R110** | **W9 and W16 both add config variables and neither listed `docker-compose.yml`.** The ownership table's own `docker-compose.yml` row names W9 and W16 explicitly, and § "Executor orientation" states the R81 rule — a variable in `.env.example` and `config.ts` still never reaches the container without an `environment:` entry — yet both Files lines stopped at `.env.example`. An executor honouring its Files line literally, as house rules require, would have shipped `WOLF_TEARDOWN_DRAIN_SECONDS`, `WOLF_SCHEDULE_CRON`, `WOLF_REPORT_MAX_BYTES` and `WOLF_SERIES_MAX_POINTS` that are correct in code, documented in `.env.example`, and simply absent at runtime — every one of them silently falling back to its default inside the container, which is exactly the failure R81 was logged for. Found by the wave-6 pre-flight reading the ownership table against the ticket bodies. **This is the fifth ownership-table defect in six waves (R81, R86, R94, R98, R110), and the mechanical check R94 describes — every path in a Files line is either in the ownership table or created by exactly one ticket, and every ticket the table names appears in that ticket's Files line — would have caught all five.** It remains unbuilt and is now the highest-value small item in the plan. **Both Files lines corrected 2026-08-21.** | **Resolved** (the two tickets) / **Open** (R94's check) |
+
+| **R111** | **The R81/R110 rule is now enforced by a test, because six waves of prose did not enforce it.** W9's implementer, told by its brief to check the three places by hand, found that **W12 shipped `WOLF_BASE_IMAGE` and `WOLF_CRITIC_CRON` documented in `.env.example` and read by `config.ts` with no `environment:` entry in `docker-compose.yml`** — so an operator setting `WOLF_CRITIC_CRON` in `.env` got the default inside the container, silently. It merged two waves earlier and was found only because a human-authored brief happened to say "check independently". Fixed on the trunk (`da49393`) together with four mechanical cases at the end of `api/src/config.test.ts`: every `env.X` read in `config.ts` must appear in the `wolf-api` environment block **and** in `.env.example`, no compose entry may name a variable nothing reads (beyond the two documented Compose-only ones), and a non-vacuity guard so a broken scan cannot pass by finding nothing. **Verified load-bearing** — removing the two restored lines fails naming both variables. Every remaining variable cross-checks clean. ⚠️ **A ticket that edits that block to make itself pass has committed a blocking defect**; W16's brief says so explicitly. This is the enforcement half of what **R94** asks for; the *ownership-table* half (every path in a Files line is either in the table or created by exactly one ticket) is still unbuilt, and W9 found the **seventh** instance of it — `api/src/config.test.ts` is on the shared ownership row but was missing from W9's own Files line. | **Resolved** (the compose gap, and the config-variable half of R94) |
+| **R112** | **Teardown step 4 contradicts the bullet three lines below it, and W10 already has the answer.** W9's step 4 says "delete every row it returns" of `GET /agent/sessions?worker=researcher-<id>`; the bullet immediately after says "a tick session still in flight is allowed to finish". W9's implementer followed step 4 literally and reported the tension rather than choosing silently. **W10's own criteria spell out the missing exclusion** — never delete a session that is the `session_id` of a pending or running delivery for that worker, because a finished tick reads `running` for up to 30 minutes and could be mid-`dataset_put`. W9's teardown was never given it. The consequence is narrow but real: a `/verdict` or `/retire` issued while a tick is running can delete that tick's session row out from under it. **Recommendation: fold W10's exclusion into the shared teardown when W10 lands** — it is one predicate, in a helper W10 already has to write, and doing it there avoids re-opening W9. Wants an owner ruling only if the intent was actually to kill in-flight ticks. | **Open** — recommend folding into W10 |
+| **R113** | **`/amend`'s source of truth was never stated, and the executor picked the safer of two readings.** W9's criterion says `/amend` "re-runs W3's validator over the amended spec" without saying where the amended spec text lives. The implementer read it from the `kind=spec-amendment` memory named by `amendment_id`, and explicitly rejected a spec supplied in the request body on the grounds that **a body-supplied spec would be a second, unaudited way for a human to set the scoreboard** — which is the same property the trust model exists to protect. That reasoning is sound and the shipped behaviour is the one to keep; this row exists so the choice is ratified in the plan rather than left as an undocumented guess that W22 or X1 might contradict. | **Resolved by ratification** — memory-sourced, not body-sourced |
+| **R114** | **Two O9 findings for whoever next owns those files, neither in O9's scope.** (1) `httpapi.DownloadDataset` orders the `DatasetScope` pin before the version lookup — correct for the non-oracle rule — but **nothing in the non-integration suite covers the interaction**. A single table case in `httpapi/datasets_test.go` presenting a scoped token against another *name* at a version that name does not have would have caught O9's blocking defect without needing Docker at all. (2) `agentdb` exposes **no way to delete a dataset row**: `ReapDatasetVersions` never deletes the highest version per name, so O9's teardown issues raw SQL through `store.DB()`. Worth knowing for O10's retention section and for any future "delete a dataset" request. Separately: `go test -tags integration ./...` at *module* scope is a trap — `go/systemtest`'s `TestMain` unconditionally shells out to `docker build ../../sandbox` and `os.Exit(1)`s rather than skipping. O9's package-scoped Validation avoids it; anyone generalising that command would not. | **Open** — one cheap httpapi case; the rest recorded |
+| **R115** | **The plan's § "The throwaway Postgres" names port 5433 and no wave has used only that port.** Concurrent Go tickets each need their own instance (R95), so every wave has supplied a different port out of band — 5434 in wave 5, 5441 in wave 6 — and every executor has had to be told the real one in its briefing. O9's implementer flagged the mismatch as a discovered issue. The section should say that 5433 is the *canonical single-ticket* instance and that a concurrent wave gets one instance per ticket on orchestrator-assigned ports, so an executor reading the plan alone does not connect to a sibling's database and wonder why its fixtures are already there. | **Open** — one paragraph in § "Executor orientation" |
