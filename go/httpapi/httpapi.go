@@ -328,6 +328,11 @@ type Endpoints struct {
 	// Memory (§7.6) — the project comes from the JWT, never from the request.
 	// ListMemories answers 500-byte snippets; the next two answer one memory in
 	// full (T18), which is what an embedding application renders its state from.
+	//
+	// ListMemories also carries the audit view, ?include_retracted=1 (O11): the
+	// one read that can see a withdrawn row, and who withdrew it. It is refused
+	// to a session-scoped (embed) credential, because that is the credential
+	// class an erasure would most likely have come from.
 	ListMemories  string // "GET /agent/memories"
 	GetMemory     string // "GET /agent/memories/{id}"
 	CurrentMemory string // "GET /agent/memories/current"

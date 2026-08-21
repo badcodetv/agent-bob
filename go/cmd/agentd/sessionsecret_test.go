@@ -38,6 +38,14 @@ var projectRoutes = []struct{ method, path string }{
 	// a session token is indistinguishable from a console JWT once decoded, so
 	// the defence is that it never decodes at all.
 	{http.MethodPost, "/agent/memories"},
+	// And the memory AUDIT view (O11). Same sharper reason, read side: this is
+	// the read that reveals a retraction, and `retracts` is an ordinary label
+	// that anything holding the core MCP tools can write. A session token that
+	// authenticated this route would let the actor able to erase the
+	// application's state watch whether the erasure had been noticed. The
+	// handler refuses a session-SCOPED (embed) credential itself; a session
+	// token is stopped a layer earlier, here, by never decoding at all.
+	{http.MethodGet, "/agent/memories?include_retracted=1"},
 }
 
 // sessionTokenFor mints exactly what the Runner injects into a container:

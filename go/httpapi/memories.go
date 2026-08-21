@@ -5,12 +5,25 @@ package httpapi
 //	GET /agent/memories
 //	  query: ?selector=<k8s label selector>&query=<free text>&limit=<n>
 //	         &since=<bound>&until=<bound>&latest_per=<label key>
+//	         &include_retracted=1
 //	         A bound is RFC3339, unix milliseconds, or a relative age ("7d").
 //	  auth : the ordinary session JWT; the project comes from the Customer claim,
 //	         never from the query (P5) — same posture as GET /agent/config-events.
 //	  200  : {"memories": [MemorySearchResult, …]}
-//	  400  : a malformed selector, reported with the parser's own message
+//	  400  : a malformed selector, reported with the parser's own message; or an
+//	         include_retracted that is not exactly `1`
+//	  403  : include_retracted asked for by a session-scoped (embed) credential
 //	  501  : no store wired, or a store that is not Postgres
+//
+// include_retracted (O11 of design/2026-08-20-agent-wolf.md) is the audit view.
+// `retracts` is an ordinary label, so anything holding the core MCP tools can
+// withdraw any row in its project — including one appended through the POST
+// below as the application's own authoritative state — and with the filter
+// always on, that erasure is indistinguishable from the row never having
+// existed. With the flag, withdrawn rows come back carrying EVERY retraction
+// against them (`retracted_by`), each with its own provenance, so a reader can
+// tell "the application took this back" from "something in a container erased
+// it". It is available to project API keys and console JWTs only.
 //
 // This is the same §7.6 relevance contract the memory_search MCP tool calls, and
 // deliberately the same one: selector filter, free text fused by RRF, recency as
@@ -85,6 +98,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -159,6 +173,32 @@ func (h *Handlers) memoryReadable(w http.ResponseWriter, id Identity) bool {
 	return true
 }
 
+// memoryIncludeRetracted reads ?include_retracted, which is the audit view's
+// switch (O11 of design/2026-08-20-agent-wolf.md).
+//
+// EXACTLY `1` turns it on and absence turns it off. Every other spelling — `0`,
+// `true`, `yes`, the empty string, and `?include_retracted` with no `=` at all —
+// is a 400 naming the parameter, and that strictness is the point rather than
+// pedantry: the caller of this parameter is auditing whether its own state was
+// erased, and a value that quietly degraded to "filtered" would hand it an
+// erasure dressed as an absence. `strconv.ParseBool` is deliberately not used
+// for the same reason — it would accept `0` and answer false.
+//
+// It writes the error response and returns ok=false; the caller just returns.
+func memoryIncludeRetracted(w http.ResponseWriter, q url.Values) (bool, bool) {
+	// Has(), not Get(): a present-but-empty parameter is a caller that thinks it
+	// said something, and Get() cannot tell it from absent.
+	if !q.Has("include_retracted") {
+		return false, true
+	}
+	if q.Get("include_retracted") == "1" {
+		return true, true
+	}
+	http.Error(w, `include_retracted: the only accepted value is 1 — omit the parameter for the default, `+
+		`which hides retracted memories`, http.StatusBadRequest)
+	return false, false
+}
+
 // ListMemories serves GET /agent/memories — the memory browser's read path.
 func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.identify(w, r)
@@ -169,6 +209,26 @@ func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	// include_retracted is settled BEFORE anything else about the query, because
+	// both of its answers are refusals and neither depends on the rest of it.
+	includeRetracted, ok := memoryIncludeRetracted(w, q)
+	if !ok {
+		return
+	}
+	if includeRetracted && id.SessionScope != "" {
+		// An embed token: API-class (same secret, empty `sid`), but minted for a
+		// browser inside a third-party page, so it reaches exactly the places a
+		// container's output reaches. The audit view exists to catch an actor
+		// with that reach erasing the application's own state; handing the view
+		// to that actor tells it precisely which erasure was noticed.
+		//
+		// The ORDINARY read is untouched — this restricts the parameter, not the
+		// route. A session token, meanwhile, never gets here at all: different
+		// signing key, and agentd's middleware rejects a non-empty `sid` with 401
+		// before routing (cmd/agentd/auth.go, doc 22 RD30).
+		http.Error(w, "this credential is scoped to a single session and may not read retracted memories", http.StatusForbidden)
+		return
+	}
 	text := q.Get("query")
 	// The embedding is computed only when there is text to embed: an empty query
 	// is a recency question, not a relevance one.
@@ -207,7 +267,8 @@ func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 		// The store validates the key and refuses an inverted range; this route
 		// deliberately does not duplicate either check, because the catch-all
 		// below already reports a store error as 400 with its own message.
-		LatestPer: strings.TrimSpace(q.Get("latest_per")),
+		LatestPer:        strings.TrimSpace(q.Get("latest_per")),
+		IncludeRetracted: includeRetracted,
 	})
 	if err != nil {
 		if errors.Is(err, agentdb.ErrMemoryRequiresPostgres) {

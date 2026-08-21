@@ -934,6 +934,27 @@ func TestMemoryToolsSearchSchemaAdmitsNarrowingArgs(t *testing.T) {
 	}
 }
 
+// TestMemoryToolsSearchSchemaOmitsIncludeRetracted pins the ONE narrowing
+// argument that HTTP has (O11 of design/2026-08-20-agent-wolf.md) and this tool
+// deliberately does not.
+//
+// `retracts` is an ordinary label, so any session holding these tools can
+// withdraw any row in its project — including an application's own
+// authoritative state. include_retracted exists so a trusted reader can DETECT
+// that. Handing the same view to the actor who can perform the erasure lets it
+// confirm the erasure took, and read back exactly what it withdrew. The MCP
+// surface is authenticated by precisely that actor's session token, so the
+// argument must not exist here even though the store now supports it.
+func TestMemoryToolsSearchSchemaOmitsIncludeRetracted(t *testing.T) {
+	tools := testMemoryTools(newFakeMemoryStore(), embedding.NewMock())
+	for _, tool := range tools.tools() {
+		props, _ := tool.InputSchema["properties"].(map[string]any)
+		if _, ok := props["include_retracted"]; ok {
+			t.Fatalf("%s must not admit include_retracted: the audit view is not for an actor that can retract", tool.Name)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The embed flag and the size ceiling (design plan T7).
 // ---------------------------------------------------------------------------

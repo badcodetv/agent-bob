@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1250,5 +1251,241 @@ func TestMemoryAppendRoute_LivePG(t *testing.T) {
 	// No config event. Data, not configuration.
 	if after := countConfigEvents(mine); after != before {
 		t.Fatalf("the append wrote %d config event(s) — a memory is data, not configuration", after-before)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// include_retracted (O11 of design/2026-08-20-agent-wolf.md) — the audit view.
+//
+// `retracts` is an ordinary label, so anything holding the core MCP tools can
+// withdraw any row in its project — including one appended over HTTP as the
+// application's own authoritative state. With the filter always on, that
+// erasure is indistinguishable from the row never having existed. This
+// parameter lets a caller that ALREADY holds project authority see what was
+// withdrawn, and by whom, and decide for itself whether to honour it.
+//
+// Which is why the parameter is refused for the one API-class credential that
+// is handed to a browser inside somebody else's page.
+// ---------------------------------------------------------------------------
+
+// The flag reaches the store when it is exactly `1`, and its absence is false —
+// the pre-O11 behaviour, unchanged, for every caller that never heard of it.
+func TestListMemories_IncludeRetractedReachesTheStore(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "absent means false", path: "/agent/memories", want: false},
+		{name: "absent alongside other params", path: "/agent/memories?selector=kind%3Dstate&latest_per=name", want: false},
+		{name: "1 turns it on", path: "/agent/memories?include_retracted=1", want: true},
+		{name: "1 alongside the narrowing params", path: "/agent/memories?latest_per=name&include_retracted=1", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fakeMemories{}
+			h := newMemoryHandlers(t, store, identityFor("acme"))
+			if rec := do(h, http.MethodGet, tc.path, ""); rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+			}
+			if store.got.IncludeRetracted != tc.want {
+				t.Fatalf("IncludeRetracted = %v, want %v (query %+v)", store.got.IncludeRetracted, tc.want, store.got)
+			}
+		})
+	}
+}
+
+// Anything other than `1` is the caller's error, named. `0`, `true` and the
+// empty string are the three a caller is most likely to send believing it had
+// said something — and the one thing none of them may do is quietly mean false,
+// because a client that thinks it asked for the audit view and got the filtered
+// one will read an erasure as an absence.
+func TestListMemories_IncludeRetractedRejectsEveryOtherValue(t *testing.T) {
+	for _, raw := range []string{"0", "true", "false", "", "yes", "1,1", "01"} {
+		t.Run("value "+strconv.Quote(raw), func(t *testing.T) {
+			store := &fakeMemories{}
+			h := newMemoryHandlers(t, store, identityFor("acme"))
+			rec := do(h, http.MethodGet, "/agent/memories?include_retracted="+url.QueryEscape(raw), "")
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s, want 400", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), "include_retracted") {
+				t.Errorf("the message must name the parameter: %q", rec.Body.String())
+			}
+			if store.call != 0 {
+				t.Error("a malformed parameter must not reach the store")
+			}
+		})
+	}
+
+	// `?include_retracted` with no `=` is present-but-empty, and is refused for
+	// the same reason as `=`: r.URL.Query().Get cannot tell it from absent.
+	store := &fakeMemories{}
+	h := newMemoryHandlers(t, store, identityFor("acme"))
+	if rec := do(h, http.MethodGet, "/agent/memories?include_retracted", ""); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bare flag: status=%d body=%s, want 400", rec.Code, rec.Body)
+	}
+}
+
+// An embed token is API-class — same secret, empty `sid` — and DOES reach this
+// handler (hazard H1 of docs/19-embedding.md). It is minted for a browser
+// inside a third-party page, which is the same blast radius as a container's
+// output, so it may read memories and may not read the audit view of them.
+//
+// A real SESSION token cannot get this far at all: it is signed with a
+// different key and agentd's middleware rejects any non-empty `sid` with 401
+// before routing, pinned by TestSessionTokenIsRejectedByProjectRoutes
+// (cmd/agentd/sessionsecret_test.go), whose route list now carries this one.
+func TestListMemories_IncludeRetractedIsRefusedForASessionScopedCredential(t *testing.T) {
+	embedToken := func(*http.Request) (Identity, error) {
+		return Identity{UserEmail: "api-key:acme", Customer: "acme", SessionScope: "s-hyp-a"}, nil
+	}
+
+	t.Run("403 with the flag", func(t *testing.T) {
+		store := &fakeMemories{}
+		h := newMemoryHandlers(t, store, embedToken)
+		rec := do(h, http.MethodGet, "/agent/memories?include_retracted=1", "")
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s, want 403", rec.Code, rec.Body)
+		}
+		if store.call != 0 {
+			t.Fatal("the refusal must land before the query is built")
+		}
+	})
+
+	t.Run("the ordinary read is untouched", func(t *testing.T) {
+		store := &fakeMemories{}
+		h := newMemoryHandlers(t, store, embedToken)
+		if rec := do(h, http.MethodGet, "/agent/memories?selector=kind%3Dstate", ""); rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s, want 200 — O11 restricts the flag, not the route", rec.Code, rec.Body)
+		}
+		if store.got.IncludeRetracted {
+			t.Error("the flag was not asked for")
+		}
+	})
+
+	t.Run("an unscoped credential may ask", func(t *testing.T) {
+		store := &fakeMemories{}
+		h := newMemoryHandlers(t, store, identityFor("acme"))
+		if rec := do(h, http.MethodGet, "/agent/memories?include_retracted=1", ""); rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		if !store.got.IncludeRetracted {
+			t.Error("a project credential must reach the audit view")
+		}
+	})
+}
+
+// The two full-content reads are unchanged: they answer one memory, whole, and
+// GetMemory was already deliberately unfiltered. The flag is a search-side
+// facility, so on these routes it is inert — not an error, and not a new field.
+func TestListMemories_IncludeRetractedIsInertOnTheSingleRecordRoutes(t *testing.T) {
+	for _, path := range []string{
+		"/agent/memories/mem-1?include_retracted=1",
+		"/agent/memories/current?name=hypothesis-a&include_retracted=1",
+	} {
+		t.Run(path, func(t *testing.T) {
+			store := &fakeMemories{one: bigMemory()}
+			h := newMemoryHandlers(t, store, identityFor("acme"))
+			rec := do(h, http.MethodGet, path, "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+			}
+			var body map[string]any
+			decodeInto(t, rec, &body)
+			if _, ok := body["retracted_by"]; ok {
+				t.Fatalf("a single-record read must not gain retracted_by: %+v", body)
+			}
+			if body["content"] != bigMemory().Content {
+				t.Fatalf("the record changed: %+v", body)
+			}
+		})
+	}
+}
+
+// The whole contract against the real store: the withdrawn row comes back with
+// its retractor's provenance, it wins its name's slot in the latest_per
+// reduction, and the same request without the flag answers the row beneath it
+// with no retracted_by anywhere. This pair is what W5's tamper detection reads.
+func TestListMemories_IncludeRetractedLivePG(t *testing.T) {
+	dsn := os.Getenv("AGENTKIT_TEST_POSTGRES_URL")
+	if dsn == "" {
+		t.Skip("AGENTKIT_TEST_POSTGRES_URL not set — skipping live Postgres test")
+	}
+	store, err := agentdb.Open(dsn)
+	if err != nil {
+		t.Fatalf("open live postgres: %v", err)
+	}
+	const project = "memaudit-mine"
+	t.Cleanup(func() { _ = store.DB().Exec("DELETE FROM memories WHERE project = ?", project).Error })
+
+	seed := func(content string, labels agentdb.LabelSet, worker, session string) *agentdb.Memory {
+		t.Helper()
+		m, _, err := store.CreateMemory(context.Background(), &agentdb.Memory{
+			Project: project, Labels: labels, Content: content,
+			CreatedByWorker: worker, CreatedBySession: session,
+		}, nil)
+		if err != nil {
+			t.Fatalf("seed %q: %v", content, err)
+		}
+		return m
+	}
+	older := seed("hypothesis A: proposed", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "")
+	newer := seed("hypothesis A: live", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "")
+	retraction := seed("ignore hypothesis A",
+		agentdb.LabelSet{"kind": "retraction", agentdb.RetractionLabel: newer.ID}, "researcher", "sess-evil")
+
+	read := func(query string) []map[string]any {
+		t.Helper()
+		h := newHandlers(t, Config{
+			Runner: stubRunner{}, Store: stubStore{},
+			Identity: identityFor(project), AgentDB: store,
+		})
+		rec := do(h, http.MethodGet, "/agent/memories"+query, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("read %s: status=%d body=%s", query, rec.Code, rec.Body)
+		}
+		var body struct {
+			Memories []map[string]any `json:"memories"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Memories
+	}
+
+	// With the flag: the retracted row wins the name's slot, and says who took
+	// it away — a session, therefore not the application's own word.
+	got := read("?selector=kind%3Dstate&latest_per=name&include_retracted=1")
+	if len(got) != 1 || got[0]["id"] != newer.ID {
+		t.Fatalf("latest_per with the flag = %+v, want the retracted row %s", got, newer.ID)
+	}
+	raw, ok := got[0]["retracted_by"].([]any)
+	if !ok || len(raw) != 1 {
+		t.Fatalf("retracted_by = %+v, want one retraction", got[0]["retracted_by"])
+	}
+	first, _ := raw[0].(map[string]any)
+	if first["memory_id"] != retraction.ID {
+		t.Errorf("memory_id = %v, want the retracting memory's own id %s", first["memory_id"], retraction.ID)
+	}
+	if first["created_by_worker"] != "researcher" || first["created_by_session"] != "sess-evil" {
+		t.Errorf("the retractor's provenance is the whole answer: %+v", first)
+	}
+	if first["created_at"].(float64) != float64(retraction.CreatedAt) {
+		t.Errorf("created_at = %v, want the retraction's own %d (unix milliseconds)", first["created_at"], retraction.CreatedAt)
+	}
+
+	// Without it: the row beneath, and not one retracted_by key anywhere.
+	got = read("?selector=kind%3Dstate&latest_per=name")
+	if len(got) != 1 || got[0]["id"] != older.ID {
+		t.Fatalf("latest_per without the flag = %+v, want the row beneath it %s", got, older.ID)
+	}
+	for _, row := range read("?selector=kind%3Dstate") {
+		if _, ok := row["retracted_by"]; ok {
+			t.Errorf("an ordinary search must be byte-identical to the pre-O11 shape: %+v", row)
+		}
+		if row["id"] == newer.ID {
+			t.Errorf("the default must still hide the retracted row: %+v", row)
+		}
 	}
 }
