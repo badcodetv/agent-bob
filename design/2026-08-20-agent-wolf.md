@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R101. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R103. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -3727,7 +3727,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   Also: adding one dependency made yarn rewrite unrelated `yarn.lock` entries — the committed
   lockfile had drifted from the manifests before this ticket; resolved versions are unchanged.
   **48 guesses, the highest of any single ticket in five waves.**
-### W8b: `/api/auth/me` and logout   [Status: pending | Model: sonnet]
+### W8b: `/api/auth/me` and logout   [Status: done | Model: sonnet]
 - **Scope:** The two auth routes the plan never had. `GET /api/auth/me` tells the UI who it is;
   `POST /api/auth/logout` clears the cookie. Nothing else — no UI, no new config, no changes to
   how the cookie is minted or verified. Owner decision 2026-08-21 (**R100**): W8 shipped the
@@ -3771,9 +3771,29 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `git diff --name-only main -- api/src/app.ts api/src/config.ts .env.example docker-compose.yml`
     prints **nothing**.
 - **Depends on:** W8 *(which brings W5, W2, W3, W4 and O11)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 15/15 criteria, zero defects, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 15 of 15 criteria PASS, zero
+  defects, zero fix rounds.** Branch `W8b-auth-me-logout`, commit `08cf4e1`, merged to `main`.
+  Two files, 14 new tests (auth.test.ts 14 → 28; api/ 572 → 586). `requireSignedIn` is mounted as
+  **route-specific** middleware on `/me` alone — narrower than per-router, so R79 is not merely
+  preserved but tightened; `app.ts` has a zero-line diff. The verifier reproduced every criterion
+  with its own probe against real Express servers and real signed cookies rather than reading the
+  ticket's tests and agreeing with them, and it proved the fifth 401 case — the allowlist-removed
+  email, the one flagged as most likely to be faked — with a **control**: the same cookie replayed
+  against the original app returns 200, which is what shows the signature verified and the
+  allowlist refused. Removing an address from `WOLF_ALLOWED_EMAILS` therefore takes effect before
+  the cookie expires. The clearing cookie matches the minted one on name, path, `SameSite`,
+  `Secure` and `HttpOnly` — structurally, not coincidentally, because `clearSessionCookie`
+  destructures `maxAge` off the same options object the mint site uses — and only the expiry
+  differs. `GET /api/auth/logout` is 404 and `PUT` is 404; there is no `app.all` and no
+  method-less handler, so the iframe-borne cross-site sign-out is not reachable.
+  **One wording error in this ticket, which was written the same day from an owner ruling and had
+  no adversarial review before its verifier's** (**R102**): the criterion says the 401 "comes for
+  free" if the route is mounted behind `requireSignedIn`, which is true for four of the five cases
+  and structurally impossible for the fifth — the guard has no access to `WolfConfig`'s allowlist.
+  The executor added an explicit check reusing the guard's own `notSignedInError` so the body shape
+  stays identical, and reported the imprecision rather than working around it silently. Same
+  handling as O6a gave **R87**. Found **R102**, **R103**. 9 guesses.
 ### W9: Go-live provisioning and ordered teardown   [Status: pending | Model: opus]
 - **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live reads the
   candidate spec, validates it, writes it as a trusted locked memory, composes the researcher
@@ -5088,3 +5108,6 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R99** | **`WOLF_TEST_LOGIN` plus `NODE_ENV=production` is now a boot failure, and `.env.example` ships `NODE_ENV=production`.** W8's `loadConfig` refuses the test-login variable outside development, which is correct — but it means **X1's `run.sh` must export `NODE_ENV=development` (or `test`) for the Wolf stack or nothing boots at all**, and the failure is at boot, before any test runs, in the one ticket with the most moving parts. Nobody would guess it from `.env.example`, which is the file an operator copies. Found by W8, which cannot fix it because `run.sh` is X1's. | **Open** — X1 |
 | **R100** | **There is no way for the UI to ask "am I signed in, and as whom?", and no way to sign out.** The plan's route table has no `GET /api/auth/me` and no logout route. W13 must therefore infer the signed-in state from a 401 on the board, and a signed-in user cannot sign out except by waiting the cookie's 12 hours or by the operator rotating `WOLF_SESSION_SECRET` — which signs *everyone* out. Not W8's to add (its criteria enumerate its routes and neither is among them). **RESOLVED by owner decision 2026-08-21: add both.** Kai's ruling — *"let's add api.auth.me and log out."* Written up as **W8b**, and added to § "Wolf API routes". Two shapes worth noting, both decided here rather than left to the executor: **logout is `POST`, never `GET`**, because a `GET` logout is triggerable by a prefetch, an `<img>` tag or a link inside a report panel — a cross-site sign-out, and this product renders model-authored HTML; and **logout with no valid cookie returns 204, not 401**, because signing out when already signed out is not an error and a 401 makes the sign-out button fail exactly when a user most wants it — on an expired session. W13's Depends-on now names W8b. | **Resolved** — W8b, W13 |
 | **R101** | **Two owner rulings on 2026-08-21 added the plan's first two new tickets since revision 4** — W8b (`/api/auth/me` + logout, closing R100) and W2b (the twenty-third Orange route, closing R91). Ticket count 39 → 41. Both are small and both close a debt an earlier ticket found and correctly refused to fix because the file was not its. Recorded as an entry in its own right because the plan's ticket list is otherwise fixed, and a reader comparing the count against revision 4's header should find the reason rather than a discrepancy. W8b runs immediately (it shares no file with anything in flight); W2b waits for W15 to land, since W15 holds `client.ts` first. | **Informational** |
+| **R102** | **A verifier brief written by the orchestrator contained an error that would have produced a FALSE blocking defect.** W8b's verifier was told to "confirm neither `/mcp` nor `/series/download` is 401". `/mcp` **is** 401 without credentials — legitimately, from its own MCP-token guard — and W8's `api/src/app.test.ts:80-87` asserts exactly that. The real invariant is that the 401 must not come from the **cookie guard**, which the verifier proved by response **body shape** rather than by status code, and then said so plainly instead of failing the ticket. A verifier following the brief literally would have raised a blocking defect against correct code and burned a fix round. **Two lessons.** (1) The briefs are as much a source of defects as the plan is, and nothing reviews them — they are written fresh each wave by the orchestrator and go straight to an agent. (2) The instruction to verifiers to **grade the ticket, not just the code** is load-bearing and should stay in every brief; it is what turned an orchestrator error into a report instead of a false failure. Also **R103**'s sibling finding: the same ticket's criterion said "normalised the same way W8 normalises it" — W8 lower-cases but does **not** trim. | **Informational** — orchestrator practice |
+| **R103** | **`setSessionCookie` lower-cases the email but does not trim it, so an untrimmed address is what lands in the signed cookie.** `api/src/auth/session.ts:115`. W8b handles it at its own read site, so `GET /api/auth/me` is correct — but **W9, W10 and W11 mount `requireSignedIn` and read `req.wolfUser.email` directly**, and will each inherit an address with surrounding whitespace. Every downstream comparison (allowlist checks, `owner` labels on memories, the K8s label charset, which forbids spaces) is then a whitespace bug waiting to happen, and it will present as "this user's hypotheses do not appear" rather than as anything auth-shaped. **The durable fix is one call at the mint site**, in W8's file, not at three read sites. **Recommendation: add `api/src/auth/session.ts` to W9's Files line and a criterion that the mint site trims**, since W9 is the next ticket to mount the guard. Found by W8b's verifier. Separately and needing no action: `requireSignedIn` deliberately does not clear an expired cookie because the bare middleware has no config to build matching flags from — now that `POST /api/auth/logout` exists the UI has a real remedy, so that comment's premise has changed. | **Open** — W9 |
+
