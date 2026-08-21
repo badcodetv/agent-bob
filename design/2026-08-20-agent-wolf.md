@@ -237,6 +237,19 @@ docker rm -f agentkit-testpg      # then repeat step 1
 - **Label values are the Kubernetes charset**, `^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`,
   ≤63 chars, ≤32 labels per object (`go/agentdb/labels.go:22-33`). No `@`, no `+`, no `/`,
   no spaces. This constrains dataset names, memory labels and metric slugs alike.
+- **`api/`'s tsconfig sets `noUncheckedIndexedAccess`.** Every array index is `T | undefined` at
+  typecheck time. It is the right setting and it materially shapes any numeric module — running
+  peaks, window edges, zip-by-index — so budget for it. Two of W4's three fix rounds were this
+  alone (**R76**). `api/` also uses `moduleResolution: NodeNext`, so a JSON import needs an import
+  attribute; read a fixture with `readFileSync(new URL(...), "utf8")` instead.
+- **Compose forwards an unset optional variable as the empty string, not as absent.** A
+  `${VAR:-}` entry arrives as `""`, and `z.coerce.number()` turns `""` into `0` — so
+  `env.FOO ?? default` silently yields 0 rather than the default. Use W7's `present()` helper
+  (`api/src/config.ts`) for every optional numeric variable (**R80**).
+- **`docker compose config` prints interpolated secrets to stdout.** Once `WOLF_API_KEY`,
+  `WOLF_MCP_TOKEN` or `FRED_API_KEY` are set in the environment, that command echoes their values.
+  No ticket's Validation may use it verbatim: grep for variable **names**, or pipe through a
+  redactor (**R82**).
 - **Selectors are Kubernetes selector semantics exactly**: `k=v`, `k!=v`, `k in (a,b)`,
   `exists k`, `!k`, comma means AND. **No OR and no nesting** — run two searches.
 
@@ -318,6 +331,7 @@ allows:
 | `api/src/orange/client.ts` | W2, W15 | Strictly serial; W2's route list is exhaustive and closed |
 | `api/src/config.ts`, `.env.example` | W1, W6, W7, W8, W9, W10, W11, W12, W16, W21, X1 | **Strictly serial in dependency order.** Each ticket adds only the variables its own criteria name, and documents each in `.env.example` with a comment |
 | `api/src/app.ts` | W1, W7, W8, W11, W21 | Strictly serial; every router is mounted here, by the ticket that creates it |
+| `docker-compose.yml` (agent-wolf) | W1, W7, W8, W9, W10, W11, W16, W21, X1 | **Strictly serial, same order as `config.ts`.** A variable in `.env.example` and `config.ts` still never reaches the container without an `environment:` entry here — R81 |
 
 ⚠️ **An earlier revision restricted `config.ts` and `.env.example` to three tickets and forbade
 everything else from touching them. That was wrong and it blocked eight tickets** — W6 needs
@@ -1505,7 +1519,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   tests, so a ticket graded on a PASS count silently forbids subtests) and **R61** (a pre-existing
   file is not gofmt-clean).
 
-### O3: Listing, version history, reaper and orphan sweep   [Status: pending | Model: sonnet]
+### O3: Listing, version history, reaper and orphan sweep   [Status: done | Model: sonnet]
 - **Scope:** `ListDatasets`, `ListDatasetVersions`, `ReapDatasetVersions`, `ListOrphanBlobPaths`,
   plus the three declarations the byte plane needs: `DatasetBlobPrefix`, `DatasetBlobDeleter` and
   `DatasetBlobLister`. O3 owns all three; O2 was told not to add them, and O6a/O8 reference O3's.
@@ -1590,10 +1604,34 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     only while `agentdb` is free of `extension`. `go build` would fail on the cycle too, but this
     one says which rule was broken.
 - **Depends on:** O2
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `O3-dataset-listing-reaper`, commit `c0aee15`, based on
+  `O2-dataset-store-cas`. No fix round.** Orchestrator re-ran the Validation on 2026-08-21:
+  build+vet clean, the live filter prints **17 `--- PASS` and zero `--- SKIP`** (O2's 8 plus 9 new),
+  `TestMutationsAreLogged` passes, `agentdb` does not import `extension`, and all three files are
+  `gofmt`-clean.
+  **Three semantics O8 must match, none of which the plan pinned.** (1) **The reaper continues
+  after a blob-delete failure.** One name's failed `Delete` halts only *that* name's remaining
+  excess versions; every other `(project, name)` group is still reaped, and the call returns the
+  real deleted count alongside the **first** error. A row-DELETE SQL failure is treated as more
+  severe and aborts the whole sweep. The alternative reading — abort everything on the first blob
+  failure — is defensible from the same sentence, so **if O8's retry logic assumes it, this is
+  where they disagree.** (2) Candidates are visited `ORDER BY project, name, version ASC`, oldest
+  excess first; that determinism is what makes the partial-failure test reproducible. (3)
+  `ListOrphanBlobPaths` builds its known set from `SELECT DISTINCT blob_path FROM datasets` with
+  **no WHERE clause at all** — so a row somehow written with a non-prefixed `blob_path` is still
+  recognised as known and never reported as an orphan, rather than being excluded from the known
+  set and looking orphaned by construction.
+  R47 needed nothing further: the ticket text already decided it. `minAge` is **accepted and does
+  not filter**, the doc comment says so, and a test pins the inertness by asserting identical
+  results for `minAge=0` and `minAge=time.Hour`. **The safety lives at the O8 caller**, which must
+  see a path in the orphan list across two passes at least `minAge` apart before deleting it.
+  `ListDatasets` reduces to one row per `(project, name)` at the highest version in an inner query
+  scoped only by project, then applies the label selector to *that* row's labels — so a superseded
+  version's labels can never decide whether the current version matches. New shared helper in this
+  file: `clampDatasetListLimit`.
 
-### O4: Scoped dataset download tokens   [Status: pending | Model: sonnet]
+### O4: Scoped dataset download tokens   [Status: done | Model: sonnet]
 - **Scope:** A short-TTL token carrying `scope: "dataset:<project>/<name>"`, minted server-side,
   and the verification function that accepts it. Model it directly on
   `go/cmd/agentd/embedtoken.go`: same signing secret (`AGENTKIT_JWT_SECRET`), same
@@ -1668,8 +1706,24 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     scope parser has to be shown not to move any of them.
 - **Depends on:** — *(this ticket touches no dataset store code; the plan's O1 edge was
   bookkeeping, not a real dependency, so O4 can run beside O2 and O3)*
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `O4-dataset-download-tokens`, commit `17b1b43`, based on `main`
+  (O4 genuinely has no dataset-store dependency, so this is the one wave-2/3 branch that can be
+  compared against `main`). No fix round.** Orchestrator re-ran the Validation on 2026-08-21:
+  build+vet clean, 12 `TestDatasetToken*` PASS under `cmd/agentd`, 6 `TestDatasetScope*` PASS under
+  `devclaims`, all files `gofmt`-clean.
+  Signatures O6b consumes, none of which the plan pinned:
+  `mintDatasetToken(secret []byte, project, name string, ttlSeconds int) (token string, exp int64, err error)`
+  and `verifyDatasetToken(secret []byte, raw string) (project, name string, err error)`. TTL is
+  clamped to `[60s, 900s]` with a 300s default; `exp` is read back off the *signed* token rather
+  than recomputed. The claims carry `Job: "dataset-download"` and an **empty `UserEmail`** — this
+  helper has no caller identity to attribute, unlike `embedtoken.go`'s mint path which always
+  threads the API-key principal's email. **If O6b needs the caller attributed, it needs a signature
+  change, and asking for one is cheaper than inventing a parameter here.** `devclaims` gains
+  `DatasetScope`/`ParseDatasetScope` as siblings of the session pair, pinning `(project, name)` with
+  **no version and no dataset id**, and a test asserts a dataset scope never parses as a session
+  scope in either direction. O4 touches no `httpapi`, no `auth.go` and no store code — those stay
+  O5's and O6b's.
 
 ### O5: Dataset HTTP read routes   [Status: pending | Model: opus]
 - **Scope:** The four routes in **Interfaces**, the two `httpapi.Config` seams they need, and —
@@ -2424,7 +2478,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 
 ---
 
-### W1: Wolf repo scaffold and local topology   [Status: blocked — escalated | Model: sonnet]
+### W1: Wolf repo scaffold and local topology   [Status: done — F1/F2/F3 closed by W1b, 2026-08-21 | Model: sonnet]
 - **Scope:** Create the repository with `api/` (Node + TypeScript + vitest) and `web/` (React 18 +
   MUI 6 + Vite + vitest), and the compose topology from § "Local topology and networking" — which
   is not negotiable, because a `wolf-api` on the ordinary compose network is unreachable from
@@ -2513,7 +2567,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     against a stub backend aliased `dind` and assert a request to `/api/healthz` arrives at the
     backend as **`/api/healthz`** — the literal prefix, unstripped (**R37**)
 - **Depends on:** —
-- [ ] done
+- [x] done — F1/F2/F3 closed by W1b on 2026-08-21
 - Notes: **Implemented 2026-08-20; 10 of 11 criteria verified PASS; ESCALATED on the eleventh.**
   Branch `W1-wolf-repo-scaffold`, five commits ending `6b59b4f`. `yarn typecheck` and
   `yarn test` are green from a clean `git archive` export (20 tests), `docker compose config`
@@ -2553,6 +2607,17 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   criterion; and only `compilerOptions.paths` is enumerated, while `baseUrl`, `extends` chains and
   additional tsconfigs are equivalent escapes. R41's first half is also still open — nothing ties
   `.env.example` to `config.ts`, and eight later tickets add config.
+  **CLOSED 2026-08-21 by W1b, branch `W1b-import-boundary-fixes`, commit `acdcdbc`, no fix round.**
+  All three failures are fixed and each is pinned by a test that was proven to fail before the fix:
+  **F1** — the checker now scans root config files as well as `srcDir`, so `web/vite.config.ts` and
+  `api/vitest.config.ts` are covered; **F2** — a bare specifier must be **declared**, not merely
+  resolvable into `node_modules`; **F3** — template-literal specifiers are matched. Orchestrator
+  re-ran the gates: `yarn typecheck` clean, 36 api + 15 web tests green (up from 32 + 14), every
+  pre-existing escape probe still caught. The five probes this Notes block calls "not criterion
+  failures" — `.mts`/`.cts` sources, computed dynamic specifiers, and a bare specifier hoisted into
+  `node_modules` but declared in no manifest — were deliberately left open; they are plan gaps, not
+  ticket failures. One new one joins them: **R75**, the checker reads a regex or string literal in a
+  test file as a real import.
 
 ### W2: Orange client   [Status: done | Model: sonnet]
 - **Scope:** A typed client for every Orange route Wolf touches. **The list is exhaustive and
@@ -2782,7 +2847,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `ratio_to` condition may name itself in `ratio_metric`. Both would have been ungraded 28th rules;
   if either matters, the guard belongs in W4.
 
-### W4: The condition evaluator   [Status: pending | Model: opus]
+### W4: The condition evaluator   [Status: done | Model: opus]
 - **Scope:** Implement § "Condition semantics" exactly: the **five** statistics (`level`,
   `change_abs`, `change_pct`, `drawdown_pct`, `ratio_to` — the Scope line said "four" until R26
   added `change_abs`; the `stat` enum in § "The condition object" is the authority), the three
@@ -2888,8 +2953,31 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     fixture, the mixed-frequency fixture and the tie fixture appear by name in the output
     (`yarn test src/hypothesis/evaluate --reporter=verbose`).
 - **Depends on:** W3
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `W4-condition-evaluator`, commit `78b4f14`, based on
+  `W3-spec-validator`. No fix round.** Orchestrator re-ran the Validation on 2026-08-21:
+  `yarn typecheck` clean, **138 api tests** green (44 evaluator fixtures, every number hand-computed
+  in the test rather than produced by the implementation).
+  **The `Reason` vocabulary is SIX, not five — orchestrator decision, forced by this ticket's own
+  criteria.** § "Every condition result carries a reason" lists five; W4's behavioural criteria
+  require `no_observations` in two separate places. Five is unsatisfiable whichever five you pick,
+  so the closed list is the union:
+  `condition_tripped | insufficient_coverage | non_positive_reference | stale_data |
+  no_ratio_pair | no_observations`, with **`stale_data`**, never `stale_series` (R67). See **R71**.
+  **Four semantics W4 had to decide that change the numbers**, all now pinned by fixtures and all
+  worth reading before W10, W11 or W14: (1) **staleness is `nowMs - t_last > S`** — the plan
+  specified the boundary twice with opposite inclusivity and they disagree at exactly
+  `t_last == nowMs - S`, which is precisely where a daily series evaluated by a daily cron sits
+  (**R72**). (2) An observation whose `trailing_n_days` window is **empty** — a guaranteed
+  occurrence for the first post-go-live observation of every such condition, since the window is
+  half-open `[t-N, t)` — is skipped as `insufficient_coverage` (**R73**). (3) **The trailing mean is
+  live-only and the ratio partner is not**: lookbacks behind `liveAtMs` are forbidden for
+  `trailing_n_days` and permitted for `ratio_to`, because a mixed-frequency ratio would otherwise be
+  `no_ratio_pair` for the first month of every hypothesis (**R74**). (4) The coverage floor is
+  `ceil(sustained_days * 0.6)` counted over **non-skipped** observations only.
+  Exports for W8/W10/W11/W14 and the report frame: `Point`, `UnixMs`, `Reason`, `ConditionState`,
+  `ConditionResult`, `MetricResult`, `EvaluationResult`, `MS_PER_DAY`. Import them; do not
+  redeclare — a `{t, v}` shape downstream is a silent `NaN`, not a type error.
 
 ### W5: Lifecycle, trusted store and tamper detection   [Status: pending | Model: opus]
 - **Scope:** The six-state machine with per-hypothesis serialisation, and reading/writing
@@ -3020,7 +3108,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - [ ] done
 - Notes:
 
-### W6: Market-data providers and normaliser   [Status: done — two criteria deferred, see R55/R56 | Model: sonnet]
+### W6: Market-data providers and normaliser   [Status: done — FRED closed by W6b; Stooq still deferred, R56 | Model: sonnet]
 - **Scope:** FRED and Stooq connectors — each exposing **both `search(query)` and `fetch(...)`** —
   the normaliser to the canonical dataset CSV, the shared data-row counter, and a TTL cache.
   `search` is in scope here and not in W7: W7 only exposes over MCP what this module implements,
@@ -3149,7 +3237,21 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `timeoutMs`) is implemented and tested in full — see `__fixtures__/README.md` for the exact
   commands that would record each fixture once unblocked.
 
-### W7: Market-data MCP server and the series download route   [Status: pending | Model: opus]
+  **R55 CLOSED 2026-08-21 by W6b, branch `W6b-fred-fixtures`, commit `ed8f6c5`, no fix round.**
+  The repository owner supplied a real FRED API key, and both FRED fixtures are now **recorded real
+  responses** — `__fixtures__/fred-observations-dgs10.json` (11 observations spanning two market
+  holidays, so it carries two genuine `"."` sentinels) and `__fixtures__/fred-search-treasury.json`
+  (5 results under FRED's real, misspelled `seriess` key), each with its recording command and date
+  in the sibling README, and the key shown only as `$FRED_API_KEY`. The two deferred criteria — the
+  `"."` omission and `search()`'s field mapping — are now pinned against those responses.
+  **The real shape matched FRED's published documentation**: the only change to `fred.ts` was
+  replacing the comments that said the mapping was unverified. Orchestrator confirmed 87 api tests
+  green, no credential anywhere in the diff, and no Stooq file touched.
+  **R56 remains OPEN.** stooq.com still answers with a JavaScript proof-of-work challenge instead of
+  CSV, `parseStooqCsv` is still unit-tested against Stooq's published shape only, and solving or
+  circumventing that challenge is out of scope.
+
+### W7: Market-data MCP server and the series download route   [Status: done | Model: opus]
 - **Scope:** An HTTP MCP server named **`wolf`** exposing `series_search` and `series_fetch`,
   authenticated by `WOLF_MCP_TOKEN`, **plus the route that actually serves the bytes those tools
   point at** — `GET /series/download?token=…`. The download route is in scope here because no
@@ -3245,8 +3347,34 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     nothing — this ticket must not edit files it does not own, and the browser never calls
     `/series/download`, so wolf-web's nginx deliberately does not proxy it.
 - **Depends on:** W6 *(for both `fetch` and the `search` capability, and for `countDataRows`)*
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `W7-marketdata-mcp`, commit `bd08963`, based on
+  `W6-market-data-providers`. No fix round.** Orchestrator re-ran the Validation on 2026-08-21:
+  `yarn typecheck` clean, **141 api tests** green.
+  **AMENDMENT, applied: W7 owns the config wiring.** This ticket's Files line and its fourth
+  Validation command said W7 must not touch `api/src/config.ts`, `.env.example` or
+  `api/src/app.ts` — which contradicts the ⚠️ block in § "Parallelism and file ownership" that made
+  those files strictly serial in dependency order rather than owned by three tickets. W7 is the next
+  ticket in that order that needs them, so it wired them, including the two variables W6 formally
+  requested: **`FRED_API_KEY`** and **`WOLF_MARKETDATA_CACHE_TTL_SECONDS`** (integer seconds,
+  default 3600 — note the `_SECONDS` suffix; the conversion `ttlMs: seconds * 1000` happens where
+  the cache is constructed, never inside `cache.ts`). The surviving ownership check is
+  `git diff --name-only <base> -- web/`, which prints nothing. **The same contradictory wording
+  appears in W8, W9, W10, W11, W16 and W21 and should be fixed there too — see R77.**
+  **Three things later tickets must not break.** (1) **W8 must NOT mount `requireSignedIn`
+  globally.** `/mcp` and `/series/download` are deliberately at the app root, outside `/api` and
+  outside any cookie: a session container has no cookie and reaches wolf-api directly at the DinD
+  gateway. `app.use(requireSignedIn)` would 401 the entire market-data surface inside containers,
+  and X1 is where that would first surface (**R79**). (2) **Compose forwards an unset optional
+  variable as `""`, not as absent**, and `z.coerce.number()` turns `""` into `0` — so
+  `env.FOO ?? default` silently yields 0. W7 added a `present()` helper and a test; every later
+  ticket adding a duration or limit variable needs the same treatment (**R80**). (3) **A variable in
+  `.env.example` and `config.ts` still never reaches the container without an `environment:` entry
+  in `docker-compose.yml`.** W7 added five; that file is now in the serial ownership row (**R81**).
+  `series_fetch` reports `rows` from W6's `countDataRows()` and nothing else, so it cannot disagree
+  with a later `dataset_put`'s `row_count` about an unmodified file. It returns **`unit: null` for
+  FRED** and `"USD"` for Stooq, because W6's FRED connector exposes units only through `search()` —
+  the tool description tells the model to take FRED units from `series_search` (**R78**).
 
 ### W8: Auth and hypothesis read routes   [Status: pending | Model: opus]
 - **Scope:** `POST /api/auth/google`, `GET /api/hypotheses`, `GET /api/hypotheses/:id`,
@@ -4578,7 +4706,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | --- | --- | --- |
 | **R45** | **W9's go-live cannot require a `report-template` without a cycle.** The report-layer amendment says go-live refuses a hypothesis with no template, but W21 is the only writer of one and W21 depends transitively on W9. Either go-live warns instead of refusing until W21 lands, or the amendment moves to W22. **Needs an owner decision.** | W9, W21, X1 |
 | **R46** | **CLOSED before wave 2 ran — revision 4 had already added all four routes to W2's Scope, and W2 shipped all twenty-two.** Original finding: **W2's route list is declared "exhaustive and closed" and is not.** W5 needs `GET /agent/sessions` (list, with `worker=`) and `include_retracted=1`; W8 needs `GET /agent/attention-requests`; W12 needs `GET`/`PUT /agent/project-settings`. § "Parallelism" gives `client.ts` to W2 and W15 only, so W2 must gain them before wave 3. | W5, W8, W12 |
-| **R47** | **`O3`'s `minAge` guard cannot be honoured as specified.** `DatasetBlobLister.List(ctx, prefix)` returns keys with no timestamps and no `extension.BlobStore` implementation exposes an age. Either the seam gains an age, or the guard is dropped and the sweep relies on the prefix re-assertion alone. | O3, O8 |
+| **R47** | **CLOSED — the ticket text had already decided it before O3 ran, and O3 implemented it: `minAge` is accepted, does not filter, says so in its doc comment, and a test pins identical results for `minAge=0` and `minAge=time.Hour`. The safety lives at the O8 caller, which must see a path across two passes at least `minAge` apart before deleting.** Original finding: **`O3`'s `minAge` guard cannot be honoured as specified.** `DatasetBlobLister.List(ctx, prefix)` returns keys with no timestamps and no `extension.BlobStore` implementation exposes an age. Either the seam gains an age, or the guard is dropped and the sweep relies on the prefix re-assertion alone. | O3, O8 |
 | **R48** | **`TRUSTED_KINDS` has two claimed owners** — W5 (the trusted store) and W15 (`api/src/report/kinds.ts`). One must define and the other re-export; the plan currently reads as though both define it. | W5, W15 |
 | **R49** | **Several variable names are used but pinned nowhere:** `WOLF_MCP_TOKEN`'s length and charset, `WOLF_SCHEDULE_CRON`'s exact default expression, `WOLF_SERIES_TOKEN_SECRET`, `WOLF_SERIES_URL_TTL_SECONDS`, `WOLF_MARKETDATA_CACHE_TTL_SECONDS`, Orange's base-URL variable, and the browser-side `VITE_ORANGE_PUBLIC_URL` / `VITE_GOOGLE_CLIENT_ID` build args. Each is named in the ticket that needs it; none is in a shared table, so two tickets could still diverge. | W6, W7, W9, W10, W11, W12, W13 |
 | **R50** | **"React Router 7" does not name the npm package** — `react-router` 7 or the `react-router-dom` 7 shim. The executor must pick and log it. | W13 |
@@ -4586,7 +4714,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R52** | **The prompt-injection literals `{{LOCKED_SPEC_JSON}}` and `<!-- WOLF:METHOD-BODY -->` are used by both W9 and W12** and pinned in neither § Interfaces nor § "Pinned technology choices". They agree today by coincidence. | W9, W12 |
 | **R53** | **`RetractedBy` is unbounded.** A container can append arbitrarily many `retracts=<id>` memories and inflate every search response carrying that row. A cap plus a truncation flag needs a number the plan does not pin. | O11 |
 | **R54** | **No HTTP-assertion library is pinned for `api/` route tests.** W1's shipped `app.test.ts` uses `app.listen(0)` + `fetch`; W8 onward assume that house pattern rather than `supertest`, but the pinned table is silent. | W8–W11, W21 |
-| **R55** | **Owner decision B2 ("a FRED API key exists") does not hold in every execution environment.** W6's executor verified `FRED_API_KEY` is absent and that an unkeyed request to `api.stlouisfed.org` returns HTTP 400. Per W6's own acceptance criterion this makes recording a FRED fixture a blocked step, not a defect to paper over: `fred.ts` implements the full connector (endpoint, error taxonomy, misconfigured-at-construction, a bounded `timeoutMs`) and every branch reachable without a fixture is tested, including the default `api.stlouisfed.org` host/path with `api_key`/`file_type=json` pinned via `undici` `MockAgent`. **Not** tested against a recorded response: `series_search`'s field mapping and the `"."` missing-value-sentinel omission — both implemented per FRED's publicly documented JSON shape only. | W6 (recording deferred); whoever next has a real `FRED_API_KEY` should record the two fixtures named in `api/src/marketdata/__fixtures__/README.md` and add the tests the README says are missing |
+| **R55** | **CLOSED 2026-08-21 by W6b — the owner supplied a key and both FRED fixtures are now recorded real responses; the published shape matched, so only comments changed in `fred.ts`.** Original finding: **Owner decision B2 ("a FRED API key exists") does not hold in every execution environment.** W6's executor verified `FRED_API_KEY` is absent and that an unkeyed request to `api.stlouisfed.org` returns HTTP 400. Per W6's own acceptance criterion this makes recording a FRED fixture a blocked step, not a defect to paper over: `fred.ts` implements the full connector (endpoint, error taxonomy, misconfigured-at-construction, a bounded `timeoutMs`) and every branch reachable without a fixture is tested, including the default `api.stlouisfed.org` host/path with `api_key`/`file_type=json` pinned via `undici` `MockAgent`. **Not** tested against a recorded response: `series_search`'s field mapping and the `"."` missing-value-sentinel omission — both implemented per FRED's publicly documented JSON shape only. | W6 (recording deferred); whoever next has a real `FRED_API_KEY` should record the two fixtures named in `api/src/marketdata/__fixtures__/README.md` and add the tests the README says are missing |
 | **R56** | **Stooq's daily-download endpoint (`stooq.com/q/d/l/`) no longer answers CSV to a plain HTTP request.** Verified directly and repeatedly by W6's executor on 2026-08-21 (`curl`, `curl` with a browser User-Agent, a persisted cookie jar across two requests, and `wget`): every attempt returns HTTP 200 with an HTML page running a client-side JavaScript proof-of-work challenge, not the documented `Date,Open,High,Low,Close,Volume` CSV. **This invalidates a check this same fix round relied on** — "stooq.com IS reachable and needs no key (verified: HTTP 200 for …)" only inspected the status code, not the body. Solving the challenge programmatically to scrape the site was judged out of scope regardless of instruction (circumventing anti-automation protection, not "recording a fixture"). `stooq.ts`'s `parseStooqCsv` is implemented and unit-tested against Stooq's publicly documented CSV shape only, not a recorded response; `search()` (against the committed `stooq-tickers.ts` table) and the error-mapping branches need no live fixture and are fully tested. | W6 (recording deferred); anything downstream that assumes `series_fetch` returns real Stooq rows today (W7, W10) is, in this environment, receiving whatever `parseStooqCsv` does with the challenge page's HTML rather than a clean error — worth a defensive check in whichever ticket first runs it against the live host |
 | **R57** | **O2's Validation cannot distinguish a correct CAS implementation from a lucky one.** A plain goroutine race against Postgres almost never reaches the unique-index backstop: the transactions are sub-millisecond and goroutine start-up staggers them, so the in-transaction `MAX(version)` pre-check catches every loser. Measured by O2's executor: with 8 and with 32 writers the branch fired **zero** times; with 16 it fires roughly once per run. An implementation whose unique-violation handling is wrong — most plausibly one that re-reads the current version *inside* the aborted transaction, which Postgres rejects with 25P02 — therefore passes on most runs. The fix, used in `TestDatasetLivePG_UniqueIndexIsTheBackstop` and which any re-implementation or review should repeat: open a manual transaction, insert a row at version 1 **without committing** (invisible to `MAX(version)`), call `CreateDatasetVersion` in a goroutine so it passes its own CAS check and blocks on the index, then commit the seed and assert the writer returns `ErrDatasetVersionConflict{Current: 1}` only after that commit. | O2 (resolved), O3, O5, O6a, W2 |
 | **R58** | **The "at least five `--- PASS`" rule silently forbids subtests.** `grep -E '^--- (PASS|SKIP|FAIL)'` is anchored at column 0, and `go test -v` indents subtest results as `    --- PASS:`. A perfectly good implementation that grouped its live coverage as subtests under two or three parents prints two or three matching lines and appears to fail its own gate. § "Executor orientation" documents the `-run` substring trap but not this one; it should. | O2, O3, O7, O11 — every ticket whose Validation counts `--- PASS` lines |
@@ -4602,3 +4730,17 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R68** | **A ticket whose Validation diffs against `main` is wrong whenever its base is unmerged.** W6's ownership check reads `git diff --name-only main -- api/src/config.ts api/src/app.ts .env.example`; `W1-wolf-repo-scaffold` created all three files and is not merged, so against `main` the command prints all three and falsely fails the ticket. The orchestrator substituted `git diff --name-only W1-wolf-repo-scaffold -- …`, which correctly prints nothing. **Generalise: every Validation command that names `main` must instead name the ticket's declared base** for as long as the wave-1 and wave-2 branches remain unmerged. Related: no env var owns the market-data HTTP timeout, so W6 pinned a 10s `timeoutMs` constructor option; if W10 needs a different bound it overrides per instance. | W6 (resolved), any ticket branched from an unmerged base |
 | **R69** | **A data table shipped as JSON under `__fixtures__/` does not survive the production build.** `api/`'s build is plain `tsc` (`rootDir src` → `outDir dist`), which never emits non-`.ts` files, and `api/Dockerfile` copies only `dist/`, `package.json` and `node_modules` — so `stooq.ts` loading its default ticker table with `readFileSync` against a JSON path `ENOENT`-ed from the built image. Reproduced by the adversarial verifier and again by the executor before fixing. Fixed by moving the table to `api/src/marketdata/stooq-tickers.ts`, a compiled module, verified by running `yarn build` and executing `dist/marketdata/stooq.js` directly. **Any later ticket that wants a committed data table must ship it as a `.ts` module**, or add `resolveJsonModule` plus an explicit copy step to both the build script and the Dockerfile. | W6 (resolved), W7, and any ticket shipping a static data table |
 | **R70** | **Nothing physically prevents a worker from editing this plan document.** The EXECUTION RULES forbid it, and wave 2's workers were told again explicitly, but the plan lives in `agent-orange` while three of the five worktrees are in `agent-wolf` — so "stay inside your worktree" does not cover it. W6's executor appended R55, R56 and its own Notes entry directly. **The content was accurate and the orchestrator kept it**, but the rule was still broken and a less careful worker could have destroyed the log — which has already happened twice on this plan. Future waves should either give workers a read-only copy of the plan or accept the edits as expected and drop the rule. | process; all future waves |
+| **R71** | **RESOLVED — the `Reason` vocabulary is SIX, not five.** § "Every condition result carries a reason" lists five and says "do not add a sixth", but W4's own behavioural criteria require `no_observations` in two separate places (a metric with no observations at all, and `MetricResult.stale_reason`). Five is unsatisfiable whichever five you pick. **Orchestrator decision 2026-08-21: the closed list is the union** — `condition_tripped \| insufficient_coverage \| non_positive_reference \| stale_data \| no_ratio_pair \| no_observations` — spelled `stale_data`, never `stale_series` (R67). W4 exports `Reason`; W10 counts consecutive indeterminates by it and W14 renders it, so neither may match on strings. | W4 (resolved), W10, W14 |
+| **R72** | **RESOLVED — the freshness boundary was specified twice with opposite inclusivity.** The condition rule reads "newer than `staleness_days` before `nowMs`" (fresh iff `t_last > nowMs - S`); the `MetricResult` rule reads "older than `staleness_days` before `nowMs`" (stale iff `t_last < nowMs - S`). They disagree at exactly `t_last == nowMs - S`, which is precisely where a daily series evaluated by a daily cron lands — so the disagreement is the common case, not an edge case. W4 unified both to **stale iff `nowMs - t_last > S`** and pinned it with a fixture. | W4 (resolved), W10, W14 |
+| **R73** | **No outcome was defined for an observation whose `trailing_n_days` window is empty.** The window is half-open `[t - N, t)`, so the FIRST post-go-live observation of every such condition has no reference at all — a guaranteed occurrence for every hypothesis, not an edge case. § "Condition semantics" enumerates skip reasons only for `R <= 0` and a missing ratio partner. W4 skips it as `insufficient_coverage`. **Worth stating in § "Condition semantics"**, because a condition with `sustained_days: 1` on a weekly series can go indeterminate purely from this. | W4 (resolved), W14, W12's interviewer prompt |
+| **R74** | **Whether pre-go-live data may contribute to a reference was unstated, and it changes the numbers.** Two references read data other than the observation itself: `trailing_n_days` (a mean) and `ratio_to` (the partner point). The plan constrains the *condition* to observations at or after `liveAtMs` but never says whether those lookbacks may reach behind it. W4 chose differently for the two, deliberately: **the trailing mean is live-only; the ratio partner is not** — a mixed-frequency ratio would otherwise be `no_ratio_pair` for the first month of every hypothesis, which is the failure R26/A13 were raised about. Both choices should be written into § "Condition semantics", and W10/W11 must fetch enough history to honour the second. | W4 (resolved), W10, W11 |
+| **R75** | **`tools/import-boundary` reads regex and string literals in test files as real imports.** The checker matches `/(?:import\|export)(?:[^'"()]*from)?\s*["']([^"']+)["']/g` over raw source, so writing an expected import statement as a regex literal in a test — which W4's own criterion ("a test asserts the module's import list") invites — makes the checker report a bare import of a package called `"."` and fail `api/src/import-boundary.test.ts`, **in a different file from the one being edited**. Cheap fix: skip `*.test.ts`, or document the trap. Joins the five probes W1's Notes already list as plan gaps rather than ticket failures. | W1 (owns the checker), any ticket asserting on import statements |
+| **R76** | **`api/`'s tsconfig sets `noUncheckedIndexedAccess` and the plan never mentioned it.** Every array index is `T \| undefined` at typecheck time. It is the right setting, but it materially shapes any numeric module — running peaks, window edges, zip-by-index — and no W-ticket budgeted for it; two of W4's three internal fix rounds were this alone. **Now recorded in § "Executor orientation"** alongside the `NodeNext` JSON-import note. | every ticket writing TypeScript in `api/` |
+| **R77** | **Six tickets carry wording that contradicts the config-ownership correction.** W7's Files line said "this ticket does not touch `api/src/config.ts`, `.env.example`, `api/src/app.ts`", and its fourth Validation asserted a diff over exactly those paths prints nothing — while the ⚠️ block in § "Parallelism and file ownership" makes those files **strictly serial in dependency order**, not owned by three tickets. Both cannot hold, and W7 is the next ticket in that order that needs them. Applied for W7 (see its Notes): Files gains the three paths and the surviving ownership check is `git diff --name-only <base> -- web/`. **The identical wording is still in W8, W9, W10, W11, W16 and W21 and should be fixed the same way before each runs.** | W7 (resolved), W8, W9, W10, W11, W16, W21 |
+| **R78** | **`series_fetch` cannot report a `unit` for FRED.** § "Market-data MCP tools" gives `series_fetch` a `unit` field, but W6's FRED connector exposes units only through `search()` (which maps `units`); `fetch()` returns observations, which carry none. W7 therefore returns **`unit: null` for FRED** and `"USD"` for Stooq, and the tool description tells the model to take FRED units from `series_search`. If W10's poller, W12's researcher prompt or W14's chart axis needs a unit straight from `series_fetch`, W6 needs a `/fred/series` metadata lookup and the plan must say so. | W6, W7 (mitigated), W10, W12, W14 |
+| **R79** | **W8 must NOT mount its cookie guard globally, or it kills `/mcp` and `/series/download`.** Both W7 routes are deliberately at the app root, outside `/api` and outside any session cookie — a session container has no cookie and reaches wolf-api directly at the DinD gateway. W8's ticket says it creates `requireSignedIn` "which W9, W10 and W11 mount"; installed instead as `app.use(requireSignedIn)`, the entire market-data surface starts 401-ing inside containers, and **X1 is where that would first surface** — nine tickets and one container later. Should be an explicit criterion in W8. | W8, X1 |
+| **R80** | **Compose forwards an unset optional variable as `""`, not as absent.** A `${VAR:-}` entry arrives as the empty string, and `z.coerce.number()` turns `""` into `0`, so `env.FOO ?? default` silently yields **0** rather than the default — a zero TTL, a zero limit, a zero max-bytes. W7 added a `present()` helper in `api/src/config.ts` and a test; **every later ticket adding a duration or limit variable needs the same treatment**, including `WOLF_REPORT_MAX_BYTES` and `WOLF_SERIES_MAX_POINTS`. Now recorded in § "Executor orientation". | W9, W10, W11, W16, W21, X1 |
+| **R81** | **Wolf's `docker-compose.yml` was in no ownership table, and every config ticket must edit it.** A variable documented in `.env.example` and read by `config.ts` still never reaches the container unless an `environment:` entry names it — W1's own comment says so, and W7 added five. **Now added to § "Parallelism and file ownership" as a strictly-serial row in the same order as `config.ts`.** | W8, W9, W10, W11, W16, W21, X1 |
+| **R82** | **`docker compose config` prints interpolated secrets to stdout.** Running it in the Wolf worktree interpolated a real FRED API key into `wolf-api`'s environment block from the ambient shell — the value is not in the repo, it comes from the environment, which is exactly what makes this a disclosure rather than a leak. **No ticket's Validation may use that command verbatim once `WOLF_API_KEY`, `WOLF_MCP_TOKEN` or `FRED_API_KEY` are set**; grep for variable NAMES or pipe through a redactor. O8's and X1's Validation lists currently do use it verbatim. Now recorded in § "Executor orientation". | O8, X1, W1 (its topology Validation) |
+| **R83** | **nginx's `/mcp` SSE directives are now dead weight (informational).** W1's `wolf-web` nginx config carries `proxy_buffering off` and `proxy_read_timeout 3600s` on `/mcp` "because Streamable HTTP's server-to-client leg is an SSE stream on `GET /mcp`". W7's server is stateless with `enableJsonResponse` and `GET /mcp` returns 405, so no SSE stream exists there. Harmless, but the comment is wrong — and session containers reach `/mcp` directly at the DinD gateway, never through nginx at all. | W1 (comment), W21 |
+| **R84** | **`go/httpapi` has a cross-test isolation flake that only surfaces under heavy load.** During wave 3's gates, O4's whole-module `go test ./...` failed `TestCreateSessionWithWorkerAttachesIdentityAndPrompt` with `session.worker = ""`, immediately preceded by `httpapi: session s-race was deleted while it was being created; create aborted`. `s-race` belongs to `session_orphan_test.go`, a deliberate concurrent create-vs-delete test; its goroutine outlives the test and mutates the shared memstore the next test is using. **Not caused by any wave-2 or wave-3 ticket** — O4's diff touches only `cmd/agentd/datasettoken*.go` and `extension/devclaims/*`, and the same test passes 3/3 in the full `httpapi` package on the O4 branch, 30/30 on `main`, and cleanly under `-race`. It reproduced only when two whole-module runs were executed in parallel, which the orchestrator was doing. **Consequence for future waves: do not run two `go test ./...` invocations concurrently**, and treat a lone `httpapi` failure naming `s-race` as this flake rather than as a ticket defect. The real fix — making `session_orphan_test.go` wait for its goroutine, or giving it its own store — belongs to whichever ticket next edits that file. | O4 (cleared), any wave running parallel Go gates |
