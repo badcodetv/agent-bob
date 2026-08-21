@@ -354,6 +354,13 @@ func main() {
 		MemoryEmbedder: func(ctx context.Context, text string) []float32 {
 			return embedding.EmbedOrDegrade(ctx, embedder, text)
 		},
+		// The dataset BYTE plane (O5). Config.Datasets fills itself from
+		// AgentDB like every other metadata store; this one cannot, because
+		// agentdb can never reach a blob store (extension imports agentdb) and
+		// httpapi must not import extension. So the process-wide BlobStore —
+		// the same one artifacts and snapshots use — is handed over here, as
+		// the single-method reader httpapi declares.
+		DatasetBlobs: blobs,
 	})
 	must(err)
 
