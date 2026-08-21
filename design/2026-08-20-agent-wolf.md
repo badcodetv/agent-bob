@@ -114,6 +114,29 @@ both.
 5. **`go build ./...` stays green and changes come with tests**, following the existing
    table-test patterns.
 
+### The Validation rule — the one that cost us the most
+
+> **A ticket's Validation commands must be capable of exercising every acceptance criterion it
+> states.** If a criterion describes runtime behaviour, a command that only compiles or typechecks
+> does not gate it.
+
+Wave 1 proved this twice and the executability audit found it in eight more tickets. O1's only
+Validation was `go build && go vet`, while its first criterion was "the migration applies cleanly
+on a fresh database and is idempotent on re-run" — a claim neither command can execute. W1's only
+topology Validation was `docker compose config`, which is how an nginx bug that broke every route
+survived the first verification pass.
+
+Three specific traps, each of which has already bitten:
+
+1. **Go live-Postgres cases SKIP silently** without `AGENTKIT_TEST_POSTGRES_URL`. A green run
+   without it proves nothing. Every such ticket's Validation ends with a `-v` run and the
+   instruction to confirm **zero `--- SKIP` lines**.
+2. **`go test -run` patterns are unanchored substrings.** `-run 'TestGC'` does not match
+   `TestResolveGCConfig`; `-run 'TestMemor'` does not match `TestListMemories_*`. Where a ticket
+   filters by name, its Scope pins the test-name prefix so the filter and the code agree.
+3. **`yarn test <path>` matches nothing outside the vitest `include` glob.** `api/vitest.config.ts`
+   includes `src/**` only, so `yarn test scripts/bootstrap-project` runs zero files and exits 0.
+
 ### Commands
 
 ```sh
@@ -232,6 +255,11 @@ These are named here, once, so that fourteen tickets do not each pick differentl
 | Dates | **native `Date` + explicit UTC helpers** | No moment, no dayjs — the units are the bug surface, keep them visible |
 | Validation | **zod** | Spec and condition schemas, and every route body |
 | Logging | **`pino`**, JSON to stdout | One line per request; never log a credential or a `download_url` |
+| HTML sanitisation | **`isomorphic-dompurify` 2.x** | One sanitiser in the tree, server-side only. Pulls `jsdom` into `api/`. No `sanitize-html`, no `xss`, no hand-rolled tag regex |
+| Router (`web/`) | **React Router 7** | The leaner of the two options; needed before a second page can be registered |
+| Sessions (`api/`) | **A signed `HttpOnly` cookie** via `cookie-parser`'s built-in signing | Wolf holds no server-side session state, so a session-store library would be machinery for nothing. `SameSite=Lax`; `Secure` outside development |
+| Component tests (`web/`) | **`@testing-library/react` 16.x** + `@testing-library/jest-dom` | `web/` ships only `vitest` + `jsdom`; the sandbox-attribute assertion cannot be written without this |
+| Market data (macro) | **FRED keyed JSON API**, `FRED_API_KEY` | The keyed API is the only path with a search endpoint, which `series_search` requires. The key is free and instant from the St. Louis Fed |
 
 ### Shared error taxonomy
 
@@ -264,6 +292,12 @@ poller retry a crashing endpoint on every tick forever (owner decision 2026-08-2
 stack trace or a credential in a thrown error must not reach a response body. Log the real error
 server-side with `pino`; return a fixed string and, where one exists, a correlation id.
 
+**Orange refusing a session because its host port pool is exhausted maps to `unavailable`**, and
+here the retryable semantics are correct rather than a bug: deleting a finished session frees a
+port, so the condition genuinely clears. Surface Orange's message verbatim — "host port pool is
+exhausted" is operational and actionable, and flattening it into "could not create" throws away the
+only useful part.
+
 ### Parallelism and file ownership
 
 Tickets that touch the same file **must not run concurrently**, whatever the dependency graph
@@ -277,9 +311,31 @@ allows:
 | `go/httpapi/memories.go` | O7, O11 | Strictly serial |
 | `go/cmd/agentd/main.go` | O6b, O8 | Strictly serial |
 | `api/src/routes/hypotheses.ts` | W8, W9 | Strictly serial |
-| `api/src/hypothesis/store.ts` | W5, W10 | Strictly serial |
+| `api/src/hypothesis/store.ts` | W5, W10, W15, W22 | Strictly serial in that order |
+| `go/cmd/agentd/auth.go`, `auth_test.go` | O5 only | O5 owns the middleware change; no other ticket may touch it |
+| `go/agentdb/memories.go` | O7, O11 | Strictly serial |
+| `api/src/orange/client.ts` | W2, W15 | Strictly serial; W2's route list is exhaustive and closed |
+| `api/src/config.ts`, `.env.example` | W1, W6, W7, W8, W9, W10, W11, W12, W16, W21, X1 | **Strictly serial in dependency order.** Each ticket adds only the variables its own criteria name, and documents each in `.env.example` with a comment |
+| `api/src/app.ts` | W1, W7, W8, W11, W21 | Strictly serial; every router is mounted here, by the ticket that creates it |
+
+⚠️ **An earlier revision restricted `config.ts` and `.env.example` to three tickets and forbade
+everything else from touching them. That was wrong and it blocked eight tickets** — W6 needs
+`FRED_API_KEY`, W8 needs the allowlist and session secret, W9/W10/W11 need their durations, and
+none of the three owners lands before them. A ticket adds the variables its own criteria require;
+the serial rule prevents the collision, not an ownership monopoly. Every duration variable ends in
+`_SECONDS` and holds a plain integer count of seconds — `WOLF_POLL_INTERVAL_SECONDS`, not
+`WOLF_POLL_INTERVAL`, because "5m" in a variable whose unit is unstated is exactly the ambiguity
+§ Vocabulary exists to prevent.
+| `api/src/routes/hypotheses.ts` | W8, W9, W22 | Strictly serial |
+| `api/src/report/*` | W16–W20 | See the report-layer sub-graph |
+| `web/package.json` | W23, W24 | Strictly serial |
+| `web/src/App.tsx` | W13, W24 | Strictly serial |
 
 Safe to run fully in parallel: **O1 ‖ O7 ‖ W1**, then **O4 ‖ W3 ‖ W6** once their deps land.
+
+⚠️ **Parallel branches inherit each other.** `O7-memory-append-route` was cut while O1 was in
+flight and therefore contains O1's commit as well as its own. Branch each ticket from `main`, and
+when merging, merge in dependency order.
 
 ### Git conventions
 
@@ -299,6 +355,13 @@ to `main` directly.
 | **Dataset** | **New in this plan.** An append-only, labelled, project-scoped, *versioned blob*. |
 | **Delivery** | One dispatched job: the record that a worker was woken. |
 | **Tick** | One firing of a hypothesis's daily schedule. |
+| **Hypothesis id** | The **bare** 8-hex id, e.g. `1a2b3c4d`. It is *not* prefixed. |
+| **Session name** | `hyp-<id>`, e.g. `hyp-1a2b3c4d`. The prefix is added exactly once, here. |
+
+⚠️ **Do not double the prefix.** An earlier draft had W5 generating ids *as* `hyp-<8 hex>` while W8
+created sessions named `hyp-<id>` — producing `hyp-hyp-1a2b3c4d`, under which the trust rule's
+"`name` matches an existing `hyp-<id>` session" clause never matches and every hypothesis reads as
+untrusted. Ids are bare; the prefix belongs to the session name and to nothing else.
 
 ---
 
@@ -401,10 +464,21 @@ topology can seed a `kind=hypothesis` label — the one that seeds memory uses f
 `{kind:registry, name:label-registry}` labels and the request body cannot supply its own — so
 there is no live forgery path. But the invariant Wolf relies on is therefore:
 
-> **A memory is trusted iff its provenance is empty AND its labels are one of the five kinds in
-> Wolf's own vocabulary AND `name` matches an existing `hyp-<id>` session.** The last clause is
-> the one that cannot be forged from inside a container: creating a named session requires an API
-> key or a console JWT.
+> **A memory is trusted iff its provenance is empty AND its kind is in `TRUSTED_KINDS` AND `name`
+> matches an existing `hyp-<id>` session.** The last clause is the one that cannot be forged from
+> inside a container: creating a named session requires an API key or a console JWT.
+
+`TRUSTED_KINDS` is **enumerated, never counted**: `hypothesis`, `hypothesis-spec`, `verdict`,
+`evaluation`, `report-template`. *(An earlier draft said "the five kinds" while the vocabulary
+listed six — `evaluation` was added by R29 and the numeral never updated. An executor enumerating
+five would make every memory the poller writes untrusted, the board would silently show no
+`support_score`, and no test in either ticket would fail. Do not reintroduce a count.)*
+
+⚠️ **Empty provenance is not sufficient for `report` either — labels are caller-chosen.** A
+researcher session for hypothesis A can append `kind=report, name=<B>` and own hypothesis B's
+headline and panel. Every `report`, `report-candidate` and `report-amendment` read is checked
+against the writing worker or session belonging to *that* hypothesis, and a mismatch is
+`Tamper{reason: "cross_hypothesis_write"}`.
 
 Note also that an **embed token is API-class** and its `scope` claim is enforced only on
 session-by-id routes (hazard H1), so it is not confined on `POST /agent/topologies/apply`. Wolf
@@ -581,6 +655,34 @@ cause. Therefore:
 | `invalidated` | Terminal. The thesis failed | Wolf, human-initiated only |
 | `archived` | Retired without a verdict | Wolf, human-initiated only |
 
+#### The legal transitions, enumerated (owner decision B3)
+
+W5's criterion is "an exhaustive table over all ordered state pairs", which needs a legal set to be
+exhaustive *against*. This is it. Everything not listed is illegal and throws a typed error naming
+both states.
+
+| From | To | Trigger |
+| --- | --- | --- |
+| `draft` | `live` | Human go-live, after the spec validates and a report template is accepted |
+| `draft` | `archived` | Human retires an un-launched hypothesis |
+| `live` | `challenged` | The poller: a condition tripped, or `horizon_days` elapsed |
+| `live` | `archived` | Human retires |
+| `challenged` | `confirmed` | Human verdict, with a rationale |
+| `challenged` | `invalidated` | Human verdict, with a rationale |
+| **`challenged`** | **`live`** | **Human accepts a spec amendment.** Without this edge every amended hypothesis is stuck at `challenged` forever while its research keeps running — there would be no route back to normal operation, which would make amendment pointless |
+| `challenged` | `archived` | Human retires |
+
+`confirmed`, `invalidated` and `archived` are **terminal**: no edge leaves them. A hypothesis that
+needs to run again is a new one, carrying `restated_from`.
+
+**A transition from a state to itself is a no-op, not an error.** It returns success and appends
+nothing. This is what makes W10's idempotence criterion mean something: the poller re-asserts the
+state it computed on every tick, and a poller forced to read-then-write under the mutex to avoid
+throwing is more code at exactly the place concurrency bugs live.
+
+*(The ASCII diagram above draws the amendment edge ambiguously — it appears to point at
+`invalidated`. This table is authoritative; the diagram is a sketch.)*
+
 **Transitions are serialised per hypothesis inside wolf-api** (an in-process async mutex keyed by
 hypothesis id), and the current state is re-read from Orange *inside* the critical section. There
 is no compare-and-swap on memories, so two concurrent writers would otherwise both append and the
@@ -715,6 +817,15 @@ window_end, observations_in_window, evaluated_at }`.
 never trips anything; three consecutive evaluations at `indeterminate` for the same condition
 raise a human-attention flag on the hypothesis instead (a scoreboard nobody can compute is a
 problem to surface, not to ignore).
+
+#### Every condition result carries a `reason`
+
+The per-condition shape the evaluator emits includes `reason`, and W14 renders it. The closed
+vocabulary is `condition_tripped`, `insufficient_coverage`, `non_positive_reference`,
+`stale_data`, `no_ratio_pair` — the last added because a `ratio_to` condition whose every
+observation skips for want of a partner point otherwise has **no defined outcome**, and W4 mandates
+a fixture for exactly that case. Timestamp fields on that shape are `window_start_ms`,
+`window_end_ms` and `evaluated_at_ms`.
 
 ### The support score — what `weight` is for
 
@@ -897,9 +1008,73 @@ func (s *Store) CurrentDataset(ctx context.Context, project, name string) (*Data
 func (s *Store) GetDatasetVersion(ctx context.Context, project, name string, version int) (*Dataset, error)
 func (s *Store) ListDatasets(ctx context.Context, project, selector string, limit int) ([]*Dataset, error)
 func (s *Store) ListDatasetVersions(ctx context.Context, project, name string, limit int) ([]*Dataset, error)
-func (s *Store) ReapDatasetVersions(ctx context.Context, keepPerName int) (deleted int, err error)
-func (s *Store) ListOrphanBlobPaths(ctx context.Context, knownPrefix string) ([]string, error)
+// The blob seams. agentdb CANNOT import extension — extension.go:12 imports agentdb, so the
+// reverse is an import cycle. These two single-method interfaces are declared IN agentdb and
+// satisfied by whatever the host wires in cmd/agentd.
+type DatasetBlobDeleter interface{ Delete(ctx context.Context, key string) error }
+type DatasetBlobLister  interface{ List(ctx context.Context, prefix string) ([]string, error) }
+
+func (s *Store) ReapDatasetVersions(ctx context.Context, keepPerName int, blobs DatasetBlobDeleter) (deleted int, err error)
+
+// Returns blob keys under DatasetBlobPrefix that NO dataset row references — the orphans
+// themselves, not the known set. Skips blobs younger than minAge so a write in flight is
+// never swept.
+func (s *Store) ListOrphanBlobPaths(ctx context.Context, blobs DatasetBlobLister, minAge time.Duration) ([]string, error)
 ```
+
+#### The blob namespace — one constant, stated once
+
+```go
+// agentdb/datasets.go
+const DatasetBlobPrefix = "_datasets/bytes/"     // then a uuid4 per WRITE ATTEMPT
+```
+
+🔴 **This constant is load-bearing for data safety.** `agentd` runs **one global `BlobStore`**,
+shared with `_artifacts/bytes/` and with snapshots. An orphan sweep that enumerates with an empty or
+wrong prefix would return every artifact and snapshot blob in the project and delete them. O3's
+lister therefore re-asserts the prefix immediately before every `Delete`, and O8's sweep does too —
+belt and braces, deliberately.
+
+⚠️ **`BlobStore` has no `Put`.** The interface is `Write` / `Read` / `Exists` / `Delete` / `List`.
+An earlier draft cited `Put` in O6a; it does not exist.
+
+#### The canonical dataset CSV — every writer and reader agrees on this
+
+```
+timestamp,value
+2026-08-19T00:00:00Z,141.22
+2026-08-20T00:00:00Z,143.90
+```
+
+Header exactly `timestamp,value`. RFC3339 in **UTC**, ascending by timestamp, `LF` line endings,
+one metric per dataset, no trailing blank line. `series_fetch`'s output is normalised into this
+before `dataset_put` is called.
+
+Nothing enforced this before, and the failure is silent: a `t,value` header makes the poller read
+zero observations from a legitimately written dataset, and no error surfaces anywhere.
+
+**`row_count` is `max(0, N-1)` where N is the number of LF-terminated lines.** Header-only is `0`,
+empty is `0`, a file with no trailing newline still counts its last line. Never `-1`: the column is
+`NOT NULL DEFAULT 0` and the 50% shrink guard divides by it.
+
+### Dataset metadata JSON — pinned, because six tickets read it (A4)
+
+An earlier draft elided this as `…metadata…`. O5 ships first and picks; O6b, W2, W10, W11 and X1
+are all written against a choice recorded nowhere. Pinned:
+
+```json
+{ "id": "ds-…", "name": "1a2b3c4d-drone-suppliers-basket", "version": 7,
+  "labels": {"hypothesis": "1a2b3c4d", "metric": "drone-suppliers-basket"},
+  "size_bytes": 40213, "row_count": 512, "sha256": "…", "content_type": "text/csv",
+  "created_by_worker": "", "created_by_session": "", "created_at": 1789000000123 }
+```
+
+`created_at` is unix **milliseconds**. **`blob_path` and `project` are never serialised** — the
+first is an internal storage key, the second is already the caller's credential.
+
+Envelopes, also pinned: the list route returns `{"datasets":[…]}`; the single-name route returns
+the **bare object**; the versions route returns `{"versions":[…]}`, newest first. O6b's
+`dataset_list` output uses byte-identical field names for the ten fields they share.
 
 ### Dataset HTTP routes (O5)
 
@@ -1003,10 +1178,25 @@ POST   /api/hypotheses/:id/go-live          → 200 | 422 { errors: [{path, mess
 POST   /api/hypotheses/:id/amend            { amendment_id, decision, rationale }
 POST   /api/hypotheses/:id/verdict          { verdict, rationale }
 POST   /api/hypotheses/:id/retire           { rationale }
-GET    /api/hypotheses/:id/embed-token      → { token, expires_at }
-GET    /api/hypotheses/:id/series/:metric   → { points:[{t,v}], unit, version, fetched_at }
-POST   /mcp                                 → market-data MCP (WOLF_MCP_TOKEN)
+GET    /api/hypotheses/:id/embed-token      → { token, expires_at_sec }
+GET    /api/hypotheses/:id/series/:metric   → { points:[{tMs,v}], unit, version, fetched_at_ms,
+                                                state }
+GET    /api/hypotheses/:id/report/frame     → text/html, the sandboxed report document
+POST   /api/hypotheses/:id/report-template  { html } → 201 { structure_hash } | 409 | 422
+POST   /api/hypotheses/:id/report-amendment { amendment_id, decision, rationale }
+POST   /mcp                                 → market-data MCP (X-Wolf-Mcp-Token)
+POST   /api/auth/dev-login                  { email } → session cookie. Mounted ONLY when
+                                              WOLF_TEST_LOGIN is set; see owner decision B6
 ```
+
+Units in these routes follow § "Shared shapes": `expires_at_sec` is unix **seconds** because that
+is what Orange returns, and `tMs`/`fetched_at_ms` are unix **milliseconds**. An earlier draft wrote
+`expires_at` and `{t,v}`, which is the exact ambiguity that would give W13 a token that either
+never refreshes or refreshes instantly.
+
+`GET /api/hypotheses/:id` additionally returns `spec_validation: { valid, errors[] }` — W13's Go
+Live button needs the blocking reasons *before* the click, and the only other validator output is
+W9's 422 *after* it.
 
 ### Spec JSON (W3)
 
@@ -1028,6 +1218,11 @@ POST   /mcp                                 → market-data MCP (WOLF_MCP_TOKEN)
 }
 ```
 
+⚠️ **The block above is illustrative, not a fixture.** Its `invalidation` value is a comment, so it
+is not parseable JSON, and an empty `invalidation` array would violate the rules below in any case.
+W3 ships a real, rule-satisfying worked example as a committed fixture and asserts it validates —
+a verifier copying the block above verbatim would fail the ticket through no fault of its own.
+
 **Validation rules (all of them, W3):** at least one metric; every metric slug unique, label-legal
 and ≤ `63 − len("hyp-") − 8 − 1 = 50` characters; weights sum to `1.0 ± 0.001`; each weight in
 `(0, 1]`; `horizon_days` in `[7, 3650]`; `flat_band_pct` in `[0, 50]`; a non-`derived` metric has
@@ -1040,6 +1235,60 @@ present iff `reference == "trailing_n_days"` and then in `[2, 365]`; `sustained_
 `staleness_days` (spec level, default `5`) in `[1, 90]`.
 Errors are returned **all at once**, each with its JSON path.
 
+### Shared shapes that four or more tickets must agree on (A6, A7)
+
+Each of these was used by several tickets and defined by none. They are pinned here, once.
+
+```ts
+// The unit lives in the NAME. This is the plan's own rule and it was broken in six places.
+type UnixMs  = number;   // memories, datasets, evaluations, reports
+type UnixSec = number;   // Orange sessions, embed-token expiry
+
+interface Point { tMs: UnixMs; v: number }        // W4, W11, W14, and the report frame
+
+// W4 produces this whole object; W8, W10, W11 and W14 all read it.
+// W14 needs per-metric direction, realised change and staleness, which no earlier
+// draft produced — W14 was literally unbuildable without this.
+interface EvaluationResult {
+  evaluated_at_ms: UnixMs;
+  support_score: number;                 // −1 … +1
+  conditions: ConditionResult[];
+  metrics: {
+    slug: string;
+    direction: "up" | "down";            // expected, from the spec
+    realised_change_pct: number | null;   // null when indeterminate
+    last_observation_ms: UnixMs | null;
+    stale: boolean;
+    stale_reason: string | null;
+  }[];
+}
+
+// W5 writes it; W8, W13, W14 and X1 read it. A bare string cannot distinguish a
+// forged row from a hostile retraction, and X1 asserts on both attacks separately.
+interface Tamper {
+  reason: "forged_row" | "hostile_retraction" | "cross_hypothesis_write";
+  written_by_worker: string;             // "" if a session wrote it
+  written_by_session: string;            // "" if a worker wrote it
+  memory_id: string;
+}
+```
+
+**Embed-token expiry is `expires_at_sec`.** Orange returns unix **seconds**; W13 computes a T-120s
+refresh. Mixing the units gives a token that either never refreshes or refreshes instantly, and
+neither ticket's own test would catch it.
+
+#### The MCP server name and its auth header
+
+Server name is **`wolf`**, so tools are `mcp__wolf__series_fetch` and friends — the researcher
+prompt, X1's mock-model script and W7 must all use that exact form.
+
+The header is **`X-Wolf-Mcp-Token`**, carrying the **bare token** with no scheme.
+
+⚠️ **`Authorization: Bearer ${WOLF_MCP_TOKEN}` cannot work.** Orange rejects partial interpolation
+of MCP header values (`go/agentdb/sessions.go:79-90`) — a header value is either a whole `${VAR}`
+reference or a literal, never a mix. W7 would build a `Bearer` header, W12 could only send a raw
+value, both tickets' tests would pass, and X1 would fail with a 401 raised inside a container.
+
 ### Memory kinds (the Wolf vocabulary, all in the `wolf` Orange project)
 
 | Kind | Labels | Content | Trusted |
@@ -1048,8 +1297,18 @@ Errors are returned **all at once**, each with its JSON path.
 | `hypothesis-spec` | `kind=hypothesis-spec, name=<id>, status=locked` | The spec JSON | **Yes** |
 | `verdict` | `kind=verdict, name=<id>, status=confirmed\|invalidated` | Rationale, deciding user, evaluation snapshot | **Yes** |
 | `evaluation` | `kind=evaluation, name=<id>` | **Line 1 is the summary line** (see § "Where the board's numbers come from"), then the full evaluation snapshot as JSON | **Yes** |
+| `report-template` | `kind=report-template, name=<id>, status=locked` | Line 1 is `structureHash`; then the template HTML fragment | **Yes** |
 | `research-note` | `kind=research-note, name=<id>` | Daily prose + per-metric reads | No |
 | `spec-amendment` | `kind=spec-amendment, name=<id>, status=proposed` | Proposed change + rationale | No |
+| `hypothesis-spec-candidate` | `kind=hypothesis-spec-candidate, name=<id>` | Line 1 is a summary; then the proposed spec JSON | No |
+| `report-candidate` | `kind=report-candidate, name=<id>` | Line 1 is a summary; then the proposed template HTML | No |
+| `report` | `kind=report, name=<id>` | Line 1 is the headline (≤400 characters); then `{slotId: html}` as JSON | No |
+| `report-amendment` | `kind=report-amendment, name=<id>, status=proposed` | Line 1 is a rationale; then the proposed template HTML | No |
+
+**The two candidate kinds are the transport across the container boundary.** An interview runs
+inside a container and its proposed spec and proposed report have to reach the human who approves
+them. Nothing in an earlier draft carried them, which left W8, W9, W12 and W13 incoherent. Both are
+untrusted by construction; approval is what makes the trusted twin.
 
 Line 1 as the title is not stylistic: `GET /agent/memories` returns a **500-byte snippet** and no
 `content` field, so the board must render from snippets alone or pay a read per hypothesis.
@@ -1123,49 +1382,171 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **Scope:** `CreateDatasetVersion`, `CurrentDataset`, `GetDatasetVersion`. The whole difficulty
   is that the next version number and the CAS check must be decided inside **one transaction**,
   or two concurrent writers both produce version N+1.
+  **Test names are pinned, so the Validation filter and the code cannot drift.** Every test this
+  ticket adds is named `TestDataset…`, and every test that needs a real Postgres is named
+  `TestDatasetLivePG_…`. `agentdb` already carries four incompatible live-test naming shapes
+  (`TestLivePG_MigrationsApplyAndAreIdempotent`, `TestConfigEvents_LivePG_Migration026`,
+  `TestWorkersLivePG_SchemaDefaults`, `TestMemoriesLiveCreateAndGet`); adopting any of them makes
+  `-run 'TestDataset'` match nothing, so the run prints `ok` while this ticket's central
+  criterion never executes.
+  **The split between the two test files is dictated by the dialect, not by taste.** `agentdb`'s
+  unit stores are sqlite (`go/agentdb/artifacts_test.go:15`) and the dataset write path uses
+  `?::jsonb` casts, so `datasets_test.go` holds only what runs without SQL — argument validation,
+  the error values, `ErrDatasetVersionConflict.Error()` — and `datasets_live_test.go` holds
+  everything that touches the table.
+  Reuse `isUniqueViolation` (`go/agentdb/customimages.go:418`) rather than matching driver strings
+  a second time; `nextCustomImageVersion` (`go/agentdb/customimages.go:405-414`) is the
+  high-water-mark precedent to follow.
+  **Do not declare `DatasetBlobPrefix`, `DatasetBlobDeleter` or `DatasetBlobLister` here** — O3
+  owns all three, and adding them now guarantees a conflict in the one file three tickets share.
+  R34 applies: Interfaces SQL means "these columns, types, defaults and constraints", not a
+  byte-for-byte transcription.
 - **Repo:** agent-orange
 - **Files:** modify `go/agentdb/datasets.go`; create `go/agentdb/datasets_test.go`,
   `go/agentdb/datasets_live_test.go`.
 - **Acceptance criteria:**
-  - `CreateDatasetVersion(ctx, d, ifVersion)` returns `ErrDatasetVersionConflict{Current: n}`
-    when `ifVersion != n`.
-  - `ifVersion == 0` succeeds only when the name does not exist in that project.
-  - Versions are strictly monotonic per `(project, name)` with no gaps.
+  - `CreateDatasetVersion(ctx, d, ifVersion)` returns `ErrDatasetVersionConflict{Current: n}` — a
+    **value**, not a pointer, because O1 gave `Error()` a value receiver — whenever `ifVersion`
+    differs from the current version `n`, where `n == 0` means the name does not exist in that
+    project.
+  - `ifVersion == 0` succeeds only when `(project, name)` has no row. `ifVersion < 0` is an
+    argument error, never a conflict.
+  - Versions start at 1, are strictly monotonic per `(project, name)` and have no gaps: the row
+    written at `ifVersion == n` carries `version == n+1`.
   - **Two concurrent writers at the same `ifVersion`: exactly one succeeds.** Asserted with real
-    goroutines against real Postgres, not mocked.
-  - The unique index on `(project, name, version)` is the backstop; the test asserts a conflict
-    surfaces as `ErrDatasetVersionConflict`, never as a raw driver error.
-  - Reads and writes filter on `project` first, in code, always.
-  - `row_count` is stored as given by the caller (agentd counts it; the store does not parse CSV).
+    goroutines against real Postgres, never mocked. The loser's error is found by `errors.As` as
+    an `ErrDatasetVersionConflict`, and afterwards exactly one row exists at that version.
+  - The unique index on `(project, name, version)` is the backstop. A violation surfaces as
+    `ErrDatasetVersionConflict` carrying the re-read current version, never as a raw driver error
+    and never as a bare "duplicate key" string.
+  - Reads and writes bind `project` first, in code, always. `CurrentDataset` and
+    `GetDatasetVersion` answer `ErrDatasetNotFound` for a name that exists only in another
+    project — the same answer as absent, so neither is an existence oracle (the posture
+    `go/httpapi/memories.go`'s `memoryNotFound` states for memories).
+  - `row_count` is stored exactly as the caller supplied it: the store never parses CSV, agentd
+    counts it (O6a). A negative `RowCount` is rejected as an argument error, because the column is
+    `NOT NULL DEFAULT 0` and O6b's 50% shrink guard divides by it.
+  - The store fills three fields when, and only when, the caller left them zero: `ID` becomes
+    `"ds-" + uuid4` (the form § "Dataset metadata JSON" shows, and the one O5 and W2 will read),
+    `CreatedAt` becomes `time.Now().UnixMilli()`, `ContentType` becomes `text/csv`.
+  - Rejected before any database round-trip, each with its own row in the table test: empty
+    `Project`; a name that fails `ValidateDatasetName` (O1); labels that fail `ValidateLabels`;
+    empty `SHA256`; empty `BlobPath`; negative `SizeBytes`; negative `RowCount`; `ifVersion < 0`.
+  - **Argument validation runs before the dialect check**, which is why that table test can drive
+    the sqlite unit store. `CreateMemory` checks the dialect first (`go/agentdb/memories.go:142`);
+    datasets deliberately do not, because "this dataset name is illegal" is a more useful answer
+    than "this deployment is not Postgres", and because it is what makes the rejection cases
+    provable without a live instance. Past validation, every method here guards the dialect and
+    returns a new **`ErrDatasetRequiresPostgres`** sentinel — declared by O2 and reused by O3 and
+    O5 — modelled on `requirePostgres` (`go/agentdb/memories.go:576-581`). It is a dataset
+    sentinel and not the memory one, so a 501 raised on a dataset route does not blame memories.
+  - **No config event is written, and none is expected** — a dataset is data, not configuration.
+    No method added here may contain one of `configEntityNouns`
+    (`Worker Project Setting Prompt Subscription Schedule Image Skill Config Topology`,
+    `go/agentdb/config_events_test.go:565-568`), or `TestMutationsAreLogged` demands a
+    registration that must not exist.
 - **TDD:** yes.
-- **Validation** — **both are required**, because the store is Postgres-only (jsonb + GIN) and the
-  sqlite path can prove nothing about CAS:
+- **Validation** — start the throwaway instance first (§ "The throwaway Postgres"), export
+  `AGENTKIT_TEST_POSTGRES_URL`, and run all five. The store is Postgres-only (jsonb + a unique
+  index under concurrency), so the sqlite path can prove nothing about CAS:
   - `cd go && go build ./... && go vet ./...`
-  - `AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test ./agentdb/... -run 'TestDataset' -count=1`
+  - `cd go && go test ./agentdb/... -run 'TestDataset' -count=1`
+  - `cd go && go test ./agentdb/... -run 'TestDatasetLivePG' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'`
+    — must print **at least five `--- PASS`** and **zero `--- SKIP`**. A `SKIP` means the URL did
+    not reach the test and the concurrency criterion is unproven; *no output at all* means the
+    name filter matched nothing, which is the same failure wearing a different hat.
+  - `cd go && go test ./agentdb/... -count=1` — the whole package, URL still exported, to prove
+    nothing that already worked broke.
+  - `cd go && go test ./agentdb/... -run 'TestMutationsAreLogged' -count=1 -v | grep -E '^--- (PASS|FAIL)'`
+    — one `--- PASS`. It lives in `go/agentdb/config_events_test.go`, not in `cmd/agentd`.
 - **Depends on:** O1
 - [ ] done
 - Notes:
 
 ### O3: Listing, version history, reaper and orphan sweep   [Status: pending | Model: sonnet]
-- **Scope:** `ListDatasets`, `ListDatasetVersions`, `ReapDatasetVersions`,
-  `ListOrphanBlobPaths`. Retention is an **env knob only** — do NOT add a project setting;
-  `ProjectSettings` is a typed struct whose columns require their own migration and console
-  surface, and that is a separate feature.
+- **Scope:** `ListDatasets`, `ListDatasetVersions`, `ReapDatasetVersions`, `ListOrphanBlobPaths`,
+  plus the three declarations the byte plane needs: `DatasetBlobPrefix`, `DatasetBlobDeleter` and
+  `DatasetBlobLister`. O3 owns all three; O2 was told not to add them, and O6a/O8 reference O3's.
+  **`agentdb` MUST NOT import `extension`** — `go/extension/extension.go:12` imports `agentdb`,
+  so the reverse is a compile-time cycle. That is why the two blob seams are single-method
+  interfaces declared here; `extension.BlobStore` satisfies both structurally and agentd passes
+  one in.
+  Retention is an **env knob only** — do NOT add a project setting; `ProjectSettings` is a typed
+  struct whose columns need their own migration and console surface, and that is a separate
+  feature.
+  Test names follow O2's rule exactly: `TestDataset…`, and `TestDatasetLivePG_…` for anything
+  needing a real Postgres. Every method here except the reaper's row deletion touches jsonb or a
+  selector, so nearly all of this ticket's coverage lives in `datasets_live_test.go`.
 - **Repo:** agent-orange
 - **Files:** modify `go/agentdb/datasets.go`, `go/agentdb/datasets_test.go`,
   `go/agentdb/datasets_live_test.go`.
 - **Acceptance criteria:**
-  - `ListDatasets` reuses the existing selector parser. No second parser.
-  - Listing returns one row per name — the current version — not every version.
-  - The reaper **never** deletes the current version, whatever the retention number, including
-    `keepPerName <= 0` which is treated as "keep everything" and logged.
-  - The reaper deletes the blob **before** the row; a blob-delete failure leaves the row intact so
-    the next sweep retries. `BlobStore.Delete` exists (`go/extension/extension.go`); no new seam.
-  - `ListOrphanBlobPaths` returns blob paths under the dataset prefix with no matching row — the
-    cleanup path for a crash between blob write and row insert (see O6a/O6b).
+  - The three declarations exist in `go/agentdb/datasets.go`, exactly as § "The blob namespace"
+    and § "Go store signatures" pin them — `const DatasetBlobPrefix = "_datasets/bytes/"`, and the
+    two single-method blob seams `DatasetBlobDeleter` (`Delete(ctx, key string) error`) and
+    `DatasetBlobLister` (`List(ctx, prefix string) ([]string, error)`), both taking a
+    `context.Context` first. A comment states why the prefix is load-bearing: agentd runs **one
+    global `BlobStore`** (`go/cmd/agentd/backends.go:59-76` returns `Global("")`) shared with
+    `_artifacts/bytes/` and with snapshots, so an empty or wrong prefix enumerates every artifact
+    and snapshot blob in the deployment for deletion.
+  - `ListDatasets` reuses `LabelSelectorSQL` (`go/agentdb/labels.go:437`). No second parser. On a
+    non-Postgres dialect it returns O2's `ErrDatasetRequiresPostgres` — never a silently empty
+    result, which is how a caller reads "no datasets match" out of "this deployment cannot
+    answer". Do not declare a second sentinel; O2 owns that one.
+  - `ListDatasets` returns **at most one row per `(project, name)` — always the highest
+    `version`** — and the selector is evaluated against **that row's labels only**, never against
+    a superseded version's. Labels are per-version, so this is the case that separates three
+    plausible implementations and it is a required test: name `d` with v1 labelled `hyp=h1` and
+    v2 unlabelled is **not** returned by selector `hyp=h1`; relabelling at v3 brings it back.
+  - Both list methods clamp `limit` in the store, with the house numbers memories already use
+    (`defaultMemorySearchLimit`/`maxMemorySearchLimit`, `go/agentdb/memories.go:36-37`):
+    `limit <= 0` becomes 20, `limit > 100` becomes 100.
+  - `ListDatasets` orders `created_at DESC, name ASC`; `ListDatasetVersions` orders
+    `version DESC`. Both tiebreaks are asserted, because `created_at` is milliseconds and two
+    writes in the same millisecond must still come back in a stable order.
+  - `ListDatasetVersions` for a name with no rows in that project returns `ErrDatasetNotFound`,
+    not an empty slice — O5's versions route needs to answer 404 rather than "exists, but empty".
+  - The reaper **never** deletes the highest version of any name, whatever the retention number.
+    `keepPerName <= 0` deletes nothing and returns `(0, nil)`, meaning "keep everything"; the
+    store does not log it (agentdb has no logger — O8 logs at boot), and a criterion is that it
+    prints nothing.
+  - The reaper deletes the **blob before the row**. A `Delete` error leaves that row intact, stops
+    work on that name, and returns a non-nil error naming the blob path; the returned count is
+    what was actually deleted, so the next sweep retries the same version. There is a test with a
+    `DatasetBlobDeleter` whose `Delete` fails.
+  - A **nil** `DatasetBlobDeleter` is refused with an error, never treated as a row-only sweep.
+    Deleting rows without their blobs manufactures exactly the orphans `ListOrphanBlobPaths`
+    exists to clean up.
+  - Every path handed to `Delete` is re-checked against `DatasetBlobPrefix` immediately before the
+    call — belt and braces, deliberately. A row whose `blob_path` lacks the prefix is skipped and
+    counted as skipped, never deleted.
+  - `ListOrphanBlobPaths(ctx, blobs, minAge)` calls `blobs.List(ctx, DatasetBlobPrefix)`,
+    subtracts every `blob_path` present in the `datasets` table **for any project** (an orphan is
+    orphaned globally; filtering by project would propose deleting another project's live bytes),
+    re-asserts the prefix on each survivor, and returns the remainder. It returns an **empty,
+    non-nil slice** — never an error, never the *known* set, which is the exact inverse of the
+    name — when the lister returns nothing. Two tests: three keys under the prefix with rows for
+    two returns exactly the third; an `_artifacts/bytes/…` key in the lister's answer is never
+    returned.
+  - **`minAge` is accepted and does not filter, and the doc comment says so in one sentence.**
+    `DatasetBlobLister.List` returns keys and no timestamps, so blob age is not knowable inside
+    `agentdb`. The returned paths are therefore **candidates**: the "a pull in flight has written
+    bytes but not yet its row" guard belongs to O8's sweep, which must see a path unreferenced
+    across two passes at least `minAge` apart before deleting it. A test pins the inertness rather
+    than leaving it accidental — the same three-key fixture returns the same answer for
+    `minAge = 0` and `minAge = time.Hour`.
 - **TDD:** yes.
-- **Validation:**
-  `AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test ./agentdb/... -run 'TestDataset' -count=1`
+- **Validation** — start the throwaway instance first (§ "The throwaway Postgres"), export
+  `AGENTKIT_TEST_POSTGRES_URL`, and run all five:
+  - `cd go && go build ./... && go vet ./...`
+  - `cd go && go test ./agentdb/... -run 'TestDataset' -count=1`
+  - `cd go && go test ./agentdb/... -run 'TestDatasetLivePG' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'`
+    — must print **at least six `--- PASS`** and **zero `--- SKIP`**. A `SKIP` means the URL did
+    not reach the test; empty output means the filter matched nothing.
+  - `cd go && go test ./agentdb/... -count=1` — the whole package, URL still exported.
+  - `cd go && ! go list -deps ./agentdb | grep -q 'badcode-agent-orange/extension$'` — exits 0
+    only while `agentdb` is free of `extension`. `go build` would fail on the cycle too, but this
+    one says which rule was broken.
 - **Depends on:** O2
 - [ ] done
 - Notes:
@@ -1176,137 +1557,388 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `go/cmd/agentd/embedtoken.go`: same signing secret (`AGENTKIT_JWT_SECRET`), same
   deliberately-empty `sid` claim, same clamp-never-reject TTL treatment. Default 300s, clamped to
   `[60, 900]`.
+  **The scope value and its parser are siblings of `SessionScope`/`ParseSessionScope` and live
+  beside them in `go/extension/devclaims/devclaims.go`** — that file's comment at `:45-46` already
+  anticipates "a later kind of scope", and putting them anywhere else would either duplicate the
+  prefix string or strand it in `package main`, which `go/httpapi` cannot import. Only the mint
+  helper and the signature-and-expiry check live in `go/cmd/agentd/datasettoken.go`; O5 calls
+  `verifyDatasetToken` from agentd's middleware, never from `go/httpapi`, which stays free of JWT
+  code.
+  ⚠️ **§ "File Structure" still describes this file as minting `scope: "dataset:<id>"`. That row
+  is stale and must not be followed.** A dataset `id` is a per-**version** uuid, so pinning it
+  would break the Interfaces guarantee that "a URL minted before a tick still resolves to that
+  name's requested version after it" — the exact failure the pin exists to prevent.
+  Every test this ticket adds under `go/cmd/agentd` is named `TestDatasetToken…`; every test it
+  adds under `go/extension/devclaims` is named `TestDatasetScope…`. The Validation filters on
+  exactly those prefixes, and an unanchored `-run` that matches nothing still exits 0.
 - **Repo:** agent-orange
-- **Files:** create `go/cmd/agentd/datasettoken.go`, `go/cmd/agentd/datasettoken_test.go`.
+- **Files:** create `go/cmd/agentd/datasettoken.go`, `go/cmd/agentd/datasettoken_test.go`; modify
+  `go/extension/devclaims/devclaims.go`, `go/extension/devclaims/devclaims_test.go`.
 - **Acceptance criteria:**
-  - The `sid` claim is empty, with a comment citing the reasoning at `embedtoken.go:158-172`
-    (a non-empty `sid` would be a working core-MCP credential).
-  - The token pins `(project, name)`, **not** a version.
-  - `verifyDatasetToken` returns the pinned project and name; a token for `a` does not verify
-    against `b`; an expired token fails; a token signed with a different secret fails.
-  - TTL is clamped, never rejected.
-  - **These are unit-level claims about the mint/verify pair.** Route-level behaviour is O5's.
+  - `devclaims` gains, beside its session equivalents: `const datasetScopePrefix = "dataset:"`,
+    `func DatasetScope(project, name string) string`, and
+    `func ParseDatasetScope(scope string) (project, name string, ok bool)`.
+    `DatasetScope("wolf", "1a2b3c4d-drone-suppliers-basket")` is exactly
+    `"dataset:wolf/1a2b3c4d-drone-suppliers-basket"` — asserted as a literal string, because O5
+    verifies what O6b mints and a whitespace or separator drift between them is invisible until
+    an agent's `curl` 401s inside a container.
+  - **The two scope families can never be confused, asserted both ways:** `ParseDatasetScope`
+    returns `ok=false` for a `session:…` scope, for the empty scope, for `"dataset:"` with
+    nothing after it, for a value with no `/`, for an empty project half and for an empty name
+    half; and `ParseSessionScope` returns `ok=false` for any `dataset:…` value. Project and name
+    are split on the **first** `/`; a value containing a second `/` is `ok=false`, since both
+    halves are label-charset and neither can legally contain one.
+  - **The scope value contains no version and no dataset id.** The token pins `(project, name)`,
+    so one minted while a name is at version 3 verifies unchanged against version 7 of the same
+    name; there is a test that says so in those terms.
+  - The `sid` claim is empty, with a comment citing the reasoning at
+    `go/cmd/agentd/embedtoken.go:159-167` — a non-empty `sid` would make this a working
+    core-MCP credential, because `/mcp` authenticates a caller by exactly that claim.
+  - The mint helper returns the token **and** its `exp`, read back off the token it just signed
+    rather than recomputed — the `embedTokenExpiry` precedent
+    (`go/cmd/agentd/embedtoken.go:196`). A body promising an expiry the token does not carry
+    is the off-by-one that shows up later as a rare, unreproducible 401.
+  - TTL is **clamped, never rejected**, in a table test with these exact rows: `0 → 300s`
+    (the default), `5 → 60s`, `59 → 60s`, `300 → 300s`, `900 → 900s`, `100000 → 900s`,
+    `-1 → 60s`.
+  - `verifyDatasetToken(secret []byte, raw string) (project, name string, err error)` returns the
+    pinned pair, and errors — distinctly enough for O5 to answer 404 rather than leak a reason —
+    on each of: an expired token; a token signed with a different secret; a token signed with a
+    non-HS256 method; a token carrying a non-empty `sid`; a token with no `scope` claim; a token
+    whose scope is `session:…`; and a token whose `customer` claim disagrees with its scope's
+    project half. Each is its own case.
+  - A token minted for `(wolf, a)` yields `("wolf", "a")` and never `("wolf", "b")` — the
+    comparison against the requested name is O5's, but the verifier must return the pair that
+    makes it possible.
+  - **These are unit-level claims about the mint/verify pair.** Route-level behaviour, the
+    `?token=` middleware leg, and the "a dataset token presented as `Authorization: Bearer` is
+    401" lock are all O5's.
 - **TDD:** yes.
-- **Validation:** `cd go && go test ./cmd/agentd/... -run 'TestDatasetToken' -count=1`
-- **Depends on:** O1
+- **Validation:**
+  - `cd go && go build ./... && go vet ./...`
+  - `cd go && go test ./cmd/agentd/... -run 'TestDatasetToken' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'`
+    — at least **six `--- PASS`** and **zero `--- SKIP`**. Empty output means the name filter
+    matched nothing, which passes silently and is the trap this line exists to catch.
+  - `cd go && go test ./extension/devclaims/... -run 'TestDatasetScope' -count=1 -v | grep -E '^--- (PASS|FAIL)'`
+    — at least **two `--- PASS`**.
+  - `cd go && go test ./cmd/agentd/... ./extension/devclaims/... -count=1` — both packages whole.
+    `devclaims` is shared by embed tokens, session tokens and the login issuer, so a change to its
+    scope parser has to be shown not to move any of them.
+- **Depends on:** — *(this ticket touches no dataset store code; the plan's O1 edge was
+  bookkeeping, not a real dependency, so O4 can run beside O2 and O3)*
 - [ ] done
 - Notes:
 
-### O5: Dataset HTTP read routes   [Status: pending | Model: sonnet]
-- **Scope:** The four routes in **Interfaces**. Follow `go/httpapi/artifacts_download.go` for byte
-  serving and `go/httpapi/memories.go` for metadata shape and tenancy posture.
+### O5: Dataset HTTP read routes   [Status: pending | Model: opus]
+- **Scope:** The four routes in **Interfaces**, the two `httpapi.Config` seams they need, and —
+  by owner decision **B1** — the two matching halves of `apiAuthMiddleware`. Follow
+  `go/httpapi/artifacts_download.go` for byte serving and `go/httpapi/memories.go` for metadata
+  shape and tenancy posture.
+  **This ticket owns `go/cmd/agentd/auth.go`; no other ticket may touch it.** It makes exactly two
+  changes there, and both are load-bearing:
+  1. **The `?token=` leg.** `apiAuthMiddleware` (`go/cmd/agentd/auth.go:62`) answers 401 to any
+     request carrying neither `X-API-Key` nor `Authorization: Bearer`, *before* the handler runs —
+     so the agent's `curl http://172.17.0.1:8099/agent/datasets/<n>/download?token=<t>`, the exact
+     call O6b's tool description and O9 require, never reaches O5's code. One narrow leg goes in
+     **after** the `X-API-Key` branch (`:65-78`) and **before** the `devOpen` branch (`:79`).
+  2. **The bearer lock.** Dataset tokens are signed with the same secret and carry the same empty
+     `sid` as an embed token, and the middleware today parses `claims["scope"]` only through
+     `ParseSessionScope`, which returns `ok=false` for a `dataset:` value and leaves the principal
+     **unrestricted** — see `TestAuthMiddleware_UnknownScopeKindIsNotASessionScope`
+     (`go/cmd/agentd/auth_test.go:225`), which asserts 200 today. As it stands, a dataset token
+     presented as `Authorization: Bearer` authenticates as a full project principal on every
+     `/agent/*` route. That is a live security defect in the design, adjacent to hazard H1, and
+     closing it is part of this ticket.
+  **`go/httpapi` must not import `extension`** (`go/httpapi/memories.go:87` states the rule), and
+  `agentdb` cannot reach a blob store at all, so the bytes arrive through a new single-method
+  interface declared in `go/httpapi/datasets.go` and wired in `main.go` from the process-wide
+  `blobs` value built at `go/cmd/agentd/main.go:114`.
+  Test names are pinned: everything O5 adds under `go/httpapi` is `TestDataset…`, everything it
+  adds under `go/cmd/agentd` is `TestDatasetDownloadAuth…`. **O5 adds no live-Postgres test** —
+  its route coverage runs on fakes — so a `--- SKIP` in either filtered run is a defect.
 - **Repo:** agent-orange
 - **Files:** create `go/httpapi/datasets.go`, `go/httpapi/datasets_test.go`; modify
-  `go/httpapi/httpapi.go` (constants near `:359-389`, registration near `:463-475`).
+  `go/httpapi/httpapi.go` (the `Endpoints` field list, `DefaultEndpoints`, the guarded
+  registration map in `Mux()`, `Config` gaining two fields, the `New()` auto-fill block, and
+  `Identity` gaining `DatasetScope`); modify `go/cmd/agentd/auth.go`,
+  `go/cmd/agentd/auth_test.go`, `go/cmd/agentd/main.go`.
 - **Acceptance criteria:**
-  - Project scope comes from the credential only. There is no project parameter.
-  - Unknown, malformed and other-project names all return `404 not found` with a byte-identical
-    body — the route is not an existence oracle.
+  - **Routes.** `Endpoints` gains four fields and `DefaultEndpoints` the four patterns exactly as
+    Interfaces writes them; registration goes in the existing guarded map in `Mux()`, so a host
+    that blanks a pattern unmounts it rather than panicking.
+  - **Two `Config` seams, with different defaulting rules, and the difference is the point.**
+    `Datasets DatasetStore` (metadata; declared in `go/httpapi/datasets.go` with
+    `var _ DatasetStore = (*agentdb.Store)(nil)`, auto-filled from `cfg.AgentDB` in `New()`
+    alongside `Memories`, nil ⇒ **501**). `DatasetBlobs DatasetBlobReader` — a NEW interface
+    `Read(ctx context.Context, key string) (io.ReadCloser, error)`, **not** auto-filled, wired in
+    `main.go`; nil ⇒ **501 on the download route only**, while the three metadata routes keep
+    working.
+  - **The metadata body is a dedicated `datasetResp`, not `agentdb.Dataset`** — that struct
+    carries json tags for `blob_path` and `project`, and the first is an internal storage key
+    while the second is already the caller's own credential. Fields, in this order:
+    `id, name, version, labels, size_bytes, row_count, sha256, content_type, created_by_worker,
+    created_by_session, created_at`, with `created_at` in unix **milliseconds**. The reasoning is
+    `memoryRecordResp`'s, and a test asserts `blob_path` and `project` appear nowhere in any of
+    the three metadata responses.
+  - **Envelopes, byte-for-byte:** the list route returns `{"datasets":[…]}`; the single-name route
+    returns the **bare object**; the versions route returns `{"versions":[…]}`, newest first. The
+    ten fields shared with O6b's `dataset_list` output are byte-identical in name.
+  - Project scope comes from the credential only. There is no project parameter on any of the
+    four routes.
+  - `selector` and `limit` pass through to the store unchanged; the store clamps the limit (O3).
+    A selector the parser rejects is **400 carrying the parser's own message**, and
+    `ErrDatasetRequiresPostgres` is **501** — the same two-way mapping `ListMemories` already
+    does (`go/httpapi/memories.go:160-169`).
+  - **404 parity.** Unknown name, malformed name, a name belonging to another project, a
+    `?version=` that is non-numeric or `< 1`, and a version that does not exist all return `404`
+    with a **byte-identical body**. The route is not an existence oracle, and a name is
+    caller-chosen and guessable in a way a uuid is not.
   - Byte responses set `Content-Type` from the row, `X-Content-Type-Options: nosniff`, and
-    `Content-Disposition: attachment`. No `Content-Length`.
-  - A row whose blob is missing is `410`; `501` off Postgres; `403` when the credential names no
-    project.
-  - The download route accepts a project API key, a console JWT, **or** a matching scoped token in
-    `?token=`. A token for another dataset is `404`, not `403` — same non-oracle rule.
-  - A scoped token is accepted **only** on the download route; the three metadata routes reject
-    it.
+    `Content-Disposition: attachment` with the dataset name as the filename. **No
+    `Content-Length`** — `size_bytes` is metadata written by a different call than the bytes, and
+    a stale value truncates the response.
+  - A row whose `blob_path` the reader cannot open is **410** (the bytes existed and no longer
+    do); a nil `Datasets` is **501**; a nil `DatasetBlobs` is **501** on the download route only;
+    a credential naming no project is **403** — no dataset is being hidden, the question cannot be
+    asked (`memoryReadable`'s reasoning, `go/httpapi/memories.go:96-109`).
+  - **`?version=` absent means the current version**; present and valid means that version.
+  - **The `?token=` leg, and it is graded against the real middleware, not the bare handler.**
+    A request with `?token=<valid>` and no auth header reaches the download handler and gets
+    bytes. The leg fires only when the method is `GET` **and** the path is
+    `/agent/datasets/<exactly one segment>/download`; on a verification failure it falls through
+    to the existing 401. On success it installs a principal whose `customer` is the token's pinned
+    project and whose new `datasetScope` field is `<project>/<name>`, surfaced to `httpapi` as
+    `Identity.DatasetScope`. The test drives `apiAuthMiddleware` end to end, following the O7
+    precedent in `go/cmd/agentd/sessionsecret_test.go` and the `captureIdentity` helper in
+    `go/cmd/agentd/auth_test.go`.
+  - **A token for dataset `a` used on `b`'s download URL is `404`, not `403`** — same non-oracle
+    rule. The handler compares `Identity.DatasetScope` to `<Customer>/<name>` and answers with the
+    identical 404 body.
+  - **A dataset token supplied as `Authorization: Bearer` is `401` on every route, the download
+    route included.** The check sits next to the existing `sid` lock (`go/cmd/agentd/auth.go:116`)
+    and has the same reasoning: a credential that reaches a container is not API-class. The test
+    mints a real dataset token and drives it through the middleware at `GET /agent/memories`
+    **and** at `GET /agent/datasets/x/download`.
+  - **`?token=` is not a credential anywhere else.** The three metadata routes read no query
+    credential, so a request carrying only `?token=<valid>` to `GET /agent/datasets`,
+    `GET /agent/datasets/{name}` or `GET /agent/datasets/{name}/versions` is `401` at the
+    middleware. Tested against the real middleware.
+  - **Nothing else changes.** No route outside the dataset download path sees any behaviour
+    difference, and `TestAuthMiddleware_UnknownScopeKindIsNotASessionScope` — a token scoped
+    `project:wolf` — must still pass unmodified: the lock is specific to `dataset:`, not to
+    "any scope I do not recognise".
 - **TDD:** yes.
-- **Validation:** `cd go && go test ./httpapi/... -run 'TestDataset' -count=1`
+- **Validation:**
+  - `cd go && go build ./... && go vet ./...`
+  - `cd go && go test ./httpapi/... -run 'TestDataset' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'`
+    — at least **eight `--- PASS`** and **zero `--- SKIP`**; empty output means the filter matched
+    nothing. O5 writes no live-Postgres test, so a SKIP here is a defect, not an environment gap.
+  - `cd go && go test ./cmd/agentd/... -run 'TestDatasetDownloadAuth' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'`
+    — at least **four `--- PASS`** and **zero `--- SKIP`**.
+  - `cd go && go test ./httpapi/... ./cmd/agentd/... -count=1` — both packages whole. This is the
+    command that proves the middleware edit moved nothing else, and it is not optional.
 - **Depends on:** O3, O4
 - [ ] done
 - Notes:
 
 ### O6a: The workspace pull pipeline   [Status: pending | Model: opus]
 - **Scope:** One internal, testable function that gets a file out of a running session container
-  safely. No MCP surface, no CAS — just: probe, cap, pull, hash, count, store the blob. O6b
-  orchestrates it. Split from a single O6 because the pull is where every sharp edge lives and it
-  deserves its own tests.
+  safely: validate the path, probe, cap, pull, hash, count, store the blob. No MCP surface, no CAS
+  — O6b orchestrates it. Split from a single O6 because the pull is where every sharp edge lives
+  (**R33**). **Every test function in this ticket is named `TestPullWorkspaceFile…`**, so the
+  Validation filter and the code agree; `-run` is an unanchored substring and a test named anything
+  else is silently not run.
 - **Repo:** agent-orange
 - **Files:** create `go/cmd/agentd/datasetpull.go`, `go/cmd/agentd/datasetpull_test.go`.
-- **The seams, named — do not go looking for them:**
-  - The pattern to copy is `onArtifactRegistered` (`go/runner.go:2733-2736`), which resolves the
-    instance with `r.get(q.SessionID)` (`:2743`) and execs through the environment's
-    `Exec(ctx, id, cmd, opts)` (`go/execenv/execenv.go:54`).
+- **The seams, named — every line number below re-verified 2026-08-21. Do not go looking:**
+  - The pattern to copy is `onArtifactRegistered` (`go/runner.go:2733-2839`). It resolves the
+    instance with `r.get(q.SessionID)` (`:2746`, defined `:2980`) **and** the environment with
+    `r.workerEnvFor(q.SessionID)` (`:2751`, defined `:2611`). Both are unexported methods on
+    `runnerImpl` — which is why O6b adds an exported `Runner.ExecInSession` and this function never
+    touches the Runner at all (audit **A9**).
+  - Execs go through `ExecutionEnvironment.Exec(ctx, id, cmd []string, opts)`
+    (`go/execenv/execenv.go:54`), returning `*ExecResult{ExitCode, Stdout, Stderr}` (`:143-147`).
+    `cmd` is **argv**. There is no shell.
   - **Copy the pattern, not its error handling.** That path is best-effort artifact capture: it
-    checks only `err != nil` and **ignores `res.ExitCode`** (`go/runner.go:2824-2827`).
-  - Blob storage is `BlobStore.Put` / `Delete` (`go/extension/extension.go`), the same seam O3
-    uses.
-- **Interface it must produce:**
+    checks only `err != nil` and **ignores `res.ExitCode`** (`go/runner.go:2824-2828`).
+  - Blob storage is `BlobStore.Write` / `Delete` (`go/extension/extension.go:92-98`). The interface
+    is `Write/Read/Exists/Delete/List` — **there is no `Put`**; an earlier draft cited one.
+- **Interface it must produce.** The exec seam is injected rather than taken as
+  `(env, InstanceID)`, so the whole function is unit-testable with no Docker and O6b binds it to
+  the Runner (audit **A9**):
   ```go
+  type sessionExec func(ctx context.Context, cmd []string,
+      opts execenv.ExecOptions) (*execenv.ExecResult, error)
+
   type pulledFile struct {
-      BlobPath  string // where the bytes were stored
+      BlobPath  string // under agentdb.DatasetBlobPrefix
       SizeBytes int64
       RowCount  int
       SHA256    string
   }
-  func pullWorkspaceFile(ctx context.Context, env execenv.ExecutionEnvironment,
-      inst execenv.InstanceID, relPath, contentType string, maxBytes int64,
-      blobs extension.BlobStore) (*pulledFile, error)
+
+  func pullWorkspaceFile(ctx context.Context, exec sessionExec, relPath, contentType string,
+      maxBytes int64, blobs extension.BlobStore) (*pulledFile, error)
   ```
 - **Acceptance criteria:**
-  - Rejects a `relPath` that escapes `/workspace` after normalisation (`..`, absolute paths
-    outside, symlink-looking segments) **before** any exec runs.
-  - **Probes with `test -f` and requires `ExitCode == 0`** from every command it runs.
-    `cat /workspace/missing.csv` returns `err == nil`, `ExitCode == 1` and empty stdout —
-    copying the artifact path verbatim would silently store a 0-row file. There is a test for the
-    missing-path case and one for a directory path.
+  - **Path hardening — the check is graded on this enumerated list, not on the word "escapes."**
+    An escape route not named here is a plan bug to be logged, not an executor failure (the
+    **R38** rule). `relPath` is resolved as `path.Clean("/workspace/" + relPath)` and **rejected
+    unless** the result has the prefix `/workspace/` **by path segment** — `/workspace-evil/x` must
+    fail — and is not `/workspace` itself. Rejected, each with its own test case: the empty string;
+    `.`; `..`; `a/../../etc/passwd`; `../workspace-evil/x`; any `relPath` beginning `/` (absolute
+    paths are rejected outright — the tool contract is "relative to `/workspace`", so
+    `/workspace/prices.csv` is a rejection, not a synonym); a NUL byte or a newline anywhere in the
+    string; a segment equal to `.git`. All of it happens **before any exec runs**.
+  - **Symlinks are explicitly NOT checked.** They cannot be decided from a string, and the exec-side
+    `test -f` is the only defence there is. Say so in a comment so the next reader does not read the
+    absence as an oversight.
+  - **Every exec is argv, never `sh -c`:** `[]string{"test","-f",abs}`, `[]string{"wc","-c",abs}`,
+    `[]string{"cat",abs}`. A test asserts no command element is `sh`, `bash` or `-c`. Do **not**
+    copy `WriteWorkspaceFile`'s `sh -c` form (`go/runner.go:924-928`): with an attacker-supplied
+    path that is command injection from inside a container (audit **A8**).
+  - **Probes with `test -f` and requires `ExitCode == 0` from every command it runs.**
+    `cat /workspace/missing.csv` returns `err == nil`, `ExitCode == 1` and empty stdout — copying
+    the artifact path verbatim would silently store a 0-row dataset. Tests: a missing path, a
+    directory path, and a `cat` that exits non-zero after a successful probe.
   - **Probes size with `wc -c` and refuses anything over `maxBytes` before reading content.**
     `execAndCollect` buffers all exec output into memory with no limit
-    (`go/execenv/docker/client.go:238-240`), and agentd shares DinD's namespace and serves every
-    session, so an unbounded pull is a memory DoS from inside a container.
+    (`go/execenv/docker/client.go:238-240`), and agentd shares DinD's network namespace and serves
+    every session, so an unbounded pull is a memory DoS from inside a container. `wc -c <file>`
+    prints `<n> <path>`: take the first whitespace-separated field; a non-integer first field is an
+    error, never a zero. The refusal names both the observed size and the cap. The cap is
+    re-checked against the bytes actually pulled, because the file can grow between the two execs.
   - Bytes are preserved exactly, including NUL bytes and non-ASCII — `stdcopy.StdCopy` is
-    binary-safe, so nothing here may re-encode or line-split the payload before hashing.
-  - `RowCount` is lines minus one header for `text/csv`, and 0 for any other content type.
-  - **The blob key is unique per call** — derive it from a fresh uuid, never from the dataset name
-    or a version number. Two concurrent pulls of the same dataset must not collide.
-  - `SHA256` is computed over the exact bytes stored.
-  - On any failure after the blob is written, the blob is best-effort deleted and the error is
-    returned; a delete failure is logged, never fatal.
+    binary-safe, so nothing here may re-encode, trim or line-split the payload before hashing.
+  - **`RowCount` for `text/csv` is `max(0, N-1)`**, where `N` counts a `\n`-terminated run plus a
+    final unterminated run when the last byte is not `\n`. So `"h\na\nb"` and `"h\na\nb\n"` both
+    give 2, `"h\n"` gives 0, and empty bytes give 0 — **never negative**: O1 declared the column
+    `NOT NULL DEFAULT 0` and O6b's 50% shrink guard divides by it. Counted in Go over the exact
+    stored bytes, never with a second `wc -l` exec. `RowCount` is 0 for every other content type,
+    and the `text/csv` match ignores parameters (`text/csv; charset=utf-8` counts). Tests cover:
+    trailing newline, no trailing newline, header only, empty file, CRLF endings (the `\r` stays in
+    the bytes and the line still counts), and `text/plain`.
+  - **The blob key is `agentdb.DatasetBlobPrefix + <fresh uuid4>`, per write attempt.** Reference
+    the constant declared by O3 in `go/agentdb/datasets.go` (§ "The blob namespace"); do **not**
+    re-declare it and do **not** derive the key from the dataset name or a version number — two
+    concurrent pulls of the same dataset must not collide, and O3's reaper and O8's sweep enumerate
+    on exactly that prefix over a **global** `BlobStore` shared with `_artifacts/bytes/` and
+    snapshots (`newBlobs` → `Global("")`, `go/cmd/agentd/backends.go:59-76`). A test asserts two
+    calls with identical arguments produce different keys and that both carry the prefix.
+  - `SHA256` is computed over the exact bytes stored; a fixture asserts a hand-computed digest.
+  - On any failure **after** `blobs.Write` succeeds, the blob is best-effort deleted and the
+    original error is returned; a delete failure is logged, never fatal. A test with a blob store
+    whose `Delete` always fails asserts the original error still surfaces unchanged.
 - **TDD:** yes.
 - **Validation:**
-  - `cd go && go test ./cmd/agentd/... -run 'TestPullWorkspaceFile' -count=1`
+  - `cd go && go test ./cmd/agentd/... -run 'TestPullWorkspaceFile' -count=1 -v` — the `-v` is
+    required, because a `-run` pattern that matches nothing exits **0**. The output must carry a
+    `--- PASS` line for each of: path rejection, argv-not-shell, exit-code handling, the size cap,
+    byte fidelity, row counting, blob-key uniqueness and delete-on-failure. Zero `--- SKIP`.
   - `cd go && go build ./... && go vet ./...`
-- **Depends on:** O5
+- **Depends on:** O3 *(`agentdb.DatasetBlobPrefix` and nothing else; O6a needs no HTTP route, so it
+  may run in parallel with O4 and O5 rather than behind them as revision 3 had it)*
 - [ ] done
 - Notes:
 
 ### O6b: Dataset MCP tools   [Status: pending | Model: opus]
-- **Scope:** `dataset_list`, `dataset_get`, `dataset_put` on the existing `core` server, built on
-  O6a's pull function plus O2's CAS store. Register with one line beside
-  `go/cmd/agentd/main.go:572-573`.
+- **Scope:** `dataset_list`, `dataset_get`, `dataset_put` on the existing `core` MCP server, built
+  on O6a's pull function plus O2's CAS store — **and the one engine change O6a's seam requires**: an
+  exported `Runner.ExecInSession`, because nothing exported today can turn a session id into a
+  runnable exec (audit **A9**). Test-name prefixes are pinned so the Validation filters match:
+  `TestDatasetTools…` in `cmd/agentd`, `TestExecInSession…` in the root `agentkit` package.
 - **Repo:** agent-orange
-- **Files:** create `go/cmd/agentd/mcp_datasets.go`, `go/cmd/agentd/mcp_datasets_test.go`;
-  modify `go/cmd/agentd/main.go`.
+- **Files:** create `go/cmd/agentd/mcp_datasets.go`, `go/cmd/agentd/mcp_datasets_test.go`,
+  `go/runner_execinsession_test.go`; modify `go/cmd/agentd/main.go` (one `mcpSrv.register(...)` line
+  beside `:572-577`, plus parsing `AGENTKIT_DATASET_MAX_BYTES` at boot), `go/agentkit.go` (the
+  `Runner` interface), `go/runner.go` (the implementation), **`go/httpapi/fakes_test.go` and
+  `go/cmd/agentd/router_test.go`** — each holds a `stubRunner` assigned to an `agentkit.Runner`
+  field (`httpapi/fakes_test.go:81`, `cmd/agentd/router_test.go:1349`), so adding a method to the
+  interface breaks both packages' tests until each stub gains it. Those two are the difference
+  between a green ticket and a red `go vet ./...` at the end of it.
 - **The seams, named:**
-  - The MCP layer authenticates by session token; the calling session id comes from that identity
-    and is also how provenance is resolved.
-  - `AGENTKIT_SELF_URL` is read once at boot in `go/cmd/agentd/main.go` and passed in — do not
-    read the environment from inside a tool handler.
+  - **`Runner` gains exactly one exported method**, declared beside `WriteWorkspaceFile`
+    (`go/agentkit.go:281-284`; `execenv` is already imported at `:19`, so no new import):
+    ```go
+    ExecInSession(ctx context.Context, ref SessionRef, cmd []string,
+        opts execenv.ExecOptions) (*execenv.ExecResult, error)
+    ```
+    Implemented in `go/runner.go` exactly like `WriteWorkspaceFile` (`:911-931`): resolve with
+    `r.get(ref.SessionID)` and `r.workerEnvFor(ref.SessionID)`, and error
+    `exec-in-session: session %q has no running instance` when either is absent. It returns the raw
+    `ExecResult` and **does not interpret `ExitCode`** — that is O6a's job.
+  - The tools take a **narrow interface declared in `mcp_datasets.go`** that `agentkit.Runner`
+    satisfies, exactly as `sessionSnapshotter` (`mcp_images.go:62-64`) and `sessionLocator`
+    (`mcp_skills.go:70-72`) do. Do not hand the tools the whole Runner.
+  - The MCP layer authenticates by session token before any handler runs;
+    `mcpCaller{Project, SessionID, Worker, Identified}` (`mcpserver.go:99-111`) is both the hard
+    scope and the provenance.
+  - `AGENTKIT_SELF_URL` is read once at boot (`main.go:214`) and passed in. Never read the
+    environment from inside a tool handler.
 - **Acceptance criteria:**
   - No tool returns file bytes. `dataset_get` returns a URL; `dataset_put` returns metadata.
-  - **`download_url` is built on `AGENTKIT_SELF_URL`**, never on `AGENTKIT_PUBLIC_BASE_URL`. A
-    test asserts the prefix. Using the public base would be unreachable from a nested container
-    and is the most likely wrong turn in this ticket.
-  - `dataset_get`'s tool description instructs the model to curl the URL to a file, not to echo
-    the URL, and not to print file contents.
-  - `dataset_put` passes `AGENTKIT_DATASET_MAX_BYTES` (default **64MiB**) to O6a as `maxBytes`.
-  - On CAS conflict, the blob O6a just wrote is best-effort deleted; failure to delete is logged,
-    never fatal. O3's orphan sweep is the backstop.
-  - The shrink guard refuses `row_count < 50%` of the current version unless `allow_shrink: true`,
-    and the refusal message names both counts.
+  - **Field names are byte-identical to § "Dataset metadata JSON" for the ten shared fields.**
+    `dataset_list` → `{"datasets":[{name, version, size_bytes, row_count, sha256, content_type,
+    labels, created_at, created_by_worker, created_by_session}]}`, `created_at` in unix
+    **milliseconds**. `blob_path` and `project` are never serialised. `limit` defaults to 20, max
+    100, and the cap is stated in the result rather than truncating silently.
+  - `dataset_get` → `{name, version, size_bytes, row_count, sha256, content_type, labels,
+    download_url, expires_at}`. **`expires_at` is unix SECONDS**, matching its sibling
+    `embedTokenResponse.ExpiresAt` (`go/cmd/agentd/embedtoken.go:63-67`) and deliberately unlike
+    `created_at`'s milliseconds — encode the unit in the comment, per the house rule.
+  - **`download_url` is built on `AGENTKIT_SELF_URL`**, never on `AGENTKIT_PUBLIC_BASE_URL`, as
+    `<selfURL>/agent/datasets/<url.PathEscape(name)>/download?version=<v>&token=<t>`. A test asserts
+    the prefix. The two values are deliberately different (`go/cmd/agentd/permalink.go` documents
+    the split) and the public base is unreachable from a nested container — this is the most likely
+    wrong turn in the ticket, and O9 is what would catch it three tickets later.
+  - The token is minted by O4's helper and carries scope `dataset:<project>/<name>` — a name, never
+    a version id — so a URL minted before a tick still resolves after it.
+  - `dataset_get`'s tool description instructs the model to curl the URL to a file, not to echo the
+    URL, and not to print the file's contents, and states that the URL carries a bearer credential
+    which therefore enters the transcript (§ "The dataset atom" caveat box, **R18**).
+  - `dataset_put` passes `AGENTKIT_DATASET_MAX_BYTES` (default **64MiB**) to O6a as `maxBytes`,
+    parsed once at boot in `main.go`; an unparseable value is a boot error naming the variable.
+    O8 is what makes the variable reach agentd through compose.
+  - **CAS.** `if_version` must equal the current version; `0` means "must not exist". A conflict is
+    returned as an error naming the current version so the model can re-read and retry. On conflict
+    the blob O6a just wrote is best-effort deleted; a delete failure is logged, never fatal, and
+    O3's orphan sweep is the backstop. A test asserts the delete was attempted.
+  - **The shrink guard** refuses a replacement whose `row_count` is below 50% of the current
+    version's unless `allow_shrink: true`, and the refusal names both counts. It applies only when
+    a current version exists **and** its `row_count > 0`; a current version of 0 rows has nothing to
+    shrink from and the write is allowed. Tested in all three shapes.
   - Every mutation reads the row back and echoes it (house rule, `docs/18` § 6).
-  - Provenance comes from the authenticated session, never from an argument; an unreadable session
-    row **refuses the write** rather than guessing (the RD4 invariant).
+  - **Provenance comes from the authenticated caller, never from an argument:**
+    `created_by_session = caller.SessionID`, `created_by_worker = caller.Worker`. A caller whose
+    session row could not be read (`caller.Identified == false`) **refuses the write** rather than
+    guessing — the RD4 invariant, `mcpserver.go:105-111`. There is a test for the refusal.
+  - **This criterion is what makes Wolf's trust model hold:** a dataset or a memory written from
+    inside a container can never carry empty provenance, so "empty provenance ⇒ server-written"
+    stays true. Do not add an argument that lets a caller name itself.
   - Datasets write **no config event** — they are data. Note in a comment that
-    `TestMutationsAreLogged`'s sweep classifies by noun and does not cover datasets.
+    `TestMutationsAreLogged` classifies by noun through `looksLikeConfigMutation` over
+    `configEntityNouns` (`go/agentdb/config_events_test.go:562-592`), and `Dataset` is not among
+    those nouns, so the sweep does not cover dataset store methods. Verified 2026-08-21, not
+    assumed — and the Validation re-runs that test so a later change to the noun list surfaces here.
+  - Registration is one line inside the existing `if agentDB != nil` block beside `main.go:572-577`,
+    so the dataset tools are absent off Postgres exactly like the rest of the core server, and the
+    boot log's `tools=` list names all three.
 - **TDD:** yes.
 - **Validation:**
-  - `cd go && go test ./cmd/agentd/... -run 'TestDataset' -count=1`
+  - `cd go && go test ./cmd/agentd/... -run 'TestDatasetTools' -count=1 -v` — `-v` is required
+    because a `-run` matching nothing exits 0. The output must carry a `--- PASS` line for each of:
+    `dataset_list` shape, the `download_url` prefix, the token scope, the CAS conflict and its blob
+    delete, the shrink guard (all three shapes), and the unidentified-caller refusal.
+  - `cd go && go test . -run 'TestExecInSession' -count=1 -v` *(the root package is `agentkit`;
+    `./...` would work too but is slow, and `-v` proves the new cases actually ran)*
   - `cd go && go test ./agentdb/... -run 'TestMutationsAreLogged' -count=1`
     *(that test lives in `go/agentdb/config_events_test.go:594`, NOT in `cmd/agentd` — running it
-    against the wrong package matches nothing and passes vacuously)*
-  - `cd go && go build ./... && go vet ./...`
-- **Depends on:** O6a
+    against the wrong package matches nothing and passes vacuously, **R12**)*
+  - `cd go && go build ./... && go vet ./...` — `go vet` typechecks `_test.go` files, so a
+    `stubRunner` that has not gained `ExecInSession` fails **here**, which is the cheapest place to
+    find it.
+- **Depends on:** O6a, O5 *(O5 brings O4 transitively: `dataset_get` mints with O4's helper and
+  points at O5's download route)*
 - [ ] done
 - Notes:
 
@@ -1361,107 +1993,370 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   **R36**; W2/W5/W8/W9/W10 must expect 201. A `project` key in the body is ignored rather than
   refused (the criterion reads both ways). Note **R42**: this branch also contains O1's commit.
 
-### O8: Reaper wiring, compose and project-map configuration   [Status: pending | Model: sonnet]
-- **Scope:** Run the dataset reaper and orphan sweep on a timer beside the snapshot reaper, and
-  make every credential this integration needs actually reach `agentd` and the session containers.
-  Compose forwards only what it names, so each variable needs its own line.
+### O8: Dataset reaper, orphan sweep, compose and project map   [Status: pending | Model: opus]
+- **Scope:** Run the dataset **version reaper** and the **orphan blob sweep** on their own ticker
+  **inside `cmd/agentd`**, started from `main.go` after the store is built and cancelled on
+  shutdown — and make every credential and knob this integration needs actually reach `agentd`.
+  "Beside the snapshot reaper" in revision 3 pointed at a place O8 may not touch: that reaper is a
+  Runner loop (`go/snapshot_reaper.go`) driven by `agentkit.Policy.SnapshotReapInterval`, which
+  agentd merely sets (`main.go:323`). Datasets are product-layer and Postgres-only, so the loop
+  stays in agentd and `go/agentkit.go` / `go/runner.go` are **not** touched. Test-name prefixes are
+  pinned: new parsing cases extend `TestResolveGCConfig`, new boot-log cases extend
+  `TestGCConfigBootLines`, the loop and sweep are `TestDatasetReap…`, and the project-map example is
+  `TestProjectMapExample`.
 - **Repo:** agent-orange
-- **Files:** modify `go/cmd/agentd/gc.go`, `go/cmd/agentd/gc_test.go`, `go/cmd/agentd/main.go`,
-  `docker-compose.yml`, `.env.example`.
+- **Files:** create `go/cmd/agentd/datasetreaper.go`, `go/cmd/agentd/datasetreaper_test.go`; modify
+  `go/cmd/agentd/gc.go`, `go/cmd/agentd/gc_test.go` (the two new knobs and their boot lines, beside
+  the two existing ones), `go/cmd/agentd/googleauth_test.go` (the `.env.example` parse test),
+  `go/cmd/agentd/main.go` (start the loop), `docker-compose.yml`, `.env.example`.
 - **Acceptance criteria:**
-  - `AGENTKIT_DATASET_REAP_INTERVAL` (default `6h`) and `AGENTKIT_DATASET_KEEP_VERSIONS`
-    (default `30`) are parsed by the existing `parseGCDuration` / bounds helpers; `0` interval
-    means never sweep. The boot log names both, in `describeReapInterval`'s style.
-  - `docker-compose.yml`'s `agentd` service gains explicit lines for `WOLF_API_KEY` and
-    `WOLF_MCP_TOKEN`, plus `AGENTKIT_MCP_ENV` already being forwarded — because compose "cannot
-    pass a dynamic set of names, so add one line per credential you allowlisted"
-    (`docker-compose.yml:166-169`).
-  - `.env.example` documents a **worked** `AGENTKIT_PROJECT_MAP` for this integration, in object
-    form, including `api_key_env: WOLF_API_KEY` and an `allowed_origins` entry for wolf-web's
-    origin. Without an origins entry the embed page's CSP is the union of configured origins and
-    **an unlisted origin cannot frame it at all** (`go/cmd/agentd/embedcsp.go`); with no map at all
-    it is `frame-ancestors 'none'`.
-  - `.env.example` sets `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` in its worked example.
-- **TDD:** no (wiring + config).
+  - `AGENTKIT_DATASET_REAP_INTERVAL` (default `6h`) is parsed by the **existing** `parseGCDuration`
+    (`go/cmd/agentd/gc.go:110`), so `off|0|none|never|disabled` mean never sweep and the
+    `[1m, 30d]` bounds apply unchanged.
+  - **`AGENTKIT_DATASET_KEEP_VERSIONS` (default `30`) is an integer count, not a duration, and no
+    existing helper can parse it.** `parseGCDuration` rejects a bare `30` outright
+    (`time.ParseDuration` does), and the "bounds helpers" revision 3 referred to do not exist. Add
+    `parseKeepVersions(name, raw string, def int) (int, error)` beside it: empty → the default; a
+    non-integer → a boot error naming the variable; a negative → a boot error; `0` means **keep
+    everything**, matching O3's `keepPerName <= 0` criterion, and is logged as such; the maximum is
+    10000. Getting this wrong in the other direction — treating `0` as a disabling word, the
+    meaning `gcDisabledWords` gives it for the interval — deletes every non-current version of every
+    dataset on the first sweep, so the `0` case has its own test.
+  - The boot log names both variables in `describeReapInterval`'s style (`gc.go:147`), including a
+    `DISABLED (no DATABASE_URL)` line — datasets are Postgres-only, exactly like the snapshot
+    reaper's `wired` argument.
+  - **The orphan sweep runs on the same ticker as the version reaper**, and not at all when the
+    interval is disabled. Each pass: `store.ReapDatasetVersions(ctx, keep, blobs)`, then
+    `orphans, err := store.ListOrphanBlobPaths(ctx, blobs, time.Hour)` and a `Delete` for each
+    returned path — with **`strings.HasPrefix(p, agentdb.DatasetBlobPrefix)` re-asserted
+    immediately before every `Delete`**. That re-assertion is belt and braces on purpose: agentd
+    runs **one global `BlobStore`** shared with `_artifacts/bytes/` and with snapshot bytes
+    (`newBlobs` → `Global("")`, `go/cmd/agentd/backends.go:59-76`), so a wrong or empty prefix
+    would enumerate and delete every artifact and snapshot blob in the deployment. The `1h` minimum
+    age is what stops the sweep eating a pull that has written its bytes but not yet its row.
+  - A `Delete` failure is logged and the pass continues. Every pass logs one line:
+    `datasets: reaped N versions, swept M orphan blobs (F delete failures)`.
+  - **The sweep has its own tests, because half this ticket's scope had none in revision 3** — an
+    executor who shipped the version reaper and no sweep at all passed every criterion. Using a
+    fake `extension.BlobStore` and a fake store: (a) a path with the `_artifacts/bytes/` prefix is
+    **never** deleted even when the fake store reports it orphaned; (b) a zero interval starts no
+    ticker; (c) the loop returns on context cancel; (d) a `Delete` error does not abort the pass.
+  - `docker-compose.yml`'s `agentd` service gains **one explicit line per variable**, because
+    compose forwards only what it names (its own comment at `:166-169`): `WOLF_API_KEY`,
+    `WOLF_MCP_TOKEN`, `AGENTKIT_DATASET_REAP_INTERVAL`, `AGENTKIT_DATASET_KEEP_VERSIONS` and
+    `AGENTKIT_DATASET_MAX_BYTES` (O6b's cap — no other ticket forwards it, so without this line an
+    operator setting it in `.env` gets the 64MiB default and no warning). Each in the `${VAR:-}`
+    form used by `AGENTKIT_SNAPSHOT_REAP_INTERVAL` at `:134`. `AGENTKIT_MCP_ENV` is **already**
+    forwarded at `:165`; nothing to add for it.
+  - `.env.example` gains a commented line for each of those five, beside the existing
+    `AGENTKIT_SNAPSHOT_REAP_INTERVAL` at `:149`, and sets `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` in its
+    worked example.
+  - **`.env.example` carries a worked `AGENTKIT_PROJECT_MAP` in object form, exactly this:**
+    ```
+    AGENTKIT_PROJECT_MAP={"users":{"you@example.com":["wolf"]},"projects":{"wolf":
+    {"api_key_env":"WOLF_API_KEY","allowed_origins":["http://localhost:8081"]}}}
+    ```
+    (one line in the file; wrapped here only to fit). `users` is **not** optional — the object form
+    fails boot with `project map: empty (neither users nor projects)` when both halves are empty
+    (`go/cmd/agentd/googleauth.go:149-152`). The origin is wolf-web's published port
+    (`WOLF_WEB_PORT`, default 8081, W1) and carries **no trailing slash and no path**:
+    `validateOrigin` (`googleauth.go:187-207`) rejects a path, query, fragment or userinfo, and
+    allows plain `http` only for `localhost` / `127.0.0.1` / `::1`. Without an `allowed_origins`
+    entry the embed page's CSP is the union of configured origins and **an unlisted origin cannot
+    frame it at all** (`go/cmd/agentd/embedcsp.go`); with no map at all it is
+    `frame-ancestors 'none'`.
+  - **`TestProjectMapExample` parses that line rather than trusting it.** It reads the
+    `AGENTKIT_PROJECT_MAP=` line out of `../../.env.example`, strips the leading `# `, and feeds it
+    to `parseProjectSettings` (`googleauth.go:73`), asserting no error and that the `wolf` project
+    resolves `api_key_env=WOLF_API_KEY` with the one origin. Without it, this ticket both authors
+    `.env.example` and is graded on `.env.example`, and a map that would kill agentd at boot ships
+    green (the **R41** shape).
+- **TDD:** yes for the two knobs, the boot lines, the sweep and the project-map example; no for the
+  compose and `.env.example` prose itself.
 - **Validation:**
-  - `cd go && go test ./cmd/agentd/... -run 'TestGC' -count=1`
-  - `docker compose config | grep -E 'WOLF_API_KEY|WOLF_MCP_TOKEN|AGENTKIT_MCP_ENV'` shows all
-    three on the `agentd` service
-- **Depends on:** O3
+  - `cd go && go test ./cmd/agentd/... -run 'TestResolveGCConfig|TestGCConfig|TestDatasetReap|TestProjectMapExample' -count=1 -v`
+    — the pattern is spelled out because `-run` is an **unanchored substring** and `-run 'TestGC'`
+    does not match `TestResolveGCConfig`, which is exactly where the natural implementation puts its
+    new cases. Confirm a `--- PASS` line for `TestResolveGCConfig`, `TestGCConfigBootLines`,
+    every `TestDatasetReap*` and `TestProjectMapExample`, and **zero `--- SKIP`**.
+  - `docker compose config | grep -E 'WOLF_API_KEY|WOLF_MCP_TOKEN|AGENTKIT_MCP_ENV|AGENTKIT_DATASET_'`
+    prints all **six** under the `agentd` service.
+  - `cd go && go build ./... && go vet ./...`
+- **Depends on:** O3 *(the version reaper, `ListOrphanBlobPaths` and `agentdb.DatasetBlobPrefix` are
+  all O3's deliverables). Strictly serial with O6b on `go/cmd/agentd/main.go`, in either order;
+  `AGENTKIT_DATASET_MAX_BYTES` is O6b's knob and this ticket only forwards its name.*
 - [ ] done
 - Notes:
 
-### O9: Dataset round-trip system test   [Status: pending | Model: sonnet]
-- **Scope:** The only test that exercises the `Exec` + `cat` path against a real container.
+### O9: Dataset round-trip integration test   [Status: pending | Model: opus]
+- **Scope:** The only test that exercises the `Exec` + `cat` pull and the `?token=` download against
+  a **real container**. Everything under it is unit-tested with fakes; this is the single place
+  where a `download_url` built on the wrong base, a shell-quoting bug, a mis-scoped token or a
+  byte-mangling read actually shows up. There is exactly one test function and it is named
+  `TestDatasetRoundTripLive`.
 - **Repo:** agent-orange
-- **Files:** create `go/systemtest/datasets_test.go`.
+- **Files:** create `go/cmd/agentd/datasets_roundtrip_test.go` — package `main`, behind
+  `//go:build integration`. **Not `go/systemtest/`, and that is a correction rather than a
+  preference:** the three tools live in `package main`, which Go cannot import, and the systemtest
+  rig is a *library* rig over `agentkittest.MemStore` + `artifacts.MockArtifactStore`
+  (`go/systemtest/helpers_test.go:60-90`) with no `agentdb.Store`, no Postgres, no `httpapi` mux
+  and no `/mcp` server — while its `TestMain` (`go/systemtest/system_test.go:56-79`) shells out to
+  `docker build ../../sandbox` and `os.Exit(1)`s on failure instead of skipping.
+- **Harness — what the test stands up, stated because no ticket built it and O9 cannot assume it:**
+  - A real `*agentdb.Store` from `AGENTKIT_TEST_POSTGRES_URL` (§ "The throwaway Postgres").
+  - An `httptest.Server` mounting O5's four dataset routes **through the same
+    `apiAuthMiddleware` the stack mounts** (`go/cmd/agentd/main.go:589`), over that store and over
+    the same `extension.BlobStore` the tools write to. Its listener address is what is handed to
+    the dataset tools as `selfURL`, so `download_url` points at it.
+  - One real container, from an image that contains `curl`, reachable **from the container to the
+    listener**. The straightforward configuration is `execenv/docker`'s `Socket` adapter with
+    `Network: "host"` (`go/execenv/docker/socket.go:32-35`), so the container reaches the listener
+    at `127.0.0.1:<port>`; a DinD environment addressed at its bridge gateway is equally
+    acceptable. If `Provision`'s health probe cannot be satisfied under the chosen network mode,
+    stand the container up directly and implement `execenv.ExecutionEnvironment` minimally over it
+    — `go/systemtest/testenv_test.go` is the worked precedent for exactly that (real Docker,
+    `--network host`, labelled for cleanup) and may be **copied**, not imported: it is a `_test.go`
+    in another package.
+  - **The first assertion in the test is a reachability pre-flight**, not the round trip: the
+    harness mux registers a trivial `/__ping` route, and the test execs
+    `curl -fsS -o /dev/null -w '%{http_code}' <selfURL>/__ping` inside the container and
+    `t.Fatalf`s with the URL when it is not `200`. Without it an unreachable listener surfaces as a
+    baffling byte-comparison failure nine lines later.
+  - **Two guards, because the two prerequisites can be absent independently:** `t.Skip` naming
+    `AGENTKIT_TEST_POSTGRES_URL` when it is unset, and `t.Skip` naming Docker when a client ping
+    fails. Do **not** model this on `go/systemtest`'s `testing.Short()` skips — that is a flag
+    check, not a Docker probe, and it does not skip when Docker is simply absent.
 - **Acceptance criteria:**
-  - Write a file into `/workspace`, `dataset_put`, `dataset_get`, curl the URL **from inside the
-    container**, and assert the bytes are byte-identical — including newlines and non-ASCII.
-  - The curl uses the returned `download_url` verbatim; this is what proves the
-    `AGENTKIT_SELF_URL` requirement in O6b.
-  - A second `dataset_put` at a stale `if_version` fails and the stored version is unchanged.
-  - A replacement below the shrink threshold is refused without `allow_shrink`, accepted with it.
-  - Skips cleanly when Docker is unavailable, matching the suite's existing guard.
+  - **Byte fidelity.** Write a payload containing a NUL byte, a non-ASCII run (`£ é 中`) and both
+    LF and CRLF sequences into `/workspace`, `dataset_put` it as `application/octet-stream`,
+    `dataset_get`, `curl` the URL to a file **from inside the container**, and assert the file is
+    **byte-identical** to what was written and that its sha256 matches the tool result's.
+  - **The canonical CSV round-trips.** A second dataset written as `text/csv` in the exact format of
+    § "The canonical dataset CSV" (header `timestamp,value`, RFC3339 UTC, ascending, LF, no
+    trailing blank line) reports `row_count == max(0, N-1)`, equal to the number of data rows
+    written.
+  - **The curl uses `download_url` verbatim** — no rewriting of host, scheme or port. This is what
+    proves O6b's `AGENTKIT_SELF_URL` requirement: a URL built on `AGENTKIT_PUBLIC_BASE_URL` would
+    be unreachable here for exactly the reason it is unreachable in the compose stack.
+  - **The download carries no `X-API-Key` and no `Authorization` header.** The `?token=` leg is the
+    only unauthenticated-at-the-middleware path in the tree (O5, owner decision **B1**), and the
+    request must travel through the real middleware — a test that calls the bare handler proves
+    nothing about the route an agent actually curls.
+  - A second `dataset_put` at a **stale** `if_version` fails with an error naming the current
+    version, and a following `dataset_get` returns the version, `size_bytes` and `sha256`
+    **unchanged**.
+  - A replacement whose `row_count` is below 50% of the current version's is refused without
+    `allow_shrink` — with both counts named in the message — and accepted with it.
+  - A `dataset_get` token minted for dataset A does not download dataset B: `404`, not `403`
+    (O5's non-oracle rule).
+  - **Cleanup is asserted, not hoped for.** The container is destroyed, and every dataset row and
+    blob the test created is removed; a teardown error fails the test loudly rather than leaking a
+    container and a host port into the next run.
 - **TDD:** no (the integration test is the deliverable).
-- **Validation:** `cd go && go test ./systemtest/... -run 'TestDataset' -count=1`
-- **Depends on:** O6b
+- **Validation:**
+  - `cd go && AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test -tags integration ./cmd/agentd/... -run 'TestDatasetRoundTripLive' -count=1 -v -timeout 600s`
+    — **`-tags integration` is not optional.** Without it the file is not compiled, the pattern
+    matches nothing and the run exits **0**, which is the vacuous pass this ticket exists to
+    prevent. The `-v` output must show `--- PASS: TestDatasetRoundTripLive`; a `--- SKIP` means a
+    prerequisite was missing and the ticket is **unproven**, not passing.
+  - `cd go && go build ./... && go vet ./... && go vet -tags integration ./cmd/agentd/...` — the
+    second vet is what typechecks the tagged file, which the ordinary gates never compile.
+- **Depends on:** O5, O6b *(O6b brings O5 transitively, but O5 is named because this test drives
+  O5's download route through the middleware directly — without that stated, the ticket reads as
+  if it only needed the tools)*
 - [ ] done
 - Notes:
 
 ### O10: Document datasets and the memory append route   [Status: pending | Model: sonnet]
-- **Scope:** `docs/20-datasets.md` plus the cross-references that keep the existing docs true.
+- **Scope:** `docs/20-datasets.md`, plus the cross-references that keep the existing docs true —
+  including the three claims O7, O11 and O6b leave stale in `docs/19-embedding.md`, which become
+  live lies the moment those branches merge (R44). Docs only; no Go change, no test change.
 - **Repo:** agent-orange
-- **Files:** create `docs/20-datasets.md`; modify `docs/19-embedding.md` (route summary + a note
-  that memories are no longer read-only over HTTP), `docs/18-workers-memory-events.md` (core-tools
-  table), `CLAUDE.md`.
+- **Files:** create `docs/20-datasets.md`; modify `docs/19-embedding.md` (§ 7's read-only claim,
+  § 10's route table, § 10's environment-variable table, hazard **H12**),
+  `docs/18-workers-memory-events.md` (§ 6's core-tools table), `CLAUDE.md` (the `docs/` repo-map
+  row and the status block). All four files carry at least one criterion below — none may be left
+  untouched, which is how two of them were silently skippable before.
 - **Acceptance criteria:**
-  - Covers: the atom, CAS, the two byte paths and why each was chosen, the shrink guard,
-    retention and the orphan sweep, and every new env var.
-  - States plainly that **bytes never need to cross the model's context** *and* the two caveats:
-    the `download_url` carries a bearer token that DOES enter context and transcripts, and nothing
-    prevents a model printing a file itself.
-  - `docs/19-embedding.md`'s § 7 claim that memory is "Read-only. There is no HTTP write" is
-    corrected, and § 10's route table gains all five new routes.
-  - The trust rule — empty provenance means server-written — is documented as the intended
-    mechanism for an embedder holding authoritative state.
+  - `docs/20-datasets.md` covers, each under its own heading: **the atom** (project-scoped, named,
+    versioned, labelled blob; "current" is the highest version for `(project, name)`); **CAS**,
+    mandatory on every write, with `if_version = 0` meaning "must not exist" and a conflict
+    naming the current version; **the two byte paths** — `Exec` + `cat` pull on write,
+    short-TTL scoped `download_url` on read — and why each was chosen over the rejected
+    alternatives in § "The dataset atom"; **the canonical CSV** (`timestamp,value`, RFC3339 in
+    UTC, ascending, LF, one metric per dataset) and `row_count = max(0, N-1)`; **the shrink
+    guard** (a replacement below 50% of the current `row_count` is refused without
+    `allow_shrink`); **retention, the orphan sweep and `agentdb.DatasetBlobPrefix`**
+    (`_datasets/bytes/`), with the warning that agentd runs one global `BlobStore` shared with
+    `_artifacts/bytes/` and snapshots, so an enumeration under the wrong prefix would sweep every
+    artifact and snapshot blob in the deployment.
+  - **Exactly these three environment variables are named, each with its default and its effect:**
+    `AGENTKIT_DATASET_MAX_BYTES` (64MiB, O6b), `AGENTKIT_DATASET_REAP_INTERVAL` (6h, `0` means
+    never sweep, O8), `AGENTKIT_DATASET_KEEP_VERSIONS` (30, O8). The Wolf-specific variables
+    (`WOLF_API_KEY`, `WOLF_MCP_TOKEN`, `AGENTKIT_MCP_ENV`) belong to O8's `.env.example` and are
+    explicitly **out of scope here** — say so in one line rather than documenting them twice.
+    *(This replaces "every new env var", which named no list and no baseline for "new": one
+    executor documented three, another six, and a verifier diffing `.env.example` failed the
+    first.)*
+  - States plainly that **bytes never need to cross the model's context** *and* both caveats: the
+    `download_url` carries a bearer token which DOES enter the tool result, the model context, the
+    persisted transcript, the SSE stream and every `worker.finished` subscriber; and nothing
+    prevents a model reading a downloaded file into its own context itself. The guarantee is "the
+    plan never *requires* bytes in context", not "bytes can never appear there".
+  - The **trust rule** is documented as the intended mechanism for an embedder holding
+    authoritative state: provenance is server-stamped from the credential's class and cannot be
+    supplied by the caller, so empty provenance means server-written; anything written from inside
+    a container carries a worker name or a session id and is advisory. The section also states the
+    two hazards an embedder must handle — `ApplyTopology` is a second producer of empty
+    provenance, and a retraction is not provenance-checked by `notRetractedSQL`, which is what
+    `?include_retracted=1` exists for.
+  - `docs/19-embedding.md` § 7's bullet **"Read-only. There is no HTTP write or delete"** is
+    replaced with the append route's contract: `POST /agent/memories`, key or JWT only, **201
+    Created**, provenance stamped empty and a body supplying it rejected `400`, `embed` defaults
+    true, >24KB with `embed: true` is `400`, hard ceiling 1MB, `501` off Postgres, no config
+    event. It also documents `GET /agent/memories?include_retracted=1` (O11) and its `403` for a
+    session-scoped credential.
+  - `docs/19-embedding.md` § 10's route table gains **five rows** — the four dataset routes of
+    § "Dataset HTTP routes" and `POST /agent/memories` — each with its auth column; and § 10's
+    environment-variable table gains the three dataset variables above.
+  - `docs/19-embedding.md`'s **hazard H12** ("the session-token secret and the API secret are the
+    same value") no longer describes this code and is rewritten: the two credential classes are
+    signed with different secrets (`go/cmd/agentd/sessionsecret.go`) and the API middleware
+    independently rejects any token carrying a non-empty `sid` with **401**
+    (`go/cmd/agentd/auth.go`, the `sid` lock, "doc 22, RD30"). This is O7's delegated fix (R28)
+    and it was previously assigned to O10 only by a parenthetical inside O7's criteria.
+  - `docs/18-workers-memory-events.md` § 6's core-tools table gains a **Datasets** row listing
+    `dataset_list`, `dataset_get` and `dataset_put`, each with its one-line contract and the
+    "metadata and URLs only, never bytes in a tool result" note.
+  - `CLAUDE.md`'s `docs/` repo-map row names `20-datasets` in its numbered list, and the status
+    block gains one sentence for the dataset atom and one for `POST /agent/memories`.
 - **TDD:** no (docs).
-- **Validation:** every route named in `docs/20-datasets.md` appears in `go/httpapi/httpapi.go`;
-  `grep -n 'Read-only' docs/19-embedding.md` no longer claims memories cannot be written.
-- **Depends on:** O7, O9
+- **Validation** — each command has a stated expected output; run from the repo root. Docs-only
+  tickets have no test to hide behind, so these are the whole gate:
+  ```sh
+  # 1. Every route the new doc names is a route that exists. Must print NOTHING.
+  for r in "GET /agent/datasets" "GET /agent/datasets/{name}/versions" \
+           "GET /agent/datasets/{name}/download" "POST /agent/memories"; do
+    grep -qF "$r" docs/20-datasets.md && grep -qF "$r" go/httpapi/httpapi.go || echo "MISSING $r"
+  done
+  # 2. The three env vars are named. Must print three lines, all >0.
+  for v in AGENTKIT_DATASET_MAX_BYTES AGENTKIT_DATASET_REAP_INTERVAL \
+           AGENTKIT_DATASET_KEEP_VERSIONS; do echo "$v $(grep -c "$v" docs/20-datasets.md)"; done
+  # 3. The stale read-only claim is gone. Must print nothing and exit 1.
+  grep -n 'There is no HTTP write' docs/19-embedding.md
+  # 4. The append route reached § 10's route table and § 7. Must hit at least twice.
+  grep -c 'POST /agent/memories' docs/19-embedding.md
+  # 5. H12 was rewritten, not left standing. Must hit both.
+  sed -n '/^### H12/,/^### H13/p' docs/19-embedding.md | grep -cE 'sessionsecret.go|401'
+  # 6. The core-tools table gained the three tools. Must print 3.
+  grep -cE 'dataset_list|dataset_get|dataset_put' docs/18-workers-memory-events.md
+  # 7. CLAUDE.md points at the new doc. Must hit.
+  grep -c '20-datasets' CLAUDE.md
+  ```
+- **Depends on:** O7, O8, O9, O11 — **all four are load-bearing, not courtesy**. O8 owns the two
+  reaper variables and their defaults, so scheduling O10 before O8 documents names that are still
+  unwritten; O11 owns `?include_retracted=1`, which no other ticket documents and which § 10's
+  table must carry; O9 is what proves the round trip the doc describes; O7 is the route itself.
 - [ ] done
 - Notes:
 
 ### O11: Make retraction visible to a trusted reader   [Status: pending | Model: opus]
-- **Scope:** Add `include_retracted=1` to `GET /agent/memories`, and return the retracting
-  memory's own provenance alongside a retracted row, so a caller holding project authority can
-  tell "this was withdrawn, by a worker" apart from "this does not exist". Without it, an
-  untrusted session can erase Wolf's authoritative state and nothing can detect it — see
-  § "The trust model" → "Retraction".
+- **Scope:** Add `include_retracted=1` to `GET /agent/memories`, and return **every** retraction of
+  a retracted row alongside it — each with its own provenance — so a caller holding project
+  authority can tell "this was withdrawn, by a worker" apart from "this does not exist". Without
+  it, an untrusted session can erase Wolf's authoritative state and nothing can detect it — see
+  § "The trust model" → "Retraction". Three things this ticket must get right that an earlier
+  draft got wrong:
+  - **The type is `agentdb.MemorySearchQuery`** (`go/agentdb/memories.go:83`), not `MemoryQuery`.
+    The plan's § "File Structure" row repeats the wrong name; the code wins.
+  - **All retractions, not the newest** (owner decision B5). Returning only the newest lets an
+    attacker append their own retraction on top of Wolf's, have it discarded as untrusted, and
+    thereby *resurrect* state Wolf had legitimately withdrawn.
+  - **The retractor lookup is store-side.** `go/httpapi` writes no SQL, and the lookup is one
+    additional query for the whole result page, never one per row.
+  Test names are pinned in the criteria below so the Validation filters and the code agree —
+  `go test -run` is an unanchored substring match, and the house naming convention puts every
+  existing regression test for this exact function outside the old filter.
 - **Repo:** agent-orange
 - **Files:** modify `go/agentdb/memories.go`, `go/agentdb/memories_test.go`,
-  `go/httpapi/memories.go`, `go/httpapi/memories_test.go`, `go/httpapi/httpapi.go`.
+  `go/agentdb/memories_retraction_live_test.go` (the live retraction cases live here and are the
+  regression gate — new live cases go beside them, not in a new file),
+  `go/httpapi/memories.go`, `go/httpapi/memories_test.go`, `go/httpapi/httpapi.go`,
+  `go/cmd/agentd/mcp_memory_test.go` (one added case; the tool itself does not change).
 - **Acceptance criteria:**
-  - `MemoryQuery` gains `IncludeRetracted bool`. When false — **the default, and every existing
-    caller** — `notRetractedSQL` (`go/agentdb/memories.go:284-288`) is applied exactly as today.
-    A test asserts existing behaviour is unchanged when the flag is absent.
-  - When true, retracted rows are returned, each carrying `retracted_by`:
-    `{ memory_id, created_by_worker, created_by_session, created_at }` for the **newest**
-    retraction of that row. Non-retracted rows omit the field entirely.
-  - Exposed as `?include_retracted=1` on `GET /agent/memories`. Any other value is `400`; absence
-    means false.
-  - **Available to project API keys and console JWTs only.** A session-scoped identity gets
-    `403` — an actor who can retract must not be able to inspect the audit view.
-  - `NewestMemory` and `GET /agent/memories/current` are **unchanged**. Briefings must keep
-    honouring retraction; this flag is a read-side audit facility, not a new default.
-  - The doc comment at `go/agentdb/memories.go:281-283` — explaining that `GetMemory` is
-    deliberately unfiltered — is extended to mention this flag as the search-side equivalent.
+  - `agentdb.MemorySearchQuery` gains `IncludeRetracted bool`. When false — **the default, and
+    every existing caller** — `notRetractedSQL("f")` is applied at `SearchMemories` exactly as
+    today. A test asserts existing behaviour is byte-identical when the flag is absent, and every
+    existing caller compiles unchanged.
+  - **`IncludeRetracted` is a property of the HARD filter**, the same clause that governs the
+    recency leg, both relevance legs and the `latest_per` pre-reduction (see the comment at
+    `SearchMemories`). So when it is true, a retracted row participates in the `latest_per`
+    reduction and can win its name's slot. **A paired test asserts both halves:**
+    `latest_per=name&include_retracted=1` returns the retracted row (carrying `retracted_by`), and
+    the same query without the flag returns the older row beneath it. This pair is the contract
+    W5's tamper detection is written against; leaving it unstated lets two competent executors
+    ship two different responses to the same request with no failing test.
+  - `agentdb.MemorySearchResult` (`go/agentdb/memories.go:113`) gains
+    `RetractedBy []MemoryRetraction \`json:"retracted_by,omitempty"\`` with
+    `MemoryRetraction{ MemoryID, CreatedByWorker, CreatedBySession string; CreatedAt int64 }`,
+    `CreatedAt` commented as unix **milliseconds** (the unit `memories` is stamped in). Rows that
+    are not retracted omit the field entirely.
+  - **`RetractedBy` carries EVERY retraction of that row, newest first** — not the newest one
+    (B5). A test appends two retractions to the same memory, one with empty provenance and one
+    from a session, and asserts both are returned. This is what lets a trusted reader ask "does
+    *any* retraction of this row have empty provenance?": with only the newest, an attacker
+    appends their own on top, the reader discards it as untrusted, and state that was legitimately
+    withdrawn comes back.
+  - Exposed as `?include_retracted=1` on `GET /agent/memories`. Absence means false; **any other
+    value — including `0`, `true` and the empty string — is `400`** naming the parameter.
+  - **Available to project API keys and console JWTs only.** The discriminator is
+    **`Identity.SessionScope != ""`** — i.e. an **embed token**, which is API-class and DOES reach
+    this handler (hazard H1) — and it gets **`403`**, checked before the query is built. A real
+    session token never reaches the handler at all: it is signed with a separate secret
+    (`go/cmd/agentd/sessionsecret.go`) and the middleware rejects any non-empty `sid` claim with
+    **401** (`go/cmd/agentd/auth.go`, the `sid` lock). Assert **401 at the real middleware** for
+    that case, exactly as O7 does in `go/cmd/agentd/sessionsecret_test.go`. Do not attempt to
+    construct a session token that reaches this handler; it cannot be done, and trying is the
+    round O7 had to pre-correct (R28).
+  - **`NewestMemory`, `GET /agent/memories/current`, `GetMemory` and `GET /agent/memories/{id}`
+    are all unchanged**, each asserted by a test. Briefings must keep honouring retraction; this
+    flag is a read-side audit facility, not a new default. `GetMemory` was already deliberately
+    unfiltered and does not gain `retracted_by`.
+  - **The `memory_search` MCP tool does NOT gain the argument.** An actor who can retract must not
+    be able to inspect the audit view, and the MCP surface is authenticated by exactly that actor's
+    session token. A case beside `TestMemoryToolsSearchSchemaAdmitsNarrowingArgs`
+    (`go/cmd/agentd/mcp_memory_test.go`) asserts `include_retracted` is absent from the tool's
+    input schema.
+  - The doc comment above `notRetractedSQL` — the one explaining that `GetMemory` is deliberately
+    unfiltered — is extended to name this flag as the search-side equivalent, and to say that it
+    returns all retractions rather than the newest, with B5's reason.
+  - **Test names are pinned so the Validation filters match them.** New `agentdb` cases are named
+    `TestRetractionLivePG_…` (matching `TestRetraction`, `Live` and `TestRetractionLivePG`
+    alike); new `httpapi` cases are named `TestListMemories_IncludeRetracted…`. A test written in
+    the file's obvious style but under a name none of the filters match is a ticket failure, not a
+    style preference — that is how a regression in retraction filtering would pass all three
+    commands below.
 - **TDD:** yes.
-- **Validation:**
-  - `cd go && go test ./agentdb/... -run 'TestMemor' -count=1`
-  - `AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test ./agentdb/... -run 'TestMemor' -count=1`
-  - `cd go && go test ./httpapi/... -run 'TestMemor' -count=1`
-- **Depends on:** O7 *(shares `go/httpapi/memories.go` and `httpapi.go`; strictly serial)*
+- **Validation** — the first two are the cheap gate; the two live runs are the only ones that can
+  execute the criteria, because every retraction case is live-Postgres only and skips silently
+  without the URL:
+  - `cd go && go build ./... && go vet ./...`
+  - `cd go && go test ./agentdb/... -run 'TestMemor|TestRetraction' -count=1` — compiles and runs
+    the sqlite-safe cases; the retraction cases SKIP here, which is expected and proves nothing
+  - `cd go && go test ./cmd/agentd/... -run 'TestMemoryTools' -count=1`
+  - `AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test ./agentdb/... \
+    -run 'TestMemor|TestRetraction' -count=1` — must exit 0. Then re-run with `-v` and
+    `| grep -E '^--- (PASS|SKIP|FAIL)'`: the four existing `TestRetraction*` cases
+    (`go/agentdb/memories_retraction_live_test.go`) plus every new `TestRetractionLivePG_*` case
+    must show `--- PASS`, and there must be **zero `--- SKIP` lines**. `-run 'TestMemor'` alone
+    matches none of those four — they are the only tests that pin `notRetractedSQL`, the exact
+    function this ticket edits
+  - `AGENTKIT_TEST_POSTGRES_URL=<same> go test ./httpapi/... -run 'TestMemor|TestListMemories' \
+    -count=1` — must exit 0. Then re-run with `-v | grep -E '^--- (PASS|SKIP|FAIL)'` and confirm
+    **zero `--- SKIP` lines**. `GET /agent/memories` is served by `ListMemories`, and its six
+    existing `TestListMemories_*` cases are not matched by `TestMemor`
+- **Depends on:** O7 *(shares `go/httpapi/memories.go` and `go/httpapi/httpapi.go`; strictly
+  serial, and O7's `MemoryStore` seam and 201 append are already in place)*
 - [ ] done
 - Notes:
 
@@ -1598,383 +2493,1614 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `.env.example` to `config.ts`, and eight later tickets add config.
 
 ### W2: Orange client   [Status: pending | Model: sonnet]
-- **Scope:** A typed client for every Orange route Wolf touches: session create/get-by-name/delete,
-  **memory append** (O7) and the three memory reads, dataset list/get/download, worker
-  create/delete, schedule create/delete/list, delivery list, embed-token mint, Google verify.
+- **Scope:** A typed client for every Orange route Wolf touches. **The list is exhaustive and
+  closed** — no later ticket may edit `api/src/orange/client.ts` except W15, which is strictly
+  serial after this one. Twenty-two routes:
+  `POST /agent/session`; `GET /agent/sessions/by-name/{name}`; `DELETE /agent/session/{id}`;
+  `GET /agent/sessions` (always `?user_email=*`, optional `&worker=`);
+  `POST /agent/memories` (**expects 201**, R36); `GET /agent/memories` (params `selector`, `query`,
+  `limit`, `latest_per`, `since`, `until`, **and `include_retracted=1`** — O11);
+  `GET /agent/memories/{id}`; `GET /agent/memories/current?name=`;
+  `GET /agent/datasets`; `GET /agent/datasets/{name}`; `GET /agent/datasets/{name}/download`;
+  `PUT /agent/workers/{name}`; `DELETE /agent/workers/{name}`;
+  `POST /agent/schedules`; `GET /agent/schedules`; `DELETE /agent/schedules/{id}`;
+  `GET /agent/deliveries`; `GET /agent/attention-requests`;
+  `GET /agent/project-settings`; `PUT /agent/project-settings`;
+  `POST /agent/embed-token`; `POST /auth/verify-google`.
+  Four of these exist only because a later ticket needs them and owns no client file:
+  `include_retracted` (W5's retraction defence), the session list (W5, W9, W10),
+  `attention-requests` (W10) and `project-settings` (W12's bootstrap, which read-merge-writes).
 - **Repo:** agent-wolf
 - **Files:** `api/src/orange/client.ts`, `api/src/orange/types.ts`,
-  `api/src/orange/client.test.ts`.
+  `api/src/orange/client.test.ts`, `api/src/orange/types.test.ts`.
 - **Acceptance criteria:**
-  - The API key is read from config once and never appears in a response, a log line or an error
-    message. A test asserts a thrown error's serialised form contains no key material.
-  - Timestamp units are in the type names — e.g. `createdAtMs` for memories and datasets,
-    `createdAtSec` for sessions. A test asserts the two are not interchangeable.
-  - Non-2xx responses become typed errors carrying Orange's status and body verbatim.
+  - **One method per route, twenty-two of them**, each with a test asserting the method, the path
+    and every query parameter it sends, driven through `undici` `MockAgent`. No live network in
+    any test.
+  - **The client reads no environment variable.** It is constructed as
+    `createOrangeClient({ baseUrl, apiKey })`; the caller supplies both. A test reads
+    `client.ts` and `types.ts` off disk and asserts neither contains `process.env`. *(This is not
+    fastidiousness: `api/src/config.ts` and `.env.example` are owned by W1/W16/W21 and W2 may not
+    edit them, so a client that reads config directly cannot be built without breaking the file
+    ownership rule — see `unresolved`.)*
+  - The API key is held in a closure-private constant and reaches only the `X-API-Key` request
+    header. Graded on exactly two tests, no more and no fewer: **(a)** a `WolfError` thrown by a
+    failed call, `JSON.stringify`-ed including `upstreamBody` and `cause`, contains no substring
+    of the key; **(b)** a `pino` instance with a capturing destination records one failing and one
+    succeeding call and no emitted line contains the key. The client writes no HTTP response, so
+    there is no third surface to grade.
+  - **Timestamp units are branded types**, declared once in `api/src/orange/types.ts`:
+    `export type UnixMs = number & { readonly __unit: "ms" }` and
+    `export type UnixSec = number & { readonly __unit: "s" }`, with `toMs` / `toSec` the only
+    conversions. Memory and dataset fields are `createdAtMs: UnixMs`; session fields and
+    `expiresAtSec` are `UnixSec`. The proof is compile-time, in `api/src/orange/types.test.ts`: a
+    fixture assigning a `UnixSec` where a `UnixMs` is expected, marked `// @ts-expect-error`. A
+    field *name* creates no TypeScript incompatibility, so a plainly-named `number` cannot satisfy
+    this and a runtime test asserting `1755600000000 !== 1755600000` proves nothing about the code.
+  - **Non-2xx responses become `WolfError`s** carrying Orange's status and body verbatim in
+    `upstreamBody`, with this **fixed** mapping, table-tested one row per status:
+    `404 → not_found`; `409 → conflict`; `403 → forbidden`; `400`/`422 → invalid`;
+    `410 → not_found` (the row exists but the blob is gone — callers treat it as absent);
+    `501 → misconfigured`, naming `DATABASE_URL`; `500`/`502`/`503`/`504`, a connection refusal or
+    a timeout `→ unavailable` (Orange being down is an upstream outage, not a Wolf bug); anything
+    else `→ internal`. A comment records that `unavailable` is the only kind W10 retries, which is
+    why a 500 must not land there.
+  - **One documented exception to that table:** a `404` from `POST /auth/verify-google` is
+    `misconfigured` naming **`GOOGLE_CLIENT_ID`**, not `not_found` — Orange 404s that route when
+    the variable is unset on *Orange*, and W8 must surface it as a configuration error rather than
+    an auth failure.
+  - **A `403` refusing a session create because the host port pool is exhausted maps to
+    `unavailable` and preserves Orange's message verbatim** — "host port pool is exhausted" is
+    operational and actionable, retryable is the correct semantics (deleting a finished session
+    frees a port), and flattening it into "could not create" throws away the only useful part.
   - `GET /agent/sessions` is always called with `?user_email=*`; an API key's synthetic email
-    (`api-key:<project>`) matches no session row and the list would otherwise be empty.
-  - Every memory read returns provenance fields; the client does not strip them.
+    (`api-key:<project>`) matches no session row and the list would otherwise come back empty.
+    A test asserts the parameter is present on every call, including when `&worker=` is also set.
+  - **Snippet reads and full-content reads are different types.** `GET /agent/memories` returns
+    rows with `snippet` and **no** `content` field (the store caps it at 500 characters);
+    `GET /agent/memories/{id}` and `/current` return `content` in full. A test asserts a
+    >600-character body round-trips whole through the two full-content methods.
+  - **Every memory read returns provenance** (`createdByWorker`, `createdBySession`) and the
+    client does not strip them; the list read also surfaces `retractedBy` (O11's shape) when
+    present. Asserted per method.
+  - Dataset metadata types match § "Dataset metadata JSON" field for field —
+    `id, name, version, labels, size_bytes, row_count, sha256, content_type, created_by_worker,
+    created_by_session, created_at` (unix ms), with `blob_path` and `project` **absent** — and the
+    envelopes are honoured: the list route returns `{"datasets":[…]}`, the single-name route
+    returns the **bare object**. A test asserts an unexpected envelope is an `invalid` error rather
+    than silently yielding `undefined` — W10's version gate compares `version` values, and
+    `undefined !== undefined` would make it re-download every CSV 288 times a day while its own
+    mocked test passed.
+  - `POST /agent/memories` treats **201** as success (R36) and any other 2xx as an `internal`
+    error naming the status, so a silent contract change surfaces rather than being absorbed.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/orange && yarn typecheck`
-- **Depends on:** W1 *(and O7 must be merged before this ticket's memory-append tests can run
-  against a live stack; the unit tests mock the HTTP layer and do not block)*
+- **Validation:**
+  - `cd api && yarn test src/orange` — exits 0. `vitest` exits **1** when a path filter matches no
+    files, so a green run here does mean the suite ran
+  - `cd api && grep -c "it(" src/orange/client.test.ts` — at least 22, one per route, plus the
+    mapping and provenance cases
+  - `cd api && yarn typecheck` — passes
+  - **The brand proof, two steps:** delete the `& { readonly __unit: "ms" }` suffix from `UnixMs`
+    in `src/orange/types.ts` and re-run `yarn typecheck` — it must **fail** with "Unused
+    '@ts-expect-error' directive". Restore the suffix and confirm it passes again. A brand that
+    has collapsed to `number` cannot be detected any other way
+- **Depends on:** W1 *(and O7 for the append route's 201, O11 for `include_retracted` — the unit
+  tests mock the HTTP layer with `MockAgent`, so neither Orange ticket blocks this one)*
 - [ ] done
 - Notes:
 
 ### W3: Spec and condition schema + validator   [Status: pending | Model: opus]
 - **Scope:** The spec type, the condition type, and the validator that is the **sole gate** on
-  go-live. Every rule listed under "Validation rules" in **Interfaces** is in scope.
+  go-live. The graded rule set is the numbered list **V1–V27** below — that list, not the run-on
+  paragraph in **Interfaces**, is what a verifier counts, because "every rule" over an unnumbered
+  paragraph is worth between 17 and 21 depending on how compound clauses are split, and a ticket
+  that fails on an arithmetic disagreement rather than on behaviour is the R38 failure shape.
+  Exported signature, non-throwing because three tickets need the error list without a 500:
+  `validateSpec(input: unknown): { valid: true; spec: Spec } | { valid: false; errors: SpecError[] }`
+  where `SpecError = { path: string; message: string }` — the same `{path, message}` shape W9
+  returns in its `422` and W8 embeds as `spec_validation`. `Spec`, `Metric`, `Method` and
+  `Condition` are exported from this module and every later ticket imports them rather than
+  redeclaring.
+  **The spec gains no report section.** The report template is a separate memory validated by W16
+  and W17, not by this validator — "the interview designs the report" is not a spec change.
 - **Repo:** agent-wolf
-- **Files:** `api/src/hypothesis/spec.ts`, `api/src/hypothesis/spec.test.ts`.
+- **Files:** `api/src/hypothesis/spec.ts`, `api/src/hypothesis/spec.test.ts`,
+  `api/src/hypothesis/__fixtures__/worked-spec.json`.
+- **The graded rule set.** Schemas are built with zod (pinned) and are **strict** at every level.
+  *Spec:* **V1** `thesis` required, non-empty string. **V2** `horizon_days` an integer in
+  `[7, 3650]`. **V3** `flat_band_pct` a number in `[0, 50]`, defaulting to `2.0`. **V4**
+  `staleness_days` a number in `[1, 90]`, defaulting to `5`. **V5** at least one metric. **V6** at
+  least one invalidation condition. **V7** unknown keys are rejected at spec, metric, method and
+  condition level alike, each error naming its JSON path — a stripping parser silently loses any
+  field an amendment added, and W9 writes this object to a memory that W10 and W14 read back.
+  *Metric:* **V8** `slug` unique across metrics, matching the label-value charset
+  `^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$`, and **≤ 50 characters** — not 63: the dataset name
+  is `<hyp-id>-<slug>`, so a 63-character slug validates here and then fails `dataset_put` on
+  every tick forever. **V9** `source` ∈ `{fred, stooq, derived}` — no other provider exists
+  (§ Out of Scope). **V10** `direction` ∈ `{up, down, flat}` — this is the enum § "The support
+  score" reads. **V11** `unit` a required non-empty string; W14 renders it beside every value.
+  **V12** `weight` in `(0, 1]`. **V13** weights sum to `1.0 ± 0.001`. **V14** a non-`derived`
+  metric has a non-empty `series_id`. **V15** a `derived` metric has `method` with a non-empty
+  `description` and a non-empty `formula`, and no `series_id`.
+  *Condition:* **V16** `id` unique within the spec and matching `^[a-z0-9]+(-[a-z0-9]+)*$` —
+  duplicate ids silently merge two conditions in W4's per-id result and in W10's
+  three-consecutive-indeterminate counter. **V17** `metric` names a metric slug in this spec.
+  **V18** `stat` ∈ `{level, change_abs, change_pct, drawdown_pct, ratio_to}`. **V19** `op` ∈
+  `{gt, gte, lt, lte}`. **V20** `threshold` a finite number. **V21** `reference` ∈
+  `{peak_since_live, value_at_live, trailing_n_days}`, **required unless** `stat` ∈
+  `{level, ratio_to}`, where it is **forbidden**. **V22** `reference_days` present iff
+  `reference == "trailing_n_days"`, and then an integer in `[2, 365]`. **V23** `ratio_metric`
+  present iff `stat == "ratio_to"`, and then naming a metric slug in this spec. **V24**
+  `ratio_lookback_days` present iff `stat == "ratio_to"`, and then an integer in `[1, 400]`.
+  **V25** `sustained_days` an integer in `[0, 365]`. **V26** `meaning` a required non-empty string.
+  *Cross-cutting:* **V27** every metric whose `weight >= 0.25` is named by at least one
+  condition's `metric` — a heavy metric that can never falsify anything is a scoreboard with a
+  blind spot.
 - **Acceptance criteria:**
-  - Returns **all** errors at once, each with a JSON path (`metrics[1].weight`), never just the
-    first.
-  - A table test covers every rule in **Interfaces**, each with an accepting and a rejecting case.
-  - Metric slugs are bounded at **50 characters**, not 63: the dataset name is
-    `<hyp-id>-<slug>` and the id is 12 characters plus a separator, so a 63-character slug
-    validates here and then fails `dataset_put` on every tick forever.
-  - A `derived` metric without a `method.description` and `method.formula` is rejected — an
+  - Returns **all** errors at once, each with a JSON path (`metrics[1].weight`,
+    `invalidation[0].ratio_lookback_days`), never just the first. A test feeds a spec violating
+    six rules at once and asserts six errors with six distinct paths.
+  - **One accepting case and one rejecting case for each of V1–V27**, so the suite carries 54
+    cases. Each case's name begins with its rule number, e.g. `V21 rejects a level condition that
+    carries a reference`. A rule with no case is a ticket failure; a rule the executor believes is
+    unimplementable goes in the Discovered Issues Log, not silently dropped.
+  - Metric slugs are bounded at **50** characters, with a rejecting case at 51 and an accepting
+    case at 50 (V8).
+  - A `derived` metric without `method.description` and `method.formula` is rejected (V15) — an
     unpinned derived metric is a scoreboard the critic can silently redefine.
-  - Rejects a spec where a metric carrying weight ≥ 0.25 has no invalidation condition: a heavy
-    metric that can never falsify anything is a scoreboard with a blind spot.
-  - The worked example in **Interfaces** round-trips.
+  - `api/src/hypothesis/__fixtures__/worked-spec.json` is the worked example from **Interfaces**
+    § "Spec JSON", transcribed as **real JSON** (the printed block is ```jsonc and cannot be
+    parsed), with its `invalidation` placeholder replaced by a real array: the condition object
+    printed verbatim in § "The condition object" (`inv-1`, on `drone-suppliers-basket`), plus a
+    second condition whose `metric` is `petro-settlement-share` — V27 requires one, since both
+    metrics carry weight ≥ 0.25 — chosen to satisfy V16–V26. **No metric or spec-level value from
+    the printed example may be altered.** Tests assert: `JSON.parse` succeeds, `validateSpec`
+    returns zero errors, and `parse → serialise → parse` is stable. If a value as printed in
+    **Interfaces** does not validate, that is a plan bug — log it, do not quietly amend the
+    fixture to make the ticket pass.
+  - The validator is pure and does no I/O; it imports `WolfError`/`WolfErrorKind` from
+    `api/src/errors.ts` for the `invalid` kind but adds no new kind.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/hypothesis/spec && yarn typecheck`
+- **Validation:**
+  - `cd api && yarn test src/hypothesis/spec` — exits 0. `vitest` exits **1** when a path filter
+    matches no files, so a green run here does mean the suite ran
+  - `cd api && grep -coE 'V[0-9]+ (accepts|rejects)' src/hypothesis/spec.test.ts` — prints **54**
+  - `cd api && grep -oE '\bV[0-9]+\b' src/hypothesis/spec.test.ts | sort -V -u | tr '\n' ' '` —
+    prints `V1 V2 … V27` with no gaps; a gap is a rule with no case
+  - `cd api && node -e "JSON.parse(require('fs').readFileSync('src/hypothesis/__fixtures__/worked-spec.json','utf8'))"`
+    — exits 0, proving the fixture is JSON rather than jsonc
+  - `cd api && yarn typecheck`
 - **Depends on:** W1
 - [ ] done
 - Notes:
 
 ### W4: The condition evaluator   [Status: pending | Model: opus]
-- **Scope:** Implement § "Condition semantics" exactly: the four statistics, the three references,
-  the sustained-window rule with its coverage floor, the indeterminate cases, and the support
-  score. Pure functions over parsed points — no I/O in this module.
+- **Scope:** Implement § "Condition semantics" exactly: the **five** statistics (`level`,
+  `change_abs`, `change_pct`, `drawdown_pct`, `ratio_to` — the Scope line said "four" until R26
+  added `change_abs`; the `stat` enum in § "The condition object" is the authority), the three
+  references (`value_at_live`, `peak_since_live`, `trailing_n_days`), the sustained-window rule
+  with its coverage floor, every indeterminate case, and the support score of § "The support
+  score". Pure functions over parsed points: **no I/O, no HTTP, no CSV parsing, no RFC3339
+  parsing and no clock read** inside this module — `nowMs` is an argument precisely so the module
+  is deterministic. Test names are prefixed `evaluate_` so a later `-t` filter can address them.
 - **Repo:** agent-wolf
-- **Files:** `api/src/hypothesis/evaluate.ts`, `api/src/hypothesis/evaluate.test.ts`.
+- **Files:** create `api/src/hypothesis/evaluate.ts`, `api/src/hypothesis/evaluate.test.ts`.
 - **Acceptance criteria:**
-  - Signature is pure: `evaluate(spec, seriesByMetric, liveAtMs, nowMs) → EvaluationResult`.
-  - Every statistic and every reference has a hand-computed fixture test — the expected numbers
-    are written out in the test, not derived by calling the implementation.
-  - **`nowMs` anchors the sustained window** (`(nowMs - sustained_days, nowMs]`), not `t_last`.
-    A fixture proves it: a series that tripped continuously and then stopped updating 60 days ago
-    yields `indeterminate`, **not** `tripped`. This single test is the difference between a
-    product that flags a dead feed and one that invalidates a thesis on ancient data.
-  - `sustained_days == 0` additionally requires the latest observation to be fresher than
-    `staleness_days`, else `indeterminate` with reason `stale_series`.
-  - **`R <= 0` skips the observation** for `change_pct` and `drawdown_pct` — a negative reference
-    would invert the comparison. All observations skipped ⇒ `indeterminate` with reason
-    `non_positive_reference`. There is a fixture with a zero-crossing series.
-  - `change_abs` is implemented and is the recommended statistic for zero-crossing series.
-  - `ratio_to` uses `ratio_lookback_days`, not a hard-coded constant, and skips when no prior
-    point falls inside it. A fixture pairs a daily metric with a monthly one.
-  - Reasons are enumerated, not free text: `stale_series`, `non_positive_reference`,
-    `insufficient_coverage`, `no_observations`.
-  - **Insufficient coverage yields `indeterminate`, never `tripped`.** A 30-day sustained window
-    containing 4 observations does not trip. There is an explicit test for this, because it is the
-    difference between "the evidence says so" and "there was no evidence to the contrary".
-  - A zero or missing reference value skips that observation rather than dividing.
-  - The support score is in `[-1, 1]`, uses `flat_band_pct`, and returns 0 for a metric with no
-    observations.
-  - The result carries, per condition, the window bounds and the observation count — this is what
-    gets snapshotted into the verdict memory, so it must be self-describing.
+  - Signature is
+    `evaluate(spec: HypothesisSpec, seriesByMetric: Record<string, Point[]>, liveAtMs: UnixMs,
+    nowMs: UnixMs): EvaluationResult`, where `Point` is `{ tMs: UnixMs; v: number }` — **unix
+    milliseconds, matching `liveAtMs` and `nowMs`**, ascending by `tMs`. Turning RFC3339 CSV into
+    `Point[]` is the caller's job (W10 and W11 both do it); this module never sees a date string.
+  - `Point`, `EvaluationResult`, `ConditionResult`, `MetricResult` and `Reason` are **exported from
+    this module**, and W8, W10, W11, W14 and the report frame import them rather than redeclaring
+    `{t, v}`. A `{t, v}` shape anywhere downstream is a silent `NaN` in the window arithmetic, not
+    a type error, which is why the export lives here and the name carries the unit.
+  - The returned object is exactly § "Shared shapes"'s `EvaluationResult` —
+    `{ evaluated_at_ms, support_score, conditions, metrics }` — with no extra and no renamed
+    fields, where:
+    - `ConditionResult` is `{ id, metric, state: "tripped"|"holding"|"indeterminate",
+      reason: Reason|null, value: number|null, threshold: number, op, window_start_ms,
+      window_end_ms, observations_in_window }`.
+    - `MetricResult` is `{ slug, direction: "up"|"down"|"flat", realised_change_pct: number|null,
+      last_observation_ms: UnixMs|null, stale: boolean, stale_reason: Reason|null }` — the field
+      names § "Shared shapes" pins, and `metrics` exists because W14 renders expected-vs-actual
+      direction and per-metric staleness and W8's board carries `support_score`; nothing else
+      computes them.
+  - A test asserts the whole result survives `JSON.parse(JSON.stringify(r))` deep-equal, because
+    W9 and W10 embed it verbatim in trusted memories and that is the permanent record after the
+    dataset reaper has removed the data it was computed from.
+  - **The statistic × reference grid is graded on these eleven hand-computed fixtures**, each with
+    the expected numbers written out in the test rather than produced by calling the
+    implementation: `level`; `change_abs` × each of the three references; `change_pct` × each of
+    the three; `drawdown_pct` × each of the three; `ratio_to`. Across the eleven, each of the four
+    `op` values (`gt`, `gte`, `lt`, `lte`) appears at least once. `peak_since_live` is a **running**
+    peak over `[L, t]` recomputed per observation; `trailing_n_days` is the mean over the
+    half-open `[t - reference_days, t)`; only observations with `tMs >= liveAtMs` are considered.
+  - **`nowMs` anchors the sustained window** — `(nowMs - sustained_days*86_400_000, nowMs]`, never
+    `t_last`. A fixture proves it: a series that held the condition continuously and then stopped
+    updating 60 days ago yields `indeterminate`/`insufficient_coverage`, **not** `tripped`. This
+    single test is the difference between a product that flags a dead feed and one that
+    invalidates a thesis on ancient data.
+  - The coverage floor is `ceil(sustained_days * 0.6)` **counted over non-skipped observations
+    only**, and it is checked before `holds`: a 30-day window containing 4 observations is
+    `indeterminate`/`insufficient_coverage` even when all 4 hold. Insufficient coverage yields
+    `indeterminate`, **never** `tripped` — absence of contrary evidence is not evidence.
+  - `sustained_days == 0` trips only if `holds` at the most recent observation **and** that
+    observation is newer than `staleness_days * 86_400_000` before `nowMs`; otherwise
+    `indeterminate`/`stale_series`. `staleness_days` is spec-level, default `5`.
+  - **`R <= 0` skips that observation** for `change_pct` and `drawdown_pct`, and `v_other == 0`
+    skips it for `ratio_to` — a non-positive reference silently inverts the comparison, which is
+    how a condition trips backwards. There is a fixture with a zero-crossing series.
+  - `change_abs` is implemented and its doc comment names it the statistic to use on any series
+    that can be `<= 0`.
+  - `ratio_to` resolves `v_other` at the nearest `ratio_metric` point **at or before** `t` within
+    `ratio_lookback_days`, never a hard-coded constant, and skips the observation when no such
+    point exists. A fixture pairs a daily metric with a monthly one at `ratio_lookback_days: 62`
+    and pins the resolved partner point for every observation.
+  - **`Reason` is a closed enumeration and this is the complete list**: `stale_series`,
+    `non_positive_reference`, `insufficient_coverage`, `no_observations`, `no_ratio_pair`.
+    `no_ratio_pair` closes the hole the audit found (A13): the plan mandated the mixed-frequency
+    fixture and defined no outcome for it. Do not add a sixth.
+  - **Skip-exhaustion is per-reason.** If every observation of a condition is skipped, the
+    condition is `indeterminate` with the reason of the skip — `non_positive_reference` for
+    `R <= 0` or `v_other == 0`, `no_ratio_pair` for a missing partner point. When both kinds occur
+    the reason is the one with the higher skip count, ties resolving to `non_positive_reference`.
+    A metric with no observations at all is `indeterminate`/`no_observations`. There is a fixture
+    per branch, including the tie.
+  - **`sustained_days == 0` whose most recent observation is skipped is `indeterminate`, never a
+    fallback to an earlier observation.** A fixture covers it.
+  - Per condition: `value` is the statistic **at the most recent non-skipped observation inside the
+    window** (for `sustained_days == 0`, at the most recent non-skipped observation overall), and
+    `null` when every observation was skipped; `window_start_ms`/`window_end_ms` are
+    `(nowMs - sustained_days*86_400_000, nowMs]`, and `[nowMs, nowMs]` when `sustained_days == 0`;
+    `observations_in_window` is the count of **non-skipped** observations — the same count the
+    coverage floor tests. One fixture pins all four for a window holding one skipped and three
+    counted observations. These are the numbers a human reads on W14's condition table when
+    deciding a verdict, so "the statistic somewhere in the window" is not good enough.
+  - `metrics[].realised_change_pct` is `change_pct` from `value_at_live` to the most recent
+    observation, `null` when there are no observations or the reference is `<= 0`.
+    `metrics[].stale` is true when there is no observation or the newest is older than
+    `staleness_days` before `nowMs`, with `stale_reason` `no_observations` or `stale_series`
+    accordingly, and `null` when not stale.
+  - **The support score is computed from `metrics[].realised_change_pct`**, so the number the UI
+    shows and the number the score uses cannot disagree: `s = +1/0/-1` per § "The support score"
+    using `flat_band_pct` (default `2.0`), `s = 0` for a metric with `realised_change_pct === null`,
+    and `support_score = Σ weight_i * s_i`, which lies in `[-1, 1]` because W3 already forces the
+    weights to sum to 1. A test asserts the bound on a spec whose every metric scores `-1`.
+  - **Determinism is tested, not assumed:** one test stubs `Date.now` to throw and asserts
+    `evaluate` still returns, and asserts two calls with identical arguments are deep-equal.
+  - `evaluate.ts` imports only type declarations from `./spec.js` and nothing else from the
+    repo — a test asserts the module's import list, so no I/O can creep in later.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/hypothesis/evaluate && yarn typecheck`
+- **Validation:**
+  - `cd api && yarn typecheck`
+  - `cd api && yarn test src/hypothesis/evaluate` — must report **0 skipped** and a non-zero test
+    count; every criterion above is a fixture in this file, so a green run with a skipped test is
+    a failed ticket. Confirm the eleven grid fixtures, the dead-feed fixture, the zero-crossing
+    fixture, the mixed-frequency fixture and the tie fixture appear by name in the output
+    (`yarn test src/hypothesis/evaluate --reporter=verbose`).
 - **Depends on:** W3
 - [ ] done
 - Notes:
 
 ### W5: Lifecycle, trusted store and tamper detection   [Status: pending | Model: opus]
 - **Scope:** The six-state machine with per-hypothesis serialisation, and reading/writing
-  hypotheses as **trusted** memories per § "The trust model".
+  hypotheses as **trusted** memories per § "The trust model". This ticket owns the trust primitives
+  the rest of the product is graded against: `TRUSTED_KINDS`, `isTrusted()`, the session index, the
+  retraction rule and the `Tamper` shape. W15 later re-exports them through
+  `api/src/report/kinds.ts`; it does not redefine them. Test names are prefixed `lifecycle_` and
+  `store_`.
 - **Repo:** agent-wolf
-- **Files:** `api/src/hypothesis/lifecycle.ts`, `api/src/hypothesis/store.ts`,
-  `api/src/hypothesis/lifecycle.test.ts`, `api/src/hypothesis/store.test.ts`.
+- **Files:** create `api/src/hypothesis/lifecycle.ts`, `api/src/hypothesis/store.ts`,
+  `api/src/hypothesis/lifecycle.test.ts`, `api/src/hypothesis/store.test.ts`,
+  `api/src/hypothesis/__fixtures__/` (Orange response bodies captured verbatim from a running O11
+  build — see the retraction criterion). `api/src/hypothesis/store.ts` is shared with W10, W15 and
+  W22 in that order (§ "Parallelism and file ownership"); W5 runs first and no other ticket may
+  hold it concurrently.
 - **Acceptance criteria:**
-  - Every legal transition is allowed and every illegal one throws a typed error naming both
-    states — an exhaustive table over all ordered state pairs.
+  - **The legal transition set is exactly these eight ordered pairs and no others:**
+    `draft → live`, `draft → archived`, `live → challenged`, `live → archived`,
+    `challenged → confirmed`, `challenged → invalidated`, `challenged → archived`, and
+    `challenged → live` — the last because a human accepting an amendment must return the
+    hypothesis to daily research; without it every amended hypothesis is stuck at `challenged`
+    with its schedule still firing and no route back (owner decision **B3**).
+  - **All six self-pairs are no-ops**, not errors and not writes (**B3**): they return the current
+    state and append **no** memory. This is what makes W10's idempotence criterion mean anything —
+    a hypothesis already `challenged` re-entering `challenged` must neither throw nor re-notify.
+    A test asserts the Orange client received no `POST /agent/memories` for a self-pair.
+  - `confirmed`, `invalidated` and `archived` are terminal: every non-self transition out of them
+    throws. The table test is **exhaustive over all 36 ordered pairs**, asserting exactly three
+    buckets — 8 legal-and-effective, 6 self no-ops, 22 illegal — and every illegal one throws a
+    typed `conflict` `WolfError` naming **both** states in its message.
   - Transitions are serialised per hypothesis id by an in-process async mutex, and the current
-    state is **re-read inside the critical section**. A test drives two concurrent transitions and
-    asserts one is rejected as illegal rather than both appending.
-  - **Only memories with `created_by_worker === "" && created_by_session === ""` are treated as
-    state.** A test appends a forged `status=confirmed` memory carrying a worker name and asserts
-    the reported status is unchanged.
-  - The board read is the two-step in § "The trust model": one `latest_per` request, and a
-    per-name follow-up **only** for ids whose newest row is untrusted. A test asserts the
-    all-trusted case issues exactly one request.
-  - An untrusted newest row produces a `tamper` field naming the writing worker or session.
-  - **The authoritative index of hypotheses is the session list**
-    (`GET /agent/sessions?user_email=*`, names matching `hyp-*`), not memory. A hypothesis whose
-    session exists but whose state row is absent from the board read is an anomaly, not an
-    absence.
-  - **Retraction is handled.** For any such anomaly, and always on the detail read, the store
-    queries with `include_retracted=1` (ticket O11) and **ignores any retraction whose own
-    provenance is non-empty**. A retraction written by Wolf itself (empty provenance) is honoured.
-  - A test appends a `retracts=<trusted-id>` memory from a session, asserts the reported status is
-    unchanged, and asserts a `tamper` field naming the retractor. **This test is the one that
-    matters** — the forged-newer-row test passes even against a store that retraction defeats.
-  - Ids are `hyp-<8 lowercase hex>`, generated, never derived from user text.
-  - The owner slug mapping is **total**: lowercase, `@` → `-at-`, every remaining character
-    outside `[a-z0-9._-]` → `-`, collapse runs of `-`, trim to 63, strip leading/trailing
-    non-alphanumerics. `kai+test@gmail.com` and `KAI@BadCode.dev` both produce valid labels. The
-    full address is kept in the memory content.
-  - The title is line 1 of the content and is parsed back from a 500-byte snippet, including the
-    case where the snippet truncates mid-multibyte-character.
+    state is **re-read from Orange inside the critical section**. A test drives two concurrent
+    transitions from the same starting state and asserts exactly one wrote and the other was
+    rejected as illegal — not that both appended and the later silently won. Serialisation is
+    per-id: a test asserts two different ids proceed concurrently.
+  - **`TRUSTED_KINDS` is an exported frozen set containing exactly `hypothesis`,
+    `hypothesis-spec`, `verdict`, `evaluation`, `report-template` — enumerated, never counted.**
+    A test asserts membership for all five and non-membership for `research-note`,
+    `spec-amendment`, `hypothesis-spec-candidate`, `report-candidate`, `report`,
+    `report-amendment`. *(An earlier draft said "the five kinds" while the vocabulary listed six;
+    an executor enumerating the wrong set makes every memory W10 writes untrusted, the board
+    silently shows no `support_score`, and no test in either ticket fails. Do not reintroduce a
+    count.)*
+  - **`isTrusted(memory, sessionIndex)` applies all three clauses of § "The trust model":** empty
+    provenance (`created_by_worker === "" && created_by_session === ""`), **and** kind in
+    `TRUSTED_KINDS`, **and** `name` matching an existing `hyp-<id>` session in the index. A test
+    asserts a memory passing only the first two clauses is **not** trusted — that is the
+    `ApplyTopology` forgery path (R24), and the session clause is the one that cannot be forged
+    from inside a container.
+  - A test appends a forged `status=confirmed` memory carrying a worker name and asserts the
+    reported status is unchanged and a `Tamper` with `reason: "forged_row"` is produced.
+  - **The board read is the two-step of § "The trust model":** one
+    `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name&limit=100`, and a per-name
+    follow-up **only** for ids whose newest row is untrusted. A test asserts the all-trusted case
+    issues exactly **one** memory request (the session index is a separate request and is counted
+    separately).
+  - **The authoritative index of hypotheses is the session list, not memory.** It is read as
+    `GET /agent/sessions?user_email=*&worker=interviewer&limit=200`, paginating on `offset` until
+    a page returns fewer than `limit` rows, then filtered to names matching `hyp-*`. Both filters
+    are load-bearing and both are server-side: `user_email=*` because an API key's synthetic email
+    matches no session row, and `?worker=` (`go/httpapi/history.go:123`) because the list is
+    ordered `updated_at DESC` with a default limit of 50 (`go/httpapi/history.go:103`,
+    `go/agentdb/sessions.go:407`) and the daily tick sessions — which carry
+    `worker=researcher-<id>` — would otherwise push idle `draft` hypotheses off the "authoritative"
+    index entirely, which is the exact failure the trust model exists to prevent. A test asserts
+    120 sessions across three pages all appear in the index.
+  - **Retraction is handled, and this is the criterion that matters.** For any anomaly, and always
+    on the detail read, the store queries with `include_retracted=1` (ticket O11) and resolves each
+    row from the **full** `retracted_by` list: a row counts as retracted iff **at least one**
+    retraction of it has empty provenance; retractions with non-empty provenance are ignored for
+    state and surfaced as `Tamper{reason: "hostile_retraction"}`. Reading only the newest
+    retraction lets an attacker **resurrect** state Wolf legitimately withdrew by appending their
+    own retraction on top of Wolf's (owner decision **B5**).
+  - A test appends a `retracts=<trusted-id>` memory written by a session, asserts the reported
+    status is unchanged, and asserts a `Tamper` naming the retractor. **This is the test that
+    matters** — the forged-newer-row test passes even against a store that retraction defeats
+    (`notRetractedSQL`, `go/agentdb/memories.go:284-288`, correlates on the retracted row's id and
+    project only and never checks who wrote the retraction).
+  - The `include_retracted=1` fixtures are response bodies **captured verbatim from a running O11
+    build** and committed under `api/src/hypothesis/__fixtures__/`, not hand-shaped — the two
+    criteria above are otherwise graded entirely against JSON this ticket invented.
+  - **`Tamper` is exactly the shape pinned in § "Shared shapes"**:
+    `{ reason: "forged_row"|"hostile_retraction"|"cross_hypothesis_write", written_by_worker,
+    written_by_session, memory_id }`, where `memory_id` is the **offending** row, not the trusted
+    one, and exactly one of the two provenance fields is non-empty. The field carried on a
+    hypothesis is `tamper?: Tamper[]` — an array, because a forged row and a hostile retraction can
+    be present at once and X1's `tamper-resistance.spec.ts` asserts on the two attacks separately.
+    W8's board, W13's banner, W14's detail page and X1 all read this shape and no other.
+  - **Ids are the bare 8 lowercase hex characters**, generated, never derived from user text; the
+    `hyp-` prefix belongs to the session name and to nothing else. A test asserts no value the
+    store emits or queries with ever matches `hyp-hyp-` — the doubled prefix makes the trust rule's
+    session clause never match and every hypothesis read as untrusted (§ "Vocabulary").
+  - Every trusted write goes through `POST /agent/memories` (O7) and expects **201** (R36); the
+    request body carries **no** `created_by_worker` or `created_by_session` — O7 rejects those
+    `400` rather than ignoring them — and a test asserts the serialised body contains neither key.
+  - **The owner slug mapping is total**: lowercase, `@` → `-at-`, every remaining character outside
+    `[a-z0-9._-]` → `-`, collapse runs of `-`, trim to 63, strip leading/trailing non-alphanumerics
+    — **and if the result is empty or does not begin with `[a-z0-9]`, prefix `u-` and append the
+    first 8 hex characters of the SHA-256 of the lowercased address**, so every possible input
+    yields a legal label. `kai+test@gmail.com`, `KAI@BadCode.dev` and `"+@-.com"` all produce valid
+    labels; a property test over 1000 random strings asserts every output matches
+    `^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$` (`go/agentdb/labels.go:33-34`) and is ≤63
+    characters. The full address is kept in the memory content, never in a label.
+  - The title is line 1 of the content and is parsed back from the search snippet, which is **500
+    characters, not 500 bytes** — `substring(content, 1, 500)` on a `text` column is
+    character-based (`go/agentdb/memories.go:35,451-452`), so a multibyte character is never split
+    and the snippet may exceed 500 bytes of UTF-8. Tests cover: a title shorter than the snippet; a
+    first line longer than 500 characters, where the title is the truncated prefix and is flagged
+    as truncated so the UI cannot claim it is complete; and a multibyte title, asserting the
+    snippet's byte length exceeds 500 while the parse is exact. Do not write a test for a
+    mid-character split: the server cannot produce one.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/hypothesis/lifecycle src/hypothesis/store && yarn typecheck`
-- **Depends on:** W2, W4, O11 *(the trusted store cannot detect retraction without O11)*
+- **Validation:**
+  - `cd api && yarn typecheck`
+  - `cd api && yarn test src/hypothesis/lifecycle src/hypothesis/store` — must report **0 skipped**
+    and a non-zero test count. Every criterion above is a case in one of these two files; a green
+    run that skipped one is a failed ticket.
+  - `cd api && yarn test src/hypothesis/lifecycle --reporter=verbose` must show the 36-pair table
+    naming all three buckets, and `… src/hypothesis/store --reporter=verbose` the forged-row,
+    hostile-retraction, three-page-index and doubled-prefix cases by name.
+  - `ls api/src/hypothesis/__fixtures__` is non-empty, and its README records the running O11 build
+    (commit sha) each body was captured from.
+- **Depends on:** W2, W4, O11 *(the trusted store cannot detect retraction without O11's
+  `include_retracted=1` and its `retracted_by` **array**; W2's client must expose the session
+  **list** with `worker=`/`offset` and the `include_retracted` read — neither is in W2's route list
+  as written, and W2's list is declared exhaustive and closed, so this is a cross-ticket
+  requirement, not something W5 may add to the client itself)*
 - [ ] done
 - Notes:
 
 ### W6: Market-data providers and normaliser   [Status: pending | Model: sonnet]
-- **Scope:** FRED and Stooq connectors, the normaliser to canonical CSV, and a TTL cache.
+- **Scope:** FRED and Stooq connectors — each exposing **both `search(query)` and `fetch(...)`** —
+  the normaliser to the canonical dataset CSV, the shared data-row counter, and a TTL cache.
+  `search` is in scope here and not in W7: W7 only exposes over MCP what this module implements,
+  and an earlier draft left the search implementation owned by nobody. Test names are prefixed
+  `marketdata_`.
 - **Repo:** agent-wolf
-- **Files:** `api/src/marketdata/{fred,stooq,normalise,cache}.ts` and a `.test.ts` beside each;
-  `api/src/marketdata/__fixtures__/` holding recorded real responses.
+- **Files:** create `api/src/marketdata/{fred,stooq,normalise,cache}.ts` and a `.test.ts` beside
+  each; `api/src/marketdata/__fixtures__/` holding the recorded responses and
+  `__fixtures__/stooq-tickers.json`; `api/src/marketdata/__fixtures__/README.md` recording the
+  exact command each fixture was captured with. **This ticket does not touch `api/src/config.ts`,
+  `.env.example` or `api/src/app.ts`** — they are owned by W1/W16/W21 (§ "Parallelism and file
+  ownership"), and the criteria below are written so it does not need to.
 - **Acceptance criteria:**
-  - Fixtures are **recorded real responses**, not hand-written, and each connector is tested
-    against its own fixture with no network access.
-  - Output is always RFC3339 UTC, ascending, deduplicated by timestamp, with **no gap filling and
-    no interpolation**.
-  - FRED's missing-value sentinel `.` omits the row; it never becomes `0`.
-  - Errors are typed and distinguish **not-found** from **unavailable** — the tick treats them
-    differently and the evaluator must not see an outage as an empty series.
-  - The cache honours a TTL, is keyed by `(source, id, from, to)`, and is bypassable per call.
+  - **The FRED endpoint is the keyed JSON API on `api.stlouisfed.org`** —
+    `/fred/series/observations` and `/fred/series/search` — never `fredgraph.csv`. The keyless CSV
+    path has no search endpoint and no metadata, which `series_search` requires (§ "Pinned
+    technology choices"). The key is the variable **`FRED_API_KEY`** (owner decision **B2**).
+  - **Nothing under `api/src/marketdata/` reads `process.env`.** Each connector and the cache is
+    constructed with explicit options — `createFredClient({ apiKey, fetchImpl })`,
+    `createCache({ ttlMs, now })` — so the module is unit-testable and needs no edit to the
+    config file it does not own. Wiring `FRED_API_KEY` and the cache TTL into `WolfConfig` and
+    `.env.example` is a one-line change owned by W1/W16/W21: **request it from the orchestrator
+    and record the request in Notes**; a missing key must surface as `WolfError.misconfigured`
+    naming `FRED_API_KEY`, raised at construction, not at first call. A test asserts that.
+  - **Fixtures are recorded real responses**, not hand-written, committed under
+    `__fixtures__/` with the recording command in the sibling `README.md`. Each connector is tested
+    against its own fixture with `undici` `MockAgent` and `enableNetConnect(false)`, so no test can
+    reach the network. **If no FRED key is available to the executor, recording the fixture is a
+    blocked step: log it in the Discovered Issues Log and stop — do not hand-write a substitute.**
+  - **Each connector exposes `search(query)`.** FRED's is `/fred/series/search`, mapping
+    `title`, `units`, `frequency`, `observation_start` and `observation_end` onto the
+    `{ source, id, title, unit, frequency, first, last }` shape of § "Market-data MCP tools".
+    **Stooq has no search API**: its `search` matches a committed static ticker table
+    (`__fixtures__/stooq-tickers.json`, covering at least the US equity and ETF symbols the
+    interviewer prompt suggests) case-insensitively on symbol and name, with `unit` always `"USD"`,
+    `frequency` always `"daily"`, and `first`/`last` **`null`** rather than synthesised by fetching
+    the series. A test asserts a Stooq search issues **zero** HTTP requests.
+  - **Stooq's value column is `Close`** — its daily CSV is `Date,Open,High,Low,Close,Volume` and
+    there is no adjusted column to prefer. FRED's is the `value` string of each observation.
+    A date-only provider timestamp (`YYYY-MM-DD`, which both providers emit) becomes
+    `YYYY-MM-DDT00:00:00Z`.
+  - **FRED's missing-value sentinel `.` omits the row entirely; it never becomes `0`.** A fixture
+    contains one and pins the omission.
+  - **`normalise()` emits the canonical dataset CSV byte-for-byte** as pinned in § "The canonical
+    dataset CSV": header exactly `timestamp,value`, RFC3339 in UTC, ascending by timestamp, `LF`
+    line endings, one metric per file, a single terminating `LF` after the last data row and no
+    blank line after it. A test asserts the **exact byte string** for a two-row fixture — nothing
+    enforced this before and the failure is silent: a `t,value` header makes W10's poller read zero
+    observations from a legitimately written dataset with no error anywhere.
+  - **`countDataRows(csv)` lives in `normalise.ts` and implements `max(0, N-1)`** over
+    LF-terminated lines, exactly as O6a's `row_count` does — header-only is `0`, empty is `0`, a
+    file with no trailing newline still counts its last line, and it is never `-1`. W7's
+    `series_fetch` reports `rows` from this function and nothing else, so `series_fetch`'s `rows`
+    and a later `dataset_put`'s `row_count` cannot disagree about an unmodified file. Six boundary
+    tests: empty, header-only, one row, one row without a trailing newline, two rows, and a file
+    ending in a blank line.
+  - Output is **deduplicated by timestamp keeping the LAST occurrence in provider order** — FRED
+    restatements re-emit a date with a corrected value and the corrected one must win, which is the
+    same fact that made § "Decisions" choose replace-over-append. A fixture contains a duplicated
+    date with two different values and pins the survivor. **No gap filling and no interpolation**,
+    ever: a missing day is a missing observation, and W4's coverage floor is what reads it.
+  - **Errors are typed with this exact mapping**, because W10's poller and W7 branch on it: an
+    upstream `404`, or FRED's "series does not exist" error body, is `not_found`; a `5xx`, a
+    connection failure, or a timeout is `unavailable` (**retryable**); a missing or rejected
+    credential is `misconfigured` naming `FRED_API_KEY`; any unrecognised throw is `internal`,
+    **never** `unavailable` (R39) — classifying our own bug as retryable makes the poller retry a
+    crashing path every tick forever. There is a test per branch, and one asserting a thrown
+    error's serialised form contains no key material.
+  - The cache honours a TTL (**default 3600s**, overridable per instance and, once an owning ticket
+    adds it, by `WOLF_MARKETDATA_CACHE_TTL`), is keyed by `(source, id, from, to)`, and is
+    bypassable per call. Expiry is tested with an injected clock, not a real timer.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/marketdata && yarn typecheck`
+- **Validation:**
+  - `cd api && yarn typecheck`
+  - `cd api && yarn test src/marketdata` — must report **0 skipped** and a non-zero test count.
+    Every criterion above is a case in this directory.
+  - `cd api && yarn test src/marketdata --reporter=verbose` must name the `.`-sentinel case, the
+    duplicate-date case, the exact-bytes case, the six `countDataRows` boundaries, the
+    zero-HTTP Stooq search and each of the four error branches.
+  - `git diff --name-only main -- api/src/config.ts api/src/app.ts .env.example` prints nothing —
+    this ticket must not edit files it does not own.
 - **Depends on:** W1
 - [ ] done
 - Notes:
 
-### W7: Market-data MCP server   [Status: pending | Model: sonnet]
-- **Scope:** An HTTP MCP server exposing `series_search` and `series_fetch`, authenticated by
-  `WOLF_MCP_TOKEN`, returning short-lived download URLs on Wolf's own origin.
+### W7: Market-data MCP server and the series download route   [Status: pending | Model: opus]
+- **Scope:** An HTTP MCP server named **`wolf`** exposing `series_search` and `series_fetch`,
+  authenticated by `WOLF_MCP_TOKEN`, **plus the route that actually serves the bytes those tools
+  point at** — `GET /series/download?token=…`. The download route is in scope here because no
+  other ticket builds it: W11's `api/src/routes/series.ts` is a different resource (signed-in,
+  per-hypothesis, JSON points over Orange *datasets*), and a `download_url` pointing at nothing
+  would first surface nine tickets later, inside a container, at X1. Test names are prefixed
+  `mcp_`.
 - **Repo:** agent-wolf
-- **Files:** `api/src/mcp/server.ts`, `api/src/mcp/tools.ts`, `api/src/mcp/server.test.ts`.
+- **Files:** create `api/src/mcp/server.ts`, `api/src/mcp/tools.ts`,
+  `api/src/mcp/seriesdownload.ts`, `api/src/mcp/server.test.ts`,
+  `api/src/mcp/seriesdownload.test.ts`.
+  **This ticket does not touch `api/src/config.ts`, `.env.example`, `api/src/app.ts` or anything
+  under `web/`** — all are owned by other tickets (§ "Parallelism and file ownership"), and the
+  criteria below are written so it does not need to.
 - **Acceptance criteria:**
-  - Neither tool returns CSV in its result body.
-  - Download URLs expire (default 300s) and are single-series scoped.
-  - An unauthenticated or wrongly-authenticated `/mcp` call is rejected **before** any provider is
-    touched — a test asserts the connector was not called.
-  - `tools/list` reports both tools with complete JSON Schemas.
-  - The URL host is taken from `WOLF_MCP_URL`'s origin, so a container gets an address it can
-    actually reach (`http://172.17.0.1:<port>` in compose).
+  - **The MCP server name is `wolf`**, so the tools are `mcp__wolf__series_search` and
+    `mcp__wolf__series_fetch`. W12's researcher prompt and X1's mock-model script use that exact
+    form; a different server name silently renames every tool the prompt calls.
+  - **The credential is sent as the bare header `X-Wolf-Mcp-Token: <token>`, with no scheme
+    prefix**, and compared in constant time. `Authorization: Bearer …` **cannot** work: Orange
+    validates MCP header values as whole-value `${VAR}` references only and rejects
+    `"Bearer ${WOLF_MCP_TOKEN}"` outright (`go/agentdb/sessions.go:55,88-89`), so W12's project MCP
+    config can carry `{"headers": {"X-Wolf-Mcp-Token": "${WOLF_MCP_TOKEN}"}}` and nothing else.
+    A test sends `Authorization: Bearer <valid token>` **with no `X-Wolf-Mcp-Token`** and asserts it
+    is still rejected, so the two schemes cannot silently diverge from W12's.
+  - **An unauthenticated or wrongly-authenticated `/mcp` call is rejected before any provider is
+    touched**, and the test asserts the connector was **not called**. The graded cases are: no
+    header at all; an empty header; a wrong token of the same length; a wrong token of a different
+    length; and the `Authorization: Bearer` case above.
+  - **Neither tool returns CSV in its result body.** A test asserts the serialised tool result
+    contains neither the string `timestamp,value` nor any data row of the fixture. Both tool
+    descriptions instruct the model to `curl` the URL to a file, not to echo the URL and not to
+    print the file's contents — the same hazard § "The dataset atom" states for `dataset_get`: the
+    bytes stay out of context, the credential in the URL does not.
+  - `series_search(query, source?)` returns `{ results: [{ source, id, title, unit, frequency,
+    first, last }] }` from W6's connectors, with `first`/`last` typed `string | null` and the tool
+    description stating that Stooq results omit them.
+  - `series_fetch(source, id, from?, to?)` returns
+    `{ download_url, expires_at_sec, rows, unit, source, id }`. **`expires_at_sec` is unix
+    seconds** — § "Interfaces" writes it `expires_at`, which § "Shared shapes" forbids ("encode the
+    unit in every type you write"); the suffixed name is the one to ship. `rows` comes from W6's
+    `countDataRows` and nothing else, so it cannot disagree with the `row_count` a later
+    `dataset_put` computes over the same bytes.
+  - **W7 owns the byte route: `GET /series/download?token=<t>`**, mounted on wolf-api **outside**
+    the `/api` prefix and outside the session-cookie auth W8 installs — a session container has no
+    cookie and reaches wolf-api directly at `http://<dind-gateway>:<port>`, not through nginx. It
+    is authenticated **solely** by the `token` query parameter (a query parameter, not a header:
+    the agent uses `curl`, and a header would force it to compose one). Responses set
+    `Content-Type: text/csv`, `X-Content-Type-Options: nosniff`, and a body byte-identical to W6's
+    `normalise()` output for that series.
+  - **The token is an HMAC-SHA256 over `(source, id, from, to, exp)`** signed with a secret
+    supplied to the server factory (to be wired as `WOLF_SERIES_TOKEN_SECRET` by whichever ticket
+    owns `config.ts`), default TTL **300s** (likewise `WOLF_SERIES_URL_TTL`). It is single-series
+    scoped, and there is a test per rejection: a token minted for `(fred, DGS10)` used to fetch
+    `(stooq, avav.us)` is **403**; an expired token is **403**; a token whose payload was edited is
+    **403**; a missing or malformed `token` parameter is **403**. All four bodies are byte-identical
+    — the route is not an existence oracle.
+  - **The route is stateless — the token IS the request.** On a download it re-resolves
+    `(source, id, from, to)` through W6's connector and cache and normalises again; there is no
+    server-side blob store, nothing to reap and no second copy of the bytes to drift. A test
+    asserts a download against a warm cache issues **zero** HTTP requests, so the normal case is a
+    cache hit and the `rows` a preceding `series_fetch` reported matches the body. A cache miss
+    that re-fetches a restated series may return a different row count; that is not an error.
+  - **The download URL's origin comes from the resolved MCP URL the server factory is given**
+    (`config.mcpUrl`), never from `process.env.WOLF_MCP_URL` directly, and this module runs no
+    second gateway probe: an explicit `WOLF_MCP_URL` wins, otherwise `api/src/config.ts` discovers
+    the DinD gateway at boot (**R43**, and W1 shipped it — `config.mcpUrl` and `config.mcpUrlSource`
+    exist today, so the audit's note that W1 left the variable unread is stale). A unit test builds
+    the server against a config whose `mcpUrl` was **discovered** rather than supplied and asserts
+    the download URL's origin follows it. Reading the raw variable yields `undefined` in exactly
+    the deployment R43 exists for, minting URLs that fail inside a container with no obvious cause.
+  - **Nothing under `api/src/mcp/` reads `process.env`.** The server factory takes
+    `{ mcpOrigin, mcpToken, seriesSecret, seriesUrlTtlSec, marketdata }`; it exports mountable
+    routers (`mcpRouter`, `seriesDownloadRouter`) and the tests build a throwaway Express app
+    around them. The one-line mount into `api/src/app.ts` is owned by W1/W21 — **request it from
+    the orchestrator and record the request in Notes**; X1 fails without it.
+  - `tools/list` reports both tools, and "complete JSON Schema" is graded on: every parameter
+    carries a `type` and a non-empty `description`; `required` lists exactly the non-optional
+    parameters (`query` for `series_search`; `source` and `id` for `series_fetch`); `source` is an
+    `enum` of `["fred","stooq"]`; and `from`/`to` document their format as `YYYY-MM-DD`.
+  - Provider failures propagate W6's typed kinds unchanged — a `not_found` series is a tool error
+    saying so, an `unavailable` upstream is a distinguishable retryable one, and an unrecognised
+    throw is `internal`. A test asserts a tool error body never contains the token, the secret or
+    the FRED key.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/mcp && yarn typecheck`
-- **Depends on:** W6
+- **Validation:**
+  - `cd api && yarn typecheck`
+  - `cd api && yarn test src/mcp` — must report **0 skipped** and a non-zero test count.
+  - `cd api && yarn test src/mcp --reporter=verbose` must name the five rejected-auth cases, the
+    four download-route 403 cases, the no-CSV-in-result case, the discovered-origin case and the
+    `tools/list` schema case.
+  - `git diff --name-only main -- api/src/config.ts api/src/app.ts .env.example web/` prints
+    nothing — this ticket must not edit files it does not own, and the browser never calls
+    `/series/download`, so wolf-web's nginx deliberately does not proxy it.
+- **Depends on:** W6 *(for both `fetch` and the `search` capability, and for `countDataRows`)*
 - [ ] done
 - Notes:
 
-### W8: Auth and hypothesis read routes   [Status: pending | Model: sonnet]
+### W8: Auth and hypothesis read routes   [Status: pending | Model: opus]
 - **Scope:** `POST /api/auth/google`, `GET /api/hypotheses`, `GET /api/hypotheses/:id`,
-  `POST /api/hypotheses`.
+  `POST /api/hypotheses` — plus the two things every later Wolf route inherits and that no other
+  ticket owns: the signed-cookie session module (`requireSignedIn`, which W9, W10 and W11 mount)
+  and the `kind=evaluation` board read that turns the poller's summary line into `support_score`.
+  Raised to **opus**: the allowlist, the cookie guard, the board parser and Orange's *asynchronous*
+  session create are four independent surfaces, not one route file.
 - **Repo:** agent-wolf
-- **Files:** `api/src/routes/auth.ts`, `api/src/routes/hypotheses.ts`, tests beside each.
+- **Files:** create `api/src/routes/auth.ts`, `api/src/routes/auth.test.ts`,
+  `api/src/routes/hypotheses.ts`, `api/src/routes/hypotheses.test.ts`, `api/src/auth/session.ts`,
+  `api/src/auth/session.test.ts`; modify `api/src/hypothesis/store.ts`,
+  `api/src/hypothesis/store.test.ts`, `api/src/app.ts` (mount `cookie-parser` and both routers),
+  `api/src/config.ts`, `.env.example`, `api/package.json` (`cookie-parser`,
+  `@types/cookie-parser`). Every route is mounted under the literal `/api` prefix — no proxy
+  rewrites it (**R37**).
 - **Acceptance criteria:**
-  - A Google identity Orange verifies but Wolf's allowlist does not contain is **rejected** —
-    Orange verifying the token is necessary, not sufficient. Orange's route also 404s unless
-    `GOOGLE_CLIENT_ID` is set **on Orange**; the client surfaces that as a configuration error
-    naming the variable, not as an auth failure.
-  - Cookies are `HttpOnly`, `SameSite=Lax`, and `Secure` outside development.
-  - `POST /api/hypotheses` creates the Orange session with
-    `{ name: "hyp-<id>", worker: "interviewer" }` and appends the trusted `draft` memory. If
-    session creation fails, no hypothesis memory is left behind.
-  - Orange's create errors are surfaced **verbatim** — notably "host port pool is exhausted",
-    which is operational, not a product bug, and must not be flattened into "could not create".
-  - `GET /api/hypotheses` returns the board including `support_score`, a conditions summary and
-    any `tamper` field.
+  - **The allowlist is `WOLF_ALLOWED_EMAILS`**: comma-separated, case-insensitive,
+    whitespace-trimmed full Google addresses, parsed in `api/src/config.ts` and documented in
+    `.env.example`. Unset or empty is a boot-time `misconfigured` failure naming the variable — an
+    empty allowlist must not silently mean "everyone". An identity Orange verifies that the list
+    does not contain is rejected **403, kind `forbidden`**: Orange verifying a token is necessary,
+    never sufficient.
+  - Wolf calls Orange's `POST /auth/verify-google` server-side with `WOLF_API_KEY` (that route is
+    API-key-only — `go/cmd/agentd/googleauth.go`'s `authenticatedByAPIKey` gate) and maps its three
+    answers separately: `200 {email, email_verified}` → continue; `401` → `forbidden` ("invalid
+    credential"); **`404` → `misconfigured` naming `GOOGLE_CLIENT_ID`**, because
+    `registerVerifyGoogle` mounts nothing when that variable is unset *on Orange*, and a
+    configuration hole must not read as a rejected user.
+  - **The session cookie is `wolf_session`, signed by `cookie-parser`'s built-in signing** (the
+    pinned mechanism — no session store, no session library) with `WOLF_SESSION_SECRET`, which is
+    required at boot (`misconfigured` naming it if absent or shorter than 32 characters). Flags:
+    `HttpOnly`, `SameSite=Lax`, `Secure` whenever `NODE_ENV !== "development"`, 12h `maxAge`. Tests
+    assert each flag on the `Set-Cookie` header and that a cookie whose signature is altered is
+    rejected.
+  - `requireSignedIn` is exported from `api/src/auth/session.ts` and is what W9, W10 and W11 mount;
+    a request with no cookie or an invalid one is **401** with kind `forbidden` (status overridden
+    on the `WolfError`), distinct from the allowlist's 403.
+  - `POST /api/hypotheses` answers **201** with `{ id }` (the R36 precedent: an unstated success
+    code is how five tickets got told after the fact). `GET` routes answer 200.
+  - Ids are the **bare** 8-hex form from W5; the `hyp-` prefix is added exactly once, on the session
+    name (§ "Vocabulary"). A test asserts the outbound session name matches `^hyp-[0-9a-f]{8}$` —
+    `hyp-hyp-…` is the failure that makes the trust rule's session clause never match.
+  - **Orange's session create is asynchronous and reports no provisioning failure on the POST.**
+    Verified: `POST /agent/session` answers `200 {id, status:"creating", workflowId}` and provisions
+    in a background goroutine (`go/httpapi/session.go`, the `go func(){ … Runner.CreateSession … }`
+    block); a failure lands on the row as `status:"error"` plus `create_error`. W8 therefore creates
+    with `{ name: "hyp-<id>", worker: "interviewer" }` and then polls
+    `GET /agent/sessions/by-name/hyp-<id>` (which returns `status` and `create_error` —
+    `go/httpapi/sessions_byname.go`) until the status leaves `creating`, bounded; on timeout,
+    `unavailable`.
+  - **The create failure surfaces are enumerated and each is mapped**, and a test drives all five:
+    `409 session name already taken` → `conflict`; `404 no worker "interviewer" in this project` →
+    `misconfigured` naming W12's bootstrap; `409 worker … is disabled` → `conflict`; `501`/`403`
+    (session names unconfigured, or no project on the credential) → `misconfigured`; and a polled
+    `status:"error"` → **`unavailable`, HTTP 503, with `create_error` passed through verbatim in
+    `message`**. "host port pool is exhausted" (`go/execenv/docker/ports.go:69`) arrives on that
+    last path and must not be flattened into "could not create"; a test asserts the exact upstream
+    string reaches the response body. `unavailable` is the right kind here because deleting a
+    finished session genuinely clears the condition (owner decision **B7**).
+  - **If the session never reaches a healthy status, no hypothesis memory is left behind** — the
+    trusted `kind=hypothesis, status=draft` memory is appended only after the poll succeeds. The
+    same five-failure test asserts zero `POST /agent/memories` calls.
+  - **The board issues exactly two `latest_per` requests regardless of hypothesis count**:
+    `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name` and
+    `GET /agent/memories?selector=kind%3Devaluation&latest_per=name`. A test with twelve
+    hypotheses asserts the request count is two. (W22 raises it to three when it adds `headline`;
+    do not fold that read in here — nothing writes a `kind=report` memory until W21.)
+  - **The evaluation summary parser lives in `api/src/hypothesis/store.ts` and there is exactly one
+    of it.** It parses line 1 of each `kind=evaluation` snippet in the format pinned in § "Where the
+    board's numbers come from" (`score=… tripped=… holding=… indeterminate=… evaluated=…`): all
+    five keys are required, and **unrecognised `key=value` tokens are ignored rather than
+    rejected**, so W10 can extend the line without breaking the board. A row whose line 1 does not
+    parse yields `support_score: null` and no conditions summary, and never throws. W10 writes the
+    same line and reuses this parser; a second copy in `routes/hypotheses.ts` fails the ticket.
+  - `GET /api/hypotheses` returns, per row: `id, title, owner, status, support_score,
+    conditions_summary, updated_at_ms, tamper?`. `tamper` is the pinned `Tamper` shape
+    (§ "Shared shapes"), passed through from W5 unmodified. A hypothesis present in W5's session
+    index whose state row is missing is rendered as an anomaly, never dropped.
+  - `GET /api/hypotheses/:id` returns `{ hypothesis, spec, spec_source, spec_validation,
+    evaluation, notes, amendments, verdict, attention_requests, atoms }`.
+  - `spec` is the newest **trusted** `kind=hypothesis-spec` memory once one exists; for a `draft` it
+    is the newest `kind=hypothesis-spec-candidate` memory — the pinned untrusted kind by which an
+    interview running inside a container gets its proposed spec to the human who approves it.
+    `spec_source` says which of the two it is, so W13 never renders a candidate as locked.
+  - `spec_validation: { valid: boolean, errors: [{path, message}] }` comes from W3's validator run
+    over whichever spec was returned, so W13's Go Live button can list blocking reasons *before* the
+    click — W9's 422 only exists after it. `web/` never imports the validator.
+  - `attention_requests: [{ id, message, created_at_sec, session_id, worker }]` is read from
+    `GET /agent/attention-requests` (the `AttentionRequests` route constant in
+    `go/httpapi/httpapi.go`, registered read-only) and attributed to this hypothesis when the row's
+    `worker` is `researcher-<id>` **or** its `session_id` is the `hyp-<id>` session's id — the row
+    carries both (`go/agentdb/attention.go:55-57`), and an interviewer ask carries only the session.
+    `created_at`/`expires_at` on that row are unix **seconds**, hence the field name. The surfacing
+    is here, in the route that renders it; W10's poller does not read attention requests.
+  - `notes` (`kind=research-note`) and `amendments` (`kind=spec-amendment`) are returned as
+    untrusted evidence and each row carries its writing worker or session, so W14 can label them.
+  - `atoms` names the four Orange atoms from § "Orange atoms per hypothesis": the `hyp-<id>` session
+    id, `researcher-<id>`, the schedule id (`null` before go-live) and the `<id>-<slug>` dataset
+    names from the locked spec.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/routes/auth src/routes/hypotheses && yarn typecheck`
-- **Depends on:** W5
+- **Validation:**
+  - `cd api && yarn test src/routes/auth src/routes/hypotheses src/auth/session src/hypothesis/store && yarn typecheck`
+  - Confirm the vitest summary reports **4 test files**. `api/vitest.config.ts` includes
+    `src/**/*.test.ts` only, and a positional filter that matches nothing runs zero files and exits
+    **0** — a green run that proved nothing is the third trap in § "The Validation rule".
+- **Depends on:** W5 *(which brings W2, W3, W4 and O11)*. O7 must be merged before any live-stack
+  run: the trusted memory append is its route, and it answers **201**.
 - [ ] done
-- Notes:
+- Notes: The report layer amends this ticket's two response shapes — `GET /api/hypotheses` gains
+  `headline` and `GET /api/hypotheses/:id` gains a `report` block — but **W22 delivers both**, from
+  the same two files, once a `kind=report` memory can exist. Keep the shapes open for extension and
+  do not implement them here.
 
 ### W9: Go-live provisioning and ordered teardown   [Status: pending | Model: opus]
-- **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live
-  validates the spec, writes it as a trusted locked memory, composes the researcher prompt as
-  `locked preamble + method body`, creates `researcher-<id>` and the daily schedule.
+- **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live reads the
+  candidate spec, validates it, writes it as a trusted locked memory, composes the researcher
+  prompt as `locked preamble + method body`, and creates `researcher-<id>` plus the daily schedule.
+  The three human routes are also the only path to a terminal state, and each ends in the ordered
+  teardown.
 - **Repo:** agent-wolf
-- **Files:** `api/src/hypothesis/provision.ts`, `api/src/hypothesis/provision.test.ts`; modify
-  `api/src/routes/hypotheses.ts`.
+- **Files:** create `api/src/hypothesis/provision.ts`, `api/src/hypothesis/provision.test.ts`;
+  modify `api/src/routes/hypotheses.ts`, `api/src/routes/hypotheses.test.ts`, `api/src/config.ts`,
+  `.env.example` (`WOLF_TEARDOWN_DRAIN_SECONDS`, `WOLF_SCHEDULE_CRON`). Routes mount under the
+  literal `/api` prefix (**R37**) into W8's existing router; `api/src/app.ts` is untouched.
 - **Acceptance criteria:**
-  - Go-live is refused `422` with per-field errors when the spec does not validate; the hypothesis
-    stays `draft` and **nothing** is provisioned.
-  - The composed researcher prompt embeds the locked spec verbatim in the preamble, including
-    every `derived` metric's `method` object.
-  - **Teardown order is: delete schedule → wait for pending deliveries to clear → delete worker →
-    delete session**, asserted by recorded call order, not merely that all four happened.
-  - **There is no delivery-cancel API and none is being added.** Deliveries are read-only over
-    HTTP — the only route is `GET /agent/deliveries` (`go/httpapi/httpapi.go:379`) — and
-    `DeliveryQuery` has no `worker` field (`go/agentdb/events.go`), so Wolf lists
-    `?status=pending` and filters on the row's own `worker` client-side. Draining therefore means
-    **polling until none remain**, with a bounded wait (`WOLF_TEARDOWN_DRAIN_TIMEOUT`, default
-    60s) after which teardown proceeds anyway and logs what it left behind.
-  - **The schedule must be deleted FIRST, before draining.** Draining while the schedule still
-    exists cannot terminate: the scheduler mints a new delivery every tick. Revision 2 had this
-    order backwards.
-  - A tick session still in flight is allowed to finish; anything it writes is untrusted by
-    construction and cannot change state.
-  - **Tick sessions are cleaned up.** Each firing creates a fresh session, and nothing else
-    deletes them — the 30-minute idle archive returns the port but the rows accumulate one per day
-    per hypothesis forever. Teardown deletes every session for this worker
-    (`GET /agent/sessions?user_email=*&worker=<name>`, the `?worker=` filter exists at
-    `go/httpapi/history.go:123`), and W10's poller does the same sweep for `live` hypotheses,
-    keeping the most recent 7 tick sessions per hypothesis for debugging.
-  - Teardown never deletes datasets — asserted explicitly.
-  - A partial failure mid-provision leaves no half-live hypothesis: either everything exists and
-    the status is `live`, or it is rolled back and the status is unchanged.
-  - The cron is 5-field, in the stack's local timezone, and overridable by `WOLF_SCHEDULE_CRON`
-    so X1 can run a per-minute schedule. `@daily` is never emitted — Orange refuses nicknames.
-  - A verdict or an accepted amendment writes a trusted memory carrying the **evaluation
-    snapshot** from W4, so the record survives the dataset reaper.
-  - Only the human-initiated routes can produce `confirmed`, `invalidated` or `archived`.
+  - **The candidate spec is the newest `kind=hypothesis-spec-candidate, name=<id>` memory**,
+    whatever its provenance — it is written from inside the interview container, so it is untrusted
+    by construction and W3's validator is the whole gate. `POST /api/hypotheses/:id/go-live` takes
+    **no request body**; a hypothesis with no candidate is refused `422` with
+    `[{path: "", message: "no spec proposed yet"}]`. (Nothing else in the plan carried the
+    interview's output across the container boundary; the two candidate kinds are what do.)
+  - Go-live is refused `422` with per-field errors from W3 — **all of them at once, each with its
+    JSON path** — when the candidate does not validate. The hypothesis stays `draft` and nothing is
+    provisioned: a test asserts zero worker, schedule and memory writes on that path.
+  - **Provisioning order is fixed, and it is what makes rollback possible.** Memories are
+    append-only with no delete, so the trusted `live` row must be written last or the claim is
+    unsatisfiable: (1) append the trusted `kind=hypothesis-spec, status=locked` memory carrying the
+    candidate JSON verbatim (`POST /agent/memories`, which answers **201** — R36); (2)
+    `PUT /agent/workers/researcher-<id>` with the composed prompt; (3) `POST /agent/schedules` in
+    worker mode; (4) append the trusted `kind=hypothesis, status=live` memory **last**.
+  - A test injects a failure at **each of steps 1, 2 and 3 in turn** and asserts, for each: no
+    `status=live` memory was appended, the status still reads `draft`, and any worker or schedule
+    created by an earlier step was deleted. Step 1's memory is deliberately **not** withdrawn — an
+    orphaned locked spec with no `live` row is inert — and the test asserts that too, so a later
+    executor does not "fix" it with a retraction.
+  - The composed researcher prompt embeds the locked spec verbatim in the preamble, including every
+    `derived` metric's `method` object. A test asserts a derived metric's `method` object appears
+    byte-for-byte inside the worker's `system_prompt`; the mutable method body is appended after the
+    preamble and is the only part W12's critic may later rewrite.
+  - The cron is **5-field**, evaluated in the stack-local timezone, and overridable by
+    `WOLF_SCHEDULE_CRON` (an integer-free string; default a once-daily 5-field expression) so X1 can
+    run `* * * * *`. `@daily` is never emitted — `agentdb.Schedule.Cron` is validated on write and
+    refuses nicknames.
+  - **Teardown order is asserted by recorded call order, not by "all five happened":**
+    1. `DELETE /agent/schedules/{id}` — **first**. Draining before this cannot terminate: the
+       scheduler mints a delivery every tick and only checks that the worker *exists*
+       (`go/cmd/agentd/scheduler.go:363-371`), dispatch then fails it with `worker "x" is disabled`
+       (`go/cmd/agentd/dispatch.go:246-248`), and the five-failure streak
+       (`go/cmd/agentd/scheduler.go:768-790`) is the only thing that would ever stop it.
+    2. **Drain pending deliveries for this worker.** There is no delivery-cancel route and none is
+       being added — deliveries are read-only over HTTP (the `Deliveries` route constant in
+       `go/httpapi/httpapi.go`, `GET /agent/deliveries`) and `DeliveryQuery` has no `worker` field
+       (`go/agentdb/events.go:296-307`), while the row itself does (`EventDelivery.Worker`,
+       `go/agentdb/events.go:263`). So Wolf polls `?status=pending`, filters on the row's own
+       `worker` client-side, and waits until none remain, bounded by `WOLF_TEARDOWN_DRAIN_SECONDS`
+       — an integer count of **seconds**, default `60` — after which teardown proceeds anyway and
+       logs the delivery ids it left behind.
+    3. `DELETE /agent/workers/researcher-<id>`.
+    4. Delete the tick sessions: `GET /agent/sessions?user_email=*&worker=researcher-<id>` (the
+       `?worker=` filter exists — `go/httpapi/history.go:123`) and delete every row it returns.
+       Nothing else deletes them; the 30-minute archive loop returns the port but leaves one row per
+       day per hypothesis forever.
+    5. `DELETE /agent/session/{id}` for the `hyp-<id>` session.
+  - A tick session still in flight is allowed to finish. Anything it writes carries a session id in
+    its provenance and is therefore untrusted by construction, so it cannot change state.
+  - **Teardown never deletes datasets** — a test records every outbound request and asserts none is
+    a `/agent/datasets` path. The datasets are the evidence behind the verdict.
+  - `/verdict` accepts `{ verdict: "confirmed" | "invalidated", rationale }`; any other `verdict`,
+    or an empty `rationale`, is `400 invalid`. It appends a trusted `kind=verdict,
+    status=<verdict>` memory whose content carries the rationale, the deciding user's full address
+    and the **complete W4 `EvaluationResult` snapshot** — that snapshot is why the record outlives
+    O3's 30-version dataset reaper — then transitions and runs the teardown above.
+  - `/retire` accepts `{ rationale }`, moves the hypothesis to `archived` from any non-terminal
+    state, writes the trusted `kind=hypothesis, status=archived` memory, and runs the same teardown.
+  - `/amend` accepts `{ amendment_id, decision: "accept" | "reject", rationale }`; any other
+    `decision` value is `400 invalid`. `accept` re-runs W3's validator over the amended spec (`422`
+    with per-field errors and **nothing written** on failure), appends a new trusted
+    `kind=hypothesis-spec, status=locked` memory carrying the amended spec together with
+    `amendment_id`, the deciding user and the rationale, and returns the hypothesis to **`live`** —
+    `challenged → live` on an accepted amendment is legal (owner decision **B3**); without it every
+    amended hypothesis is stuck at `challenged` with its research still running and no route back.
+  - **Only the human-initiated routes can produce `confirmed`, `invalidated` or `archived`.** All
+    four routes sit behind W8's `requireSignedIn`; a test drives each one with no `wolf_session`
+    cookie and asserts `401` and zero memory writes.
+  - Every state change goes through W5's lifecycle machine inside its per-id mutex, with the current
+    state re-read inside the critical section. Self-transitions are no-ops (**B3**).
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/hypothesis/provision && yarn typecheck`
-- **Depends on:** W8, W12 *(the preamble template is a W12 deliverable)*
+- **Validation:**
+  - `cd api && yarn test src/hypothesis/provision src/routes/hypotheses && yarn typecheck`
+  - Confirm the vitest summary reports **2 test files**. `api/vitest.config.ts` includes
+    `src/**/*.test.ts` only, so a positional filter matching nothing runs zero files and exits **0**
+    — and at least three of the criteria above (`422`, the `401` gate, the verdict snapshot) live in
+    `routes/hypotheses.test.ts`, which the previous single-path filter never executed.
+- **Depends on:** W8, W12 *(the locked-preamble template is a W12 deliverable)*
 - [ ] done
-- Notes:
+- Notes: The report layer's amendment table gives W9 a "refuse go-live unless a `report-template`
+  exists" gate. **It is deliberately not folded in here**: nothing writes a `report-template` until
+  W21, and W21 depends on W11 → W9, so implementing it now would both create a dependency cycle and
+  make every go-live — including X1's — fail. Recorded for the owner in this ticket's unresolved
+  list; the natural home is W21 or W22.
 
 ### W10: Evaluation poller — the `live → challenged` trigger   [Status: pending | Model: opus]
-- **Scope:** The mechanism that actually moves a hypothesis to `challenged`. Nothing else does:
-  Orange cannot call Wolf (no webhook; subscriptions dispatch workers, not HTTP), so Wolf polls.
+- **Scope:** The mechanism that actually moves a hypothesis to `challenged`, and the writer of the
+  board's numbers. Nothing else does either: Orange cannot call Wolf (no webhook; subscriptions
+  dispatch workers, not HTTP), so Wolf polls. Also owns the canonical-CSV parser, because two
+  tickets read dataset bytes and there must be exactly one parser in the tree.
 - **Repo:** agent-wolf
-- **Files:** `api/src/hypothesis/poller.ts`, `api/src/hypothesis/poller.test.ts`; wire into the
-  api entrypoint.
+- **Files:** create `api/src/hypothesis/poller.ts`, `api/src/hypothesis/poller.test.ts`,
+  `api/src/hypothesis/points.ts`, `api/src/hypothesis/points.test.ts`; modify
+  `api/src/hypothesis/store.ts`, `api/src/hypothesis/store.test.ts` (the `kind=evaluation` append
+  and its summary line), `api/src/index.ts` (start the interval after `app.listen`),
+  `api/src/config.ts`, `.env.example` (`WOLF_POLL_INTERVAL_SECONDS`).
 - **Acceptance criteria:**
-  - Runs on an interval (`WOLF_POLL_INTERVAL`, default 5m) over every `live` hypothesis: fetch each
-    metric's current dataset, parse, run W4's evaluator, and act on the result.
-  - **Dataset reads are version-gated.** Datasets change once a day; polling every 5 minutes would
-    re-download and re-parse each CSV 288 times a day. The poller fetches
-    `GET /agent/datasets/{name}` (metadata, carrying `version` and `sha256`) first and skips the
-    byte fetch entirely when `version` is unchanged, caching parsed points by `(name, version)`.
-    A test asserts a second poll over unchanged data issues no download.
-  - **The poller writes the board's numbers.** It appends a trusted `kind=evaluation` memory whose
-    line 1 is the summary line specified in § "Where the board's numbers come from" and whose body
-    is the full snapshot — but **only when that summary line differs from the previous one, or
-    more than 20 hours have passed**. A test asserts an unchanged evaluation appends nothing.
-  - It sweeps completed tick sessions for each `live` hypothesis, keeping the most recent 7.
-  - Any condition `tripped` ⇒ transition to `challenged` through W5's state machine, writing the
-    trusted memory **with the evaluation snapshot embedded**.
-  - **Notification is Wolf's own, not Orange's.** `request_human_attention` is an MCP tool
-    callable only from inside a container; over HTTP, attention is **read-only**
-    (`GET /agent/attention-requests`, `go/httpapi/httpapi.go:319`). The `challenged` state on the
-    board IS the notification surface. The poller additionally READS
-    `GET /agent/attention-requests` so asks raised by the researcher agent itself appear on the
-    hypothesis detail page.
-  - `horizon_days` elapsed with nothing tripped ⇒ also `challenged`, with a distinct reason
-    (`horizon_reached`) so the UI can say "time's up, verdict?" rather than "your thesis failed".
-  - Three consecutive polls where the same condition is `indeterminate` ⇒ raise a human-attention
-    flag on the hypothesis, without changing state. A scoreboard nobody can compute is surfaced,
-    not ignored.
-  - The poller is **idempotent**: a hypothesis already `challenged` is not re-transitioned and does
-    not re-notify. Asserted by running the poller twice over the same data.
-  - A dataset that 404s (never written yet) is not an error and not an evaluation — it is skipped
-    with a log line.
-  - Poll failures never crash the process; each hypothesis is isolated.
+  - Runs on an interval — `WOLF_POLL_INTERVAL_SECONDS`, an integer count of **seconds**, default
+    `300` — over every `live` hypothesis, enumerated from W5's session index
+    (`GET /agent/sessions?user_email=*`, names matching `hyp-*`), never from memory alone.
+  - **The interval is started in `api/src/index.ts` after `app.listen`, never as an import side
+    effect.** A test that imports `createApp` asserts no timer was scheduled — otherwise every
+    route test in the repo starts a live poller.
+  - **Dataset reads are version-gated.** For each metric the poller first fetches
+    `GET /agent/datasets/<id>-<metric-slug>`, whose response is the **bare metadata object**
+    (§ "Dataset metadata JSON" — the list route wraps in `{"datasets":[…]}`, the single-name route
+    does not), carrying `version`, `sha256`, `row_count` and `created_at` in unix **milliseconds**.
+    It skips the byte fetch entirely when `version` is unchanged and caches parsed points by
+    `(name, version)`. A test asserts a second poll over unchanged data issues **no** download
+    request. A response with no `version` field is a hard `invalid` error, never treated as
+    unchanged: `undefined !== undefined` is false, and that single mistake re-downloads every CSV
+    288 times a day while the mocked test still passes.
+  - **`parseCanonicalCsv(text) → Point[]` in `api/src/hypothesis/points.ts` is the one parser**, and
+    it implements the canonical dataset CSV exactly (§ "The dataset atom"): header **exactly**
+    `timestamp,value`, RFC3339 UTC timestamps, ascending, LF line endings, no trailing blank line,
+    one metric per dataset. `Point` is W4's pinned `{ tMs: UnixMs; v: number }`; `tMs` is the
+    RFC3339 timestamp parsed to unix **milliseconds**, matching W4's `liveAtMs`/`nowMs`, and a test
+    asserts a known row round-trips to the expected integer.
+  - **The parser's graded rejections are enumerated**, each a typed `invalid` error naming the
+    offending line number: a header that is not byte-for-byte `timestamp,value`; a row whose column
+    count is not 2; a timestamp that is not RFC3339 or not UTC; a `value` that is empty or not
+    finite; a timestamp that is not strictly greater than its predecessor. A header-only file is
+    **zero observations, not an error**. A wrong header must fail loudly — the whole reason this
+    format is pinned is that a `t,value` header otherwise makes the poller read zero observations
+    from a legitimately written dataset with no error anywhere.
+  - **The poller writes the board's numbers.** It appends a trusted `kind=evaluation, name=<id>`
+    memory whose line 1 is the summary line pinned in § "Where the board's numbers come from" and
+    whose remaining content is the full `EvaluationResult` as JSON — but **only when that summary
+    line differs from the previous one, or more than 20 hours have passed**. Two tests: an unchanged
+    evaluation appends nothing; the same unchanged evaluation 21 hours later appends exactly once.
+  - **Three consecutive `kind=evaluation` memories in which the same condition id is
+    `indeterminate` raise attention, and the counter is derived, not held in process.** The poller
+    reads the last three `kind=evaluation` memories for that name; on a third consecutive
+    `indeterminate` for a condition it writes `attention: [{condition_id, reason, since_ms}]` into
+    the evaluation JSON body and appends ` attention=<n>` to the summary line. The state does not
+    change. Deriving the counter from memory rather than from a field is what makes a restart not
+    reset it; appending to the summary line is what makes the write land, since the appearance of
+    `attention` is itself a change to line 1. (W8's parser ignores unrecognised `key=value` tokens,
+    which is what makes this extension safe.)
+  - Any condition `tripped` ⇒ transition `live → challenged` through W5's machine, writing the
+    trusted `kind=hypothesis, status=challenged` memory with the **full evaluation snapshot
+    embedded**, reason `condition_tripped`.
+  - `horizon_days` elapsed since go-live with nothing tripped ⇒ also `challenged`, with reason
+    `horizon_reached`, so the UI can say "time's up, verdict?" rather than "your thesis failed".
+  - **The poller is idempotent.** A hypothesis already `challenged` is not re-transitioned and
+    writes no second state memory; self-transitions are no-ops (owner decision **B3**, which is what
+    makes this criterion mean anything). Asserted by running the poller twice over the same data and
+    counting `POST /agent/memories` calls.
+  - **Tick sessions are swept without consulting status.** List
+    `GET /agent/sessions?user_email=*&worker=researcher-<id>`, order by `created_at` descending, and
+    delete every session past the 7th **whose id is not the `session_id` of any delivery currently
+    `pending` or `running` for that worker**. Orange has no "completed" session status: a finished
+    tick session reads `running`/`active` for up to 30 minutes and `archived` only afterwards, so a
+    status filter either sweeps nothing on a stack with a long idle timeout or deletes a session
+    that is at that moment mid-`dataset_put`.
+  - **Failure handling is enumerated and per-hypothesis.** A `404` from the dataset metadata route
+    means "never written yet": skipped with a log line, not an error and not an evaluation. A
+    `WolfError` of kind `unavailable` skips that hypothesis for this tick without penalty. Any other
+    kind is logged at `error` and the hypothesis is skipped. `not_found` and `unavailable` must stay
+    distinguishable (§ "Shared error taxonomy") — conflating them makes a provider outage look like
+    a missing metric. No throw escapes the interval callback, and one hypothesis's failure never
+    stops the rest; a test drives a hypothesis that throws and asserts the next one is still polled.
+  - **The poller does not read `GET /agent/attention-requests`.** Attention raised from inside a
+    container by `request_human_attention` is surfaced by W8's detail route, which owns
+    `api/src/routes/hypotheses.ts`; a poller that read the rows and exported them would be dead code
+    the criterion vacuously satisfies. Over HTTP attention is read-only — the `AttentionRequests`
+    constant in `go/httpapi/httpapi.go` is registered `GET`-only — and the `challenged` state on the
+    board is Wolf's notification surface.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/hypothesis/poller && yarn typecheck`
+- **Validation:**
+  - `cd api && yarn test src/hypothesis/poller src/hypothesis/points src/hypothesis/store && yarn typecheck`
+  - Confirm the vitest summary reports **3 test files**. `api/vitest.config.ts` includes
+    `src/**/*.test.ts` only, and a positional filter that matches nothing runs zero files and exits
+    **0**.
 - **Depends on:** W9
 - [ ] done
 - Notes:
 
 ### W11: Embed tokens and the series proxy   [Status: pending | Model: sonnet]
-- **Scope:** `GET /api/hypotheses/:id/embed-token` and `GET /api/hypotheses/:id/series/:metric`.
+- **Scope:** `GET /api/hypotheses/:id/embed-token` and `GET /api/hypotheses/:id/series/:metric` —
+  the two routes the browser needs and the only two places Wolf hands the UI something that came
+  from Orange. Both are read-only; neither changes hypothesis state.
 - **Repo:** agent-wolf
-- **Files:** `api/src/routes/embed.ts`, `api/src/routes/series.ts`, tests beside each.
+- **Files:** create `api/src/routes/embed.ts`, `api/src/routes/embed.test.ts`,
+  `api/src/routes/series.ts`, `api/src/routes/series.test.ts`; modify `api/src/app.ts` (mount both
+  routers), `api/src/config.ts`, `.env.example` (`ORANGE_PUBLIC_URL`). Routes are mounted under the
+  literal `/api` prefix — no proxy rewrites it (**R37**).
 - **Acceptance criteria:**
-  - Embed tokens are minted at the **900s default**, never at the 3600s ceiling. Hazard H1 means
-    the token carries project-wide authority for its lifetime; the TTL is the only bound.
-  - A caller who is not signed in gets no token.
-  - The series route **proxies bytes** and never redirects the browser to Orange — Orange has no
-    CORS by design and a redirect would fail.
-  - A `404` from Orange for a dataset that has never been written becomes an empty series with a
-    `never_fetched` marker, not a 500.
-  - Parsed points are validated: a non-numeric value or an unparseable timestamp fails the request
-    loudly rather than rendering a broken chart.
-  - Responses carry the dataset `version` so the UI can show which snapshot it is looking at.
+  - The embed token is minted through `POST /agent/embed-token {session: "hyp-<id>"}` with
+    `WOLF_API_KEY`, **sending no `ttl_seconds` at all**, so Orange applies its own 900s default:
+    `clampEmbedTTL` treats absent-or-zero as the default and clamps anything else to `[60, 3600]`
+    (`go/cmd/agentd/embedtoken.go`). Hazard H1 means the token carries project-wide authority for
+    its lifetime, so the TTL is its only bound and the 3600s ceiling is never asked for. A test
+    asserts the outbound body contains no `ttl_seconds` key.
+  - **The response is `{ token, expires_at_sec, embed_url }`, and `expires_at_sec` is unix
+    SECONDS.** Orange returns the token's own `exp` claim in seconds (`embedTokenResponse.ExpiresAt`
+    in the same file). The unit is in the name because W13 computes a T-120s refresh from it, and
+    subtracting 120 from milliseconds or 120 000 from seconds gives a token that either never
+    refreshes or refreshes instantly — invisible in either ticket's own tests.
+  - **`embed_url` is `${ORANGE_PUBLIC_URL}/embed/session/hyp-<id>`** — the *browser-reachable*
+    Orange origin (`http://localhost:8080` in the compose stack), read from `ORANGE_PUBLIC_URL` in
+    `api/src/config.ts` and documented in `.env.example`. It is deliberately **not** the address
+    wolf-api itself uses (`http://localhost:8099`, inside DinD's network namespace and unreachable
+    from a browser). Without this field W13 has to hard-code an origin into the React bundle, which
+    breaks every non-compose deployment. `ORANGE_PUBLIC_URL`'s origin must also appear in O8's
+    `AGENTKIT_PROJECT_MAP` `allowed_origins`, or the embed page's `frame-ancestors` CSP blocks the
+    iframe outright (`go/cmd/agentd/embedcsp.go`) — say so in the `.env.example` comment.
+  - The token is returned in the JSON body for the client to append as a URL **fragment**; the route
+    never builds the fragment itself and never logs the token. A test asserts that neither the token
+    nor `WOLF_API_KEY` appears in any captured `pino` line.
+  - A caller with no valid `wolf_session` cookie gets **401** and no token: W8's `requireSignedIn`
+    guards both routes, and a test asserts no upstream request was made at all.
+  - A hypothesis whose `hyp-<id>` session does not exist is **404 `not_found`**. Orange answers 404
+    for absent and for another project alike and Wolf does not distinguish either — the route is not
+    an existence oracle.
+  - **The series route proxies bytes server-side and never redirects the browser to Orange.** Orange
+    sets no CORS headers by design, so a redirect or a client-side fetch would fail; a test asserts
+    the response is `200` with a JSON body, never a `3xx`.
+  - It reads `GET /agent/datasets/<id>-<metric>` (the **bare** metadata object) and then
+    `GET /agent/datasets/<id>-<metric>/download`, both with `WOLF_API_KEY`. It never mints an O4
+    dataset token: those exist so a container can `curl` a URL, and a server that already holds the
+    project key has no use for one.
+  - **The response is `{ points, unit, version, fetched_at_ms, state }`**, where `points` is
+    `Point[]` — W4's pinned `{ tMs, v }`, unix **milliseconds** — and `state` is exactly one of
+    `"ok" | "never_fetched" | "stale"`:
+    - a `404` from Orange (the dataset has never been written) returns **200** with `points: []`,
+      `version: 0` and `state: "never_fetched"`, never a `500`;
+    - a dataset whose newest observation is older than the spec's `staleness_days` returns its
+      points with `state: "stale"`, which is what lets W14 render "stale, with its reason" instead
+      of a flat line or a silent gap;
+    - otherwise `state: "ok"`.
+    "Never written yet" and "the last tick failed" are different renderings and therefore different
+    values, not one marker.
+  - `unit` is the metric's `unit` from the locked `kind=hypothesis-spec` memory; a `:metric` that
+    names no slug in that spec is **404 `not_found`**, not an empty series.
+  - `version` is the dataset version the points came from, so the UI can say which snapshot it is
+    looking at, and `fetched_at_ms` is when Wolf read it — unix **milliseconds**, per the plan's own
+    rule that every timestamp encodes its unit in its name.
+  - **Parsing uses W10's `parseCanonicalCsv` and nothing else** — one canonical-CSV parser in the
+    tree. A malformed dataset fails the request loudly as `invalid` naming the offending line rather
+    than rendering a broken chart; the graded rejection list is W10's, and a test here asserts one
+    of them (a wrong header) surfaces as a 400 rather than as an empty series.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/routes/embed src/routes/series && yarn typecheck`
-- **Depends on:** W9
+- **Validation:**
+  - `cd api && yarn test src/routes/embed src/routes/series && yarn typecheck`
+  - Confirm the vitest summary reports **2 test files**. `api/vitest.config.ts` includes
+    `src/**/*.test.ts` only, and a positional filter that matches nothing runs zero files and exits
+    **0**.
+- **Depends on:** W9, W10 *(W10 owns `parseCanonicalCsv`; W11 imports it rather than shipping a
+  second parser, which also serialises the two siblings that would otherwise both edit shared
+  files)*
 - [ ] done
-- Notes:
+- Notes: § "Wolf API routes" still shows this route returning `{ points:[{t,v}], unit, version,
+  fetched_at }`. That line predates the pinned `Point` type and the pinned unit rule; the shape in
+  the criteria above is the authority and the Interfaces line should be corrected to match.
 
 ### W12: Wolf image, prompts and project bootstrap   [Status: pending | Model: opus]
-- **Scope:** The installation image, the four prompt files, and an idempotent bootstrap script
-  that configures the `wolf` project end to end.
+- **Scope:** The installation image, the script that gets it into DinD, the four prompt files, and
+  an idempotent bootstrap that configures the `wolf` project end to end. This ticket is the only
+  thing that creates the two project-level workers, so the `interviewer` worker W8 names on every
+  session create exists because of this ticket or not at all — and the failure mode is a session
+  create rejected for an unknown worker, nine tickets later, at X1.
 - **Repo:** agent-wolf
-- **Files:** `installations/wolf/Dockerfile`, `prompts/interviewer.md`,
-  `prompts/researcher-preamble.md`, `prompts/researcher-method.md`, `prompts/critic.md`,
-  `scripts/bootstrap-project.ts`, `scripts/bootstrap-project.test.ts`.
+- **Files:** create `installations/wolf/Dockerfile`, `scripts/load-image-into-dind.sh`,
+  `prompts/interviewer.md`, `prompts/researcher-preamble.md`, `prompts/researcher-method.md`,
+  `prompts/critic.md`, `api/src/bootstrap/bootstrap-project.ts`,
+  `api/src/bootstrap/bootstrap-project.test.ts`, and a thin `scripts/bootstrap-project.ts` that
+  only imports and runs the former; modify `api/src/config.ts` and `.env.example`
+  (`WOLF_BASE_IMAGE`, `WOLF_CRITIC_CRON` only).
+  The test lives under `api/src/` deliberately: `api/vitest.config.ts` sets
+  `include: ["src/**/*.test.ts"]`, so a test at repo-root `scripts/` matches **zero files** and
+  `yarn test` exits 0 having proven nothing. `api/src/config.ts` and `.env.example` are on the
+  shared-ownership row (W1, W16, W21) — run strictly serial with those tickets and add only the two
+  variables named above.
+- **The pinned strings — every one of these is a contract with another ticket:**
+  - MCP server name is **`wolf`**, so the tools are `mcp__wolf__series_search` /
+    `mcp__wolf__series_fetch` (`go/agentdb/sessions.go:49-51` derives `mcp__<name>__<tool>`).
+  - The stored header is **`X-Wolf-Mcp-Token`** carrying the **bare** token as `${WOLF_MCP_TOKEN}`.
+    `"Bearer ${WOLF_MCP_TOKEN}"` **cannot be stored at all**: `MCPServerConfig.Validate`
+    (`go/agentdb/sessions.go:62-95`, `envRefPattern` at `:53-55`) rejects any value containing
+    `${` that is not a whole-value reference.
+  - The preamble's single substitution token is **`{{LOCKED_SPEC_JSON}}`**, alone on its own line.
+  - The preamble/method boundary is the literal line **`<!-- WOLF:METHOD-BODY -->`**. Everything
+    above it is locked; everything below is the mutable method body.
 - **Acceptance criteria:**
-  - The Dockerfile sets **no** `CMD`, `ENTRYPOINT`, `EXPOSE`, `HEALTHCHECK` or `WORKDIR` — house
-    rule 4; `WORKDIR` is on that list because setting it broke every session from `core` and
-    `example` on 2026-08-13.
-  - `python3 -c "import pandas, numpy, duckdb"` succeeds inside the built image.
-  - The bootstrap script is **idempotent**: running it twice produces no duplicate workers,
-    schedules, settings or MCP entries. Asserted by a test that runs it twice.
-  - It sets the project's `base_image` to the Wolf image, the `attention_channel`, and the MCP
-    config pointing at `WOLF_MCP_URL` with the token referenced as `${WOLF_MCP_TOKEN}` — the
-    sandbox resolves `${VAR}` references from the forwarded MCP env (O8).
-  - `prompts/researcher-preamble.md` is a **template** into which W9 injects the locked spec. It
-    states the replace-vs-append rule per metric `source`, forbids `allow_shrink` without a
-    research note, mandates a single retry on a `dataset_put` CAS conflict, and states that the
-    researcher may **propose** an amendment but never enact one and never write a `hypothesis`,
-    `hypothesis-spec` or `verdict` memory.
-  - `prompts/critic.md` states that it may rewrite only the **method body**, never the preamble,
+  - `installations/wolf/Dockerfile` begins `ARG BASE_IMAGE=agent-orange-core:dev` / `FROM
+    ${BASE_IMAGE}` — the same contract and default tag as `installations/example/Dockerfile:15-16`
+    — and adds python3, pandas, numpy and duckdb and nothing else.
+  - It sets **no** `CMD`, `ENTRYPOINT`, `EXPOSE`, `HEALTHCHECK` or `WORKDIR` (house rule 4;
+    `WORKDIR` joined that list on 2026-08-13 after setting it broke every session from `core`).
+    Graded by comparing the built image's `.Config.Cmd`, `.Entrypoint`, `.WorkingDir`,
+    `.ExposedPorts` and `.Healthcheck` against the base image's — they must be identical.
+  - **`scripts/load-image-into-dind.sh` builds the image inside DinD, not on the host.** A
+    host-built image is invisible to sessions (`installations/README.md` § "Local": with the
+    default `blobarchive` registry `EnsurePresent` is a no-op, so nothing pulls it). The script
+    streams `installations/wolf` as a tar build context into the DinD daemon
+    (`tar -C installations/wolf -cf - . | docker exec -i "$ORANGE_DIND_CONTAINER" docker build …`),
+    defaults the container name to `agent-orange-dind-1`, builds `agent-orange-core:dev` into DinD
+    from `$ORANGE_REPO/installations/core` (default `../agent-orange`) when that tag is absent,
+    fails naming the exact command when that path does not exist, and is safe to re-run.
+  - The script's last step is `docker exec "$ORANGE_DIND_CONTAINER" docker run --rm <tag> python3
+    -c "import pandas, numpy, duckdb"`, and a non-zero exit fails the script. A comment states
+    that Orange's compose `BASE_IMAGE` must **never** be set to the Wolf tag: `init-sandbox`
+    rebuilds the bare harness and tags it with any `BASE_IMAGE` containing no `/`
+    (`docker-compose.yml:36-58`), silently shadowing the real image.
+  - **The bootstrap creates EXACTLY these atoms, idempotently — a second run creates nothing and
+    mutates nothing.** An executor that ships fewer passes no criterion here:
+    1. project settings for project `wolf`: `base_image` = `WOLF_BASE_IMAGE` (default
+       `agent-wolf:dev`), `attention_channel`, `mcp_config`;
+    2. worker `interviewer`, prompt = `prompts/interviewer.md` verbatim, enabled;
+    3. worker `critic`, prompt = `prompts/critic.md` verbatim, enabled;
+    4. one worker-mode schedule for `critic`, 5-field cron, default `0 4 * * 1`, overridable by
+       `WOLF_CRITIC_CRON`. Never a nickname: `go/agentdb/schedules.go:827` refuses `@weekly`.
+    Per-hypothesis workers and schedules are W9's and must not appear here.
+  - **Settings are written read-merge-write.** `PUT /agent/project-settings` is a whole-object
+    replace (`go/agentdb/project_settings.go:136-160`, "every field is written, zero values
+    included"), so the script GETs, merges its three fields and PUTs the merged object. A bare PUT
+    silently clears `system_prompt`. A test asserts a pre-existing unrelated field survives.
+  - `mcp_config` is written as `{"wolf": {"url": "<WOLF_MCP_URL>", "headers":
+    {"X-Wolf-Mcp-Token": "${WOLF_MCP_TOKEN}"}}}`, with the URL taken from W1's boot-resolved
+    config value, never re-derived here. A test asserts the value satisfies Orange's whole-value
+    `${VAR}` rule (no `Bearer` prefix, no partial interpolation).
+  - **`attention_channel` is written explicitly EMPTY (`{}`), and that is the criterion.** Orange's
+    only channel kind is an outbound webhook needing an http(s) URL
+    (`go/cmd/agentd/attention.go:57-103`) and Wolf exposes no receiver; per W10 the `challenged`
+    state on the board is the notification surface and the poller reads
+    `GET /agent/attention-requests` instead. A comment in the bootstrap says so, so a later reader
+    does not "fix" it by inventing a URL.
+  - `prompts/interviewer.md` states the **deposit contract**: when the thesis is sharp enough the
+    interviewer calls `memory_create` with labels `{kind: "hypothesis-spec-candidate", name:
+    "<id>"}`, line 1 a one-line summary and the rest the spec JSON alone (no prose, no fences),
+    re-emitting a full replacement on every revision. It states that this memory is **untrusted**,
+    that it becomes the locked spec only when a human clicks Go Live, and that the interviewer
+    cannot mark a hypothesis live.
+  - `prompts/researcher-preamble.md` is a template containing `{{LOCKED_SPEC_JSON}}` exactly once.
+    It states the canonical dataset CSV verbatim (header exactly `timestamp,value`, RFC3339 UTC,
+    ascending, LF, one metric per dataset, no trailing blank line), the replace-vs-append rule per
+    metric `source`, that `allow_shrink` may not be passed without first filing a `research-note`
+    saying why, that a `dataset_put` CAS conflict is retried exactly once after re-reading, and
+    that the researcher may **propose** an amendment but never enact one and never write a
+    `hypothesis`, `hypothesis-spec` or `verdict` memory.
+  - `prompts/researcher-method.md` is the initial mutable method body — the text that goes below
+    the marker line — and contains no spec values, since the critic may rewrite it freely.
+  - `prompts/critic.md` quotes the marker line `<!-- WOLF:METHOD-BODY -->` literally, states that
+    the critic must re-emit everything above it byte-for-byte and may rewrite only what is below,
     and requires a rationale on every `worker_prompt_write`.
-  - `prompts/interviewer.md` states that it cannot mark a hypothesis live and that a human must.
-- **TDD:** no for the Dockerfile and prompts; **yes** for the bootstrap script's idempotency.
+  - **A prompt-contract test** (in `bootstrap-project.test.ts`, so `yarn test src/bootstrap` grades
+    it) asserts these literals: `{{LOCKED_SPEC_JSON}}` occurs exactly once in the preamble and
+    nowhere in the method body; `<!-- WOLF:METHOD-BODY -->` occurs in the preamble and in
+    `critic.md`; `timestamp,value` occurs in the preamble; `mcp__wolf__series_search` and
+    `mcp__wolf__series_fetch` occur in the method body; `hypothesis-spec-candidate` occurs in
+    `interviewer.md`.
+  - The idempotency test runs the script twice against an `undici` `MockAgent` Orange and asserts
+    the set of create/PUT calls on run 2 is empty.
+  - **The report-layer obligations on these two prompt files are W25's, not W12's.** W25 creates
+    `prompts/report-authoring.md` and edits `interviewer.md` (also produce a `report-candidate`)
+    and `researcher-preamble.md` (write a `kind=report` memory each tick, filling only declared
+    slots). W12 therefore leaves both files sectioned so that edit is purely additive, and both go
+    on the § "Parallelism and file ownership" table as W12 → W25, strictly serial.
+- **TDD:** no for the Dockerfile, the loader script and the prompt prose; **yes** for the bootstrap
+  and the prompt-contract test.
 - **Validation:**
-  - `docker build -f installations/wolf/Dockerfile -t agent-wolf:dev installations/wolf`
-  - `docker run --rm agent-wolf:dev python3 -c "import pandas, numpy, duckdb; print('ok')"`
-  - `cd api && yarn test scripts/bootstrap-project`
-- **Depends on:** W7
+  - `cd api && yarn test src/bootstrap && yarn typecheck` — and confirm vitest reports **0
+    skipped**; a `.skip` left in the suite vacates the idempotency criterion silently
+  - with agent-orange's stack up: `./scripts/load-image-into-dind.sh` — must exit 0 and print the
+    `import pandas, numpy, duckdb` success line
+  - `docker exec "${ORANGE_DIND_CONTAINER:-agent-orange-dind-1}" docker image inspect
+    --format '{{json .Config.Cmd}}|{{.Config.WorkingDir}}|{{json .Config.ExposedPorts}}'
+    agent-wolf:dev agent-orange-core:dev` — the two lines must be identical (house rule 4)
+- **Depends on:** W2, W7 *(W2 owns `api/src/orange/client.ts` and its route list is closed, so the
+  project-settings read-merge-write helper, worker create and schedule create must come from W2 —
+  do not hand-roll a second HTTP client here; W7 defines the MCP server this config points at)*
 - [ ] done
 - Notes:
 
 ### W13: UI — board, new hypothesis, chat frame   [Status: pending | Model: sonnet]
 - **Scope:** `HypothesisList`, `NewHypothesis`, `Archive`, `OrangeChatFrame`, `StatusChip`,
-  `TamperWarning`, and the app shell with routing and sign-in.
+  `TamperWarning`, and the app shell: the router, sign-in, and the two browser-side build
+  variables. This is the first ticket to need a router and a DOM-testing library, so it installs
+  both from § "Pinned technology choices" — W14 and W24 inherit whatever it wires.
 - **Repo:** agent-wolf
-- **Files:** `web/src/pages/{HypothesisList,NewHypothesis,Archive}.tsx`,
-  `web/src/components/{OrangeChatFrame,StatusChip,TamperWarning}.tsx`, `web/src/App.tsx`, tests.
+- **Files:** create `web/src/pages/HypothesisList.tsx`, `web/src/pages/NewHypothesis.tsx`,
+  `web/src/pages/Archive.tsx`, `web/src/components/OrangeChatFrame.tsx`,
+  `web/src/components/StatusChip.tsx`, `web/src/components/TamperWarning.tsx`, `web/src/env.ts`
+  (the one place `import.meta.env` is read), and a `.test.tsx` beside each component and page;
+  modify `web/src/App.tsx`, `web/package.json`, `web/Dockerfile`, `docker-compose.yml` (build args
+  on `wolf-web`), `.env.example` (the two `VITE_*` defaults).
+  `web/package.json` is on the shared-ownership row with W23 and W24, and `.env.example` with W1,
+  W16 and W21 — run strictly serial with those and add only what is named here.
 - **Acceptance criteria:**
-  - The board renders from a single `GET /api/hypotheses` response with no per-card follow-up.
-  - `OrangeChatFrame` refreshes its embed token at **T-120s** and remounts; the token is held in
-    memory only and never written to `localStorage` or `sessionStorage`.
-  - The Go Live button is disabled with the blocking reasons listed until the spec validates.
-  - All six lifecycle states render a distinct, labelled chip.
-  - A hypothesis with a `tamper` field renders a visible warning naming the writer — this is a
-    security signal and must not be a subtle icon.
-  - The Archive page shows `restated_from` lineage when present.
-- **TDD:** yes for the token-refresh timing, the Go Live gate and the tamper banner; no for layout.
-- **Validation:** `cd web && yarn test && yarn typecheck`
+  - **Router: React Router 7** per § "Pinned technology choices". One route table, in
+    `web/src/App.tsx`: `/` (board), `/new`, `/archive`, `/hypotheses/:id` — the last a placeholder
+    component W14 replaces. W24 adds the go-live review route to the same table; do not add a
+    second router or a second table.
+  - **`@testing-library/react` 16.x + `@testing-library/jest-dom`** are installed (jsdom is already
+    the vitest environment in `web/vite.config.ts`). The criteria below cannot be asserted without
+    them, and W23 must find them already present rather than adding a second copy.
+  - **Two build args, because `wolf-web` ships as a built nginx image and cannot read runtime env.**
+    `VITE_ORANGE_PUBLIC_URL` (default `http://localhost:8080` — Orange's *browser-reachable*
+    origin, **not** `WOLF_MCP_URL` and not the DinD gateway) and `VITE_GOOGLE_CLIENT_ID`, declared
+    as `ARG`/`ENV` in `web/Dockerfile`'s build stage, passed through `build.args` on the `wolf-web`
+    service, documented in `.env.example`, and read **only** in `web/src/env.ts`.
+  - `OrangeChatFrame`'s `src` is `${VITE_ORANGE_PUBLIC_URL}/embed/session/hyp-<id>#token=<token>`,
+    composed from the variable — a test stubs the variable and asserts the rendered `src`, so a
+    hard-coded origin fails. The session name carries the `hyp-` prefix and the id does not
+    (§ Vocabulary); do not double it. That origin must also appear in O8's `allowed_origins` entry
+    or Orange's CSP `frame-ancestors` blocks the frame outright.
+  - **The embed token's expiry is `expires_at_sec`, unix SECONDS**, passed through from Orange
+    verbatim (`go/cmd/agentd/embedtoken.go:62-68` states the unit). `OrangeChatFrame` re-mints and
+    remounts when `expires_at_sec * 1000 - Date.now() <= 120_000`. A fake-timer test pins that
+    boundary with a fixture whose `expires_at_sec` is a 10-digit number — mixing the unit gives a
+    token that either never refreshes or refreshes instantly, and neither is visible in a test
+    whose fixture the same executor invented.
+  - The token is held in component state only: a test asserts nothing is written to
+    `localStorage` or `sessionStorage` across a mount, a refresh and an unmount.
+  - The board renders from a **single** `GET /api/hypotheses` response with no per-card follow-up
+    request; a test with twelve hypotheses asserts exactly one fetch.
+  - Each card renders title, `StatusChip`, `support_score`, the condition summary, and `headline`
+    — line 1 of the newest `kind=report` snippet, added to the board payload by W22, so W13's own
+    tests drive it from fixtures. `headline: null` renders a distinct "no report yet" state — never
+    an empty string, and never omitted, so "said nothing" and "nothing yet" stay distinguishable.
+  - **All six lifecycle states render a distinct, labelled chip**, enumerated: `draft`, `live`,
+    `challenged`, `confirmed`, `invalidated`, `archived`. A table test covers all six; an unknown
+    value renders verbatim rather than throwing or falling back to `draft`.
+  - **The Go Live gate has exactly one server-side source.** `GET /api/hypotheses/:id` carries
+    `spec_validation: { valid: boolean, errors: [{ path, message }] }`, computed by W8 with W3's
+    validator over the newest `kind=hypothesis-spec-candidate` memory. The button is disabled iff
+    `spec_validation.valid === false` and lists `path: message` for every error. **`web/` never
+    imports the validator** — that would put the go-live gate in two places, and W1's import
+    boundary would permit it. W9's `422` is the backstop for a race, not the UI's source of truth.
+    W24 extends this gate with the accepted-template condition; W13 ships the spec half.
+  - **`TamperWarning` is graded on the pinned `Tamper` shape** (§ "Shared shapes"):
+    `{ reason, written_by_worker, written_by_session, memory_id }`, all fields present, the unused
+    provenance field `""`. It renders a full-width MUI `Alert severity="error"` naming
+    `written_by_worker || written_by_session` and the `memory_id`, and distinguishes all three
+    reasons in words: `forged_row`, `hostile_retraction`, `cross_hypothesis_write`. A test covers
+    each of the three. This is a security signal — a subtle icon fails the criterion.
+  - The Archive page shows `restated_from` lineage when the label is present, linking to the
+    retired hypothesis; without it, archive-and-relaunch reads as a fresh thesis.
+  - `NewHypothesis` posts `{ title }`, expects **201**, and surfaces Orange's create error verbatim
+    — "host port pool is exhausted" is operational and actionable, and must not be flattened.
+- **TDD:** yes for the token-refresh boundary, the single-fetch board, the Go Live gate, the chip
+  table and the three tamper reasons; no for layout.
+- **Validation:**
+  - `cd web && yarn test && yarn typecheck` — confirm vitest reports **0 skipped**; a `.skip`
+    silently vacates a criterion here, and five of them are single tests
+  - `docker build -f web/Dockerfile --build-arg VITE_ORANGE_PUBLIC_URL=http://localhost:8090
+    --build-arg VITE_GOOGLE_CLIENT_ID=probe.apps.googleusercontent.com -t wolf-web:vtest .`
+    then `docker run --rm wolf-web:vtest grep -rq 'localhost:8090' /usr/share/nginx/html` —
+    **empirical, not declarative**: it proves the build arg reaches the bundle Vite inlined, which
+    `docker compose config` cannot
+  - `docker compose config` shows both args under `wolf-web`'s `build.args`
 - **Depends on:** W11
 - [ ] done
 - Notes:
 
 ### W14: UI — detail, scoreboard, conditions and verdict   [Status: pending | Model: sonnet]
-- **Scope:** `HypothesisDetail` with the scoreboard, the condition table, the timeline and the
-  human verdict/amendment actions.
+- **Scope:** `HypothesisDetail` with the scoreboard, the metric charts, the condition table, the
+  timeline and the human verdict/amendment actions. Everything it renders comes from
+  `GET /api/hypotheses/:id` and `GET /api/hypotheses/:id/series/:metric`; this ticket adds no
+  arithmetic — W4 computed it all.
 - **Repo:** agent-wolf
-- **Files:** `web/src/pages/HypothesisDetail.tsx`,
-  `web/src/components/{Scoreboard,MetricChart,Timeline,ConditionTable}.tsx`, tests.
+- **Files:** create `web/src/pages/HypothesisDetail.tsx`, `web/src/components/Scoreboard.tsx`,
+  `web/src/components/MetricChart.tsx`, `web/src/components/Timeline.tsx`,
+  `web/src/components/ConditionTable.tsx`, and a `.test.tsx` beside each; modify
+  `web/src/App.tsx` (replace W13's `/hypotheses/:id` placeholder route — the file is shared with
+  W13 and W24, strictly serial).
+- **The shapes it reads, all pinned in § "Shared shapes that four or more tickets must agree on":**
+  `EvaluationResult` (`evaluated_at_ms`, `support_score`, `conditions[]`, `metrics[]` with
+  `direction` / `realised_change_pct` / `last_observation_ms` / `stale` / `stale_reason`), and
+  `Point = { tMs: UnixMs; v: number }` for series. Timestamps ending `_ms` are unix
+  **milliseconds**; the embed token's `expires_at_sec` is the only seconds value in the UI.
 - **Acceptance criteria:**
-  - `ConditionTable` shows every condition's state (`tripped`/`holding`/`indeterminate`), its
-    computed value, its threshold and its window. **`indeterminate` is visually distinct from
-    `holding`** — "we could not tell" must never read as "it is fine".
-  - A metric whose latest tick failed renders as **stale with its reason**, never as a flat line
-    or a silent gap.
-  - Expected direction is shown beside the actual move for every metric.
-  - `support_score` is labelled as a summary and carries an explicit note that it does not decide
-    anything — only conditions do.
-  - A `challenged` hypothesis shows the reason (`condition_tripped` vs `horizon_reached`), the
-    agent's case, and both verdict buttons. No other state shows them.
-  - Confirming or invalidating requires a rationale and refuses to submit without one.
-  - Status comes from the hypothesis memory, never from Orange's delivery status — a delivery
-    parked at `awaiting_human` never clears, which is a known Orange wart.
-  - Amendment proposals render as proposals with accept/reject actions; accepting calls
-    `/amend`, which is what makes the change trusted.
-- **TDD:** yes for the condition/stale/verdict-gate logic; no for layout.
-- **Validation:** `cd web && yarn test && yarn typecheck`
+  - `ConditionTable` renders, per condition: the condition id, its metric, its state, the computed
+    `value`, the `threshold`, the window (`window_start`–`window_end`), and
+    `observations_in_window`. **`indeterminate` is visually distinct from `holding`** — not merely
+    a different label, a different colour treatment — because "we could not tell" must never read
+    as "it is fine". The word is `indeterminate` throughout; never "unknown".
+  - An `indeterminate` row shows W4's `reason` verbatim, enumerated: `stale_series`,
+    `non_positive_reference`, `insufficient_coverage`, `no_observations`. A reason W4 emits that is
+    not in that list renders verbatim rather than being dropped — a silently blank reason is how a
+    spec mistake (a percentage statistic on a zero-crossing series) stays invisible.
+  - **A stale metric is defined here, not inferred:** a metric is stale when its series response
+    carries `never_fetched`, or when `Date.now() - lastPoint.tMs > staleness_days * 86_400_000`
+    (the spec-level `staleness_days`, default 5). `MetricChart` then shows the last known points
+    plus a hatched trailing region and a caption reading exactly one of `never fetched` /
+    `no update since <date>`. Never a flat line to today, never a silent gap.
+  - **Status and staleness never come from Orange's delivery status.** A delivery parked at
+    `awaiting_human` never clears — a known Orange wart — so status comes from the trusted
+    `hypothesis` memory and staleness from the series/evaluation payloads. A test asserts the
+    component renders correctly from a payload carrying no delivery information at all.
+  - Every metric shows its expected `direction` from the spec beside its `realised_change_pct`, so
+    "expected down, moved up" is readable at a glance.
+  - `support_score` is labelled as a summary and carries an explicit note that **it decides
+    nothing — only conditions do**. Asserted on the rendered text, because this sentence is the
+    difference between a scoreboard and a verdict.
+  - **A `challenged` hypothesis shows, and no other state does:** the reason
+    (`condition_tripped` | `horizon_reached`) taken from the trusted `hypothesis` memory's
+    snapshot; the evaluation snapshot's **tripped-condition rows** (metric, statistic, value,
+    threshold, window, observation count); and the **three most recent `kind=research-note`
+    memories**, under a heading naming them as the agent's untrusted evidence, not a
+    recommendation. There is no separately generated "the agent's case" artefact — no ticket
+    produces one, and nothing wakes the researcher when a condition trips.
+  - Both verdict buttons appear only in `challenged`. Confirming or invalidating requires a
+    rationale and the submit control stays disabled until one is entered; a test asserts an empty
+    and a whitespace-only rationale are both refused client-side.
+  - **Amendment actions post the pinned body:** `POST /api/hypotheses/:id/amend` with
+    `{ amendment_id, decision: "accept" | "reject", rationale }`, where `amendment_id` is the
+    Orange memory id of the `kind=spec-amendment` row, carried by the detail response as
+    `amendments: [{ id, proposed_at_ms, content }]`. A test asserts the exact request body — two
+    executors shipping `"accept"` vs `"accepted"` both pass their own mocked tests and the UI 400s
+    the first time a human clicks Accept.
+  - Proposals render **as proposals**, labelled untrusted; accepting is what makes the change
+    trusted, and the UI says so.
+  - `Timeline` renders, newest first by `created_at_ms`: state changes from the `hypothesis`
+    memories, `research-note`s, `spec-amendment`s and the `verdict`. Every row is labelled trusted
+    or untrusted per § "Memory kinds" — the trust boundary is the product, so it is visible.
+  - `MetricChart` plots `Point[]` with a UTC-formatted axis and does not interpolate across gaps.
+  - The page is laid out so W23's `VerdictBand` + `ReportPanel` compose **above** the condition
+    table without restructuring it: W23 modifies this same file and the condition table is
+    explicitly unchanged by that ticket.
+- **TDD:** yes for the condition/reason rendering, the staleness rule, the verdict gate, the
+  `challenged`-only block and the amend request body; no for layout.
+- **Validation:**
+  - `cd web && yarn test && yarn typecheck` — confirm vitest reports **0 skipped**
+  - `cd web && yarn build` — `tsc -p tsconfig.json && vite build`: it typechecks the whole tree
+    and proves the page compiles into the production bundle, neither of which `vitest run` does
+    (esbuild strips types without checking them)
 - **Depends on:** W13
+- [ ] done
+- Notes:
+
+### W15: Report vocabulary, trusted-kind set, and the store reads   [Status: pending | Model: opus]
+- **Scope:** The four memory kinds as types and label builders, the corrected trusted-kind rule,
+  the full-content Orange reads the frame route needs, and the store functions that read templates
+  and reports. No routes, no rendering, no sanitising.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/kinds.ts`, `api/src/report/kinds.test.ts`; modify
+  `api/src/hypothesis/store.ts`, `api/src/hypothesis/store.test.ts`, `api/src/orange/client.ts`,
+  `api/src/orange/client.test.ts`.
+- **Acceptance criteria:**
+  - `TRUSTED_KINDS` is an exported frozen set containing exactly `hypothesis`, `hypothesis-spec`,
+    `verdict`, `evaluation`, `report-template` — **enumerated, never counted**. A test asserts
+    membership for all five and non-membership for `report`, `report-candidate`,
+    `report-amendment`, `research-note` and `spec-amendment`.
+  - `isTrusted()` applies **all three** clauses of the main plan's rule: empty provenance, kind in
+    `TRUSTED_KINDS`, and `name` matching an existing `hyp-<id>` session. A test asserts a memory
+    passing only the first two is **not** trusted.
+  - Parsing a `kind=report` memory splits line 1 (headline) from the JSON body; a body that is not
+    a flat `Record<string,string>` is a typed `invalid` error naming the offending key.
+  - A headline longer than **400 characters** is truncated on read at a character boundary. *(The
+    snippet limit is 500 **characters**, not bytes — `substring(content,1,500)` in Postgres is
+    character-based, `go/agentdb/memories.go:451-452` — so a mid-multibyte split is not
+    constructible and no test should claim to construct one.)*
+  - A `report-template` memory with **non-empty provenance** is rejected as forged, reusing W5's
+    helper rather than reimplementing the check.
+  - `client.getMemoryById(id)` and `client.getCurrentMemory(name, kind)` return **full content**,
+    not snippets. A test asserts a >600-character body round-trips whole.
+  - `store.readTemplate(id)` and `store.readLatestReport(id)` exist and are the only paths by which
+    later tickets obtain either. Both use `include_retracted=1` and **ignore any retraction whose
+    own provenance is non-empty**, exactly as W5 does — a template hidden by a hostile retraction
+    must surface as `tamper`, never as absence.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/kinds src/hypothesis/store src/orange/client && yarn typecheck`
+- **Depends on:** W5, O11
+- [ ] done
+- Notes:
+
+### W16: Template parser, structure hash, and the report config   [Status: pending | Model: opus]
+- **Scope:** `parseTemplate` — slot extraction, fragment-shape validation, https-only enforcement,
+  size limit, structure hashing. Plus the two config variables this feature introduces.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/template.ts`, `api/src/report/template.test.ts`; modify
+  `api/src/config.ts`, `.env.example`.
+- **Acceptance criteria:**
+  - `parseTemplate(html, maxBytes)` takes the limit as a **parameter**; it reads no config itself.
+  - `WOLF_REPORT_MAX_BYTES` (default 512000) and `WOLF_SERIES_MAX_POINTS` (default 5000) are added
+    to `api/src/config.ts` and documented in `.env.example` **by this ticket**, because W16 is the
+    first consumer. W21 must not re-add them.
+  - Slot ids are extracted from `[data-wolf-slot]` in document order. A **duplicate slot id is a
+    validation error**, not last-wins: two regions sharing an id makes drift undetectable.
+  - A slot id must match `^[a-z][a-z0-9-]{0,31}$`; anything else is an error naming the id.
+  - **The template is a FRAGMENT.** A `<!doctype>`, `<html>`, `<head>` or `<body>` element is a
+    validation error — `composeFrame` owns the document skeleton.
+  - **Every `src` and `href` must be `https:`.** `http:`, protocol-relative `//host`, and
+    `javascript:` are each a distinct error message. `data:` is permitted on `img` only.
+  - `structureHash` is `sha256` of the **stored bytes with no normalisation whatsoever**,
+    lowercase hex. *(An earlier draft called for whitespace normalisation. That is wrong and was
+    removed: whitespace inside a `<script>` body is semantically significant, so normalising would
+    let two templates with different chart code hash identically — making the lock forgeable.)*
+  - A template with no `[data-wolf-fallback]` element is a validation error: a CDN failure is
+    invisible inside an opaque frame, so the fallback is the operator's only signal.
+  - A template exceeding `maxBytes` is an error naming both the limit and the actual size.
+  - `scriptSrcs` lists every external script and stylesheet URL, for the go-live review screen.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/template && yarn typecheck`
+- **Depends on:** W15
+- [ ] done
+- Notes:
+
+### W17: The slot sanitiser and template validation   [Status: pending | Model: opus]
+- **Scope:** `sanitiseSlot`, the strip counter, and `validateTemplate`. This is the security
+  boundary of the whole feature.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/sanitise.ts`, `api/src/report/sanitise.test.ts`; modify
+  `api/package.json`.
+- **Acceptance criteria:**
+  - `isomorphic-dompurify` is pinned at **`^2`** and is the only sanitiser dependency added.
+  - `SLOT_PROFILE` is the **allow list** in § "The slot sanitiser profile, pinned as an ALLOW
+    list", byte-for-byte. A test asserts `ALLOWED_TAGS` and `ALLOWED_ATTR` equal those literals, so
+    a later widening is a deliberate, visible act.
+  - **No URL survives a slot.** `img`, `a`, `src`, `href` and `style` are absent from the allow
+    list; a test passes each and asserts it is gone. A remote `src` in a slot would be a daily,
+    human-unreviewed egress channel.
+  - A table test, one row per vector, covers `<script>`, `<iframe>`, `<object>`, `<embed>`,
+    `<link>`, `<style>`, `<form>`, `<base>`, `<meta>`, every `on*` attribute, `javascript:` and
+    `data:` URLs, and `srcdoc`. Each row asserts the dangerous token is **absent from the output
+    string**, not merely that the output differs from the input.
+  - **The same script text passes `validateTemplate` and is stripped by `sanitiseSlot`.** One test,
+    both calls, asserting the asymmetry directly — the entire locking design rests on this.
+  - `validateTemplate(html, maxBytes)` **never mutates and never returns HTML**; on success it
+    returns the `ParsedTemplate` from W16's `parseTemplate`. A test asserts no exported function
+    named `sanitiseTemplate` exists.
+  - `strippedCount` counts removed **nodes and attributes**, and is zero for clean input.
+  - `sanitiseSlot` is **idempotent** across the whole vector table — sanitising twice equals
+    sanitising once. A non-idempotent sanitiser is a mutation-XSS smell.
+  - Mutation-XSS regressions included: `<noscript><p title="</noscript><img src=x onerror=1>">`,
+    `<svg><style><img src=x onerror=1>`, and a `<math>` wrapper.
+  - A test asserts no second sanitiser is present: it reads every `package.json` in the repo and
+    fails if `sanitize-html`, `xss`, `dompurify` (bare) or `sanitize-html-react` appears as a
+    dependency. It checks **manifests, not source**, so the test cannot fail on its own text.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/sanitise && yarn typecheck`
+- **Depends on:** W16
+- [ ] done
+- Notes:
+
+### W18: Series selection and injection payload   [Status: pending | Model: sonnet]
+- **Scope:** `buildSeriesPayload` — choose metrics, downsample, shape the payload.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/series.ts`, `api/src/report/series.test.ts`.
+- **Acceptance criteria:**
+  - **Only metrics named in the locked spec are injected.** A dataset present in the project but
+    absent from the spec never reaches the frame.
+  - Points are downsampled to at most `maxPoints` per metric using largest-triangle-three-buckets,
+    and the **first and last points are always retained** — a downsampler that drops the newest
+    point hides the move the hypothesis is about.
+  - Timestamps are epoch milliseconds in a field named **`tMs`**, matching the audit's pinned
+    `Point = {tMs, v}` so the frame does not become the one place using a different name.
+  - A metric whose dataset is missing appears with empty arrays and `version: 0`, **never absent**
+    — an absent key makes the locked template's chart code throw, and the template cannot be fixed
+    without an amendment.
+  - The payload is JSON-serialisable with no `undefined`, and `</script>` is escaped: a series
+    whose `unit` contains that string must not break out of the injection. Tested directly.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/series && yarn typecheck`
+- **Depends on:** W15
+- [ ] done
+- Notes:
+
+### W19: Frame composition and the CSP value   [Status: pending | Model: opus]
+- **Scope:** `composeFrame` — assemble the document, produce the CSP string.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/frame.ts`, `api/src/report/frame.test.ts`.
+- **Acceptance criteria:**
+  - The CSP string equals the § "The CSP header, byte-for-byte" value **exactly**, asserted as a
+    string literal — including the leading `sandbox allow-scripts` directive. A substring check
+    does not satisfy this criterion.
+  - `composeFrame` owns the document skeleton (`<!doctype html>`, `<html>`, `<head>`, `<body>`);
+    the template fragment is placed inside `<body>`.
+  - **Every byte of the template fragment outside a `[data-wolf-slot]` element's children is
+    emitted unchanged.** Asserted by composing a frame and diffing the template region against the
+    stored bytes. *(This replaces an earlier "byte-identical" criterion that was impossible to
+    satisfy alongside slot filling.)*
+  - **The series injection sits at exactly one pinned position: the last child of `<head>`,
+    immediately before `</head>`** — so it is assigned before any template script runs, and its
+    position never depends on template content. Asserted by index.
+  - Slot content is inserted **after** sanitisation; a test passes hostile slot content end to end
+    and asserts the composed document contains none of it.
+  - An unfilled slot renders as an empty element, never the literal string `undefined`.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/frame && yarn typecheck`
+- **Depends on:** W17, W18
+- [ ] done
+- Notes:
+
+### W20: Drift detection   [Status: pending | Model: sonnet]
+- **Scope:** `detectDrift` — orphan and unfilled slots.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/report/drift.ts`, `api/src/report/drift.test.ts`.
+- **Acceptance criteria:**
+  - A slot id the tick filled but the template does not declare is an **orphan**; a slot the
+    template declares but the tick left empty is **unfilled**. Both are reported; neither is
+    silently dropped.
+  - Drift is reported per hypothesis, so the UI shows one indicator.
+  - An empty tick (no `report` memory at all) is **not** drift — it is the empty state, and the two
+    must be distinguishable by the caller. A test asserts both shapes differ.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/drift && yarn typecheck`
+- **Depends on:** W16
+- [ ] done
+- Notes:
+
+### W21: Report routes   [Status: pending | Model: opus]
+- **Scope:** The three routes in § "HTTP routes added", including fetching the datasets the frame
+  injects.
+- **Repo:** agent-wolf
+- **Files:** create `api/src/routes/report.ts`, `api/src/routes/report.test.ts`; modify
+  `api/src/app.ts`.
+- **Acceptance criteria:**
+  - `GET …/report/frame` returns `text/html`, the exact CSP header **including `sandbox
+    allow-scripts`**, `X-Content-Type-Options: nosniff`, and **no `Set-Cookie`** — asserted
+    explicitly, because the session middleware will otherwise refresh a cookie onto this response.
+  - **A route-level test proves no credential reaches the frame.** It drives the real app with a
+    config holding recognisable fake values for the Wolf API key and an embed token, requests a
+    frame, and asserts neither string appears anywhere in the body or headers. This is the test the
+    threat model rests on; it must not be deleted or weakened to a unit test of `composeFrame`,
+    which is a pure function that cannot see config at all.
+  - The route fetches each spec metric's dataset through the dataset read path and **gates on
+    `version`**, serving a cached payload when the version is unchanged — without this the frame
+    re-downloads every CSV on every page view.
+  - The frame request is authenticated like every other route; the frame's *contents* carry no
+    credential, but the *request for it* is authenticated.
+  - `404` when no template exists, with a body the UI distinguishes from a server error.
+  - `POST …/report-template` writes through Wolf's server credential so provenance is empty, and
+    returns **409** if a locked template already exists — the amendment route is the only
+    replacement path.
+  - `POST …/report-amendment` with `decision: "accept"` re-validates the proposed HTML and then
+    writes a new `report-template`; a proposal failing validation is **422** and no template is
+    written.
+  - Every failure is a `WolfError` with the right `kind`; an unhandled throw maps to `internal`,
+    never `unavailable` (main plan § "Shared error taxonomy", R39).
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/routes/report && yarn typecheck`
+- **Depends on:** W19, W20, W8, W11
+- [ ] done
+- Notes:
+
+### W22: Board integration and cross-hypothesis defence   [Status: pending | Model: opus]
+- **Scope:** The third board read, the headline, the detail payload's report block, and the
+  provenance check that keeps one hypothesis out of another's report.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/hypothesis/store.ts`, `api/src/routes/hypotheses.ts`, and their tests.
+- **Acceptance criteria:**
+  - The board issues **exactly three** `latest_per` requests regardless of hypothesis count. A test
+    with twelve hypotheses asserts the request count is three.
+  - 🔴 **A `kind=report` or `kind=report-candidate` memory whose provenance does not name that
+    hypothesis's own researcher worker or its `hyp-<id>` session is IGNORED, not rendered, and
+    surfaces as `tamper`.** Labels are chosen entirely by the caller, so a researcher session for
+    `hyp-A` can otherwise append `kind=report, name=hyp-B` and own hypothesis B's headline and
+    panel. A test does exactly that and asserts B's headline is unchanged and B reports tamper.
+    Without this criterion the feature's isolation claim is false.
+  - `headline` comes from line 1 of the `kind=report` snippet; a hypothesis with no report yet gets
+    `headline: null`, never `""`, so the UI distinguishes "nothing yet" from "said nothing".
+  - `GET /api/hypotheses/:id` returns the `report` block exactly as pinned in § "The detail route's
+    report block, pinned" — snake_case keys, `updated_at_ms`, `drift.orphan_slots`,
+    `drift.unfilled_slots`.
+  - A forged `report-template` (non-empty provenance) yields `tamper` and the frame route then
+    serves **404** rather than the forged template.
+  - A `report-template` hidden by a retraction whose own provenance is non-empty is still served,
+    and carries `tamper` naming the retractor — reusing W15's store reads, not a second code path.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/hypothesis/store src/routes/hypotheses && yarn typecheck`
+- **Depends on:** W21
+- [ ] done
+- Notes:
+
+### W23: VerdictBand and ReportPanel   [Status: pending | Model: sonnet]
+- **Scope:** The detail page's new upper half, plus the drift indicator.
+- **Repo:** agent-wolf
+- **Files:** create `web/src/components/{VerdictBand,ReportPanel,ReportDrift}.tsx` and tests;
+  modify `web/src/pages/HypothesisDetail.tsx`, `web/package.json`.
+- **Acceptance criteria:**
+  - `web/package.json` gains a component-testing library — **`@testing-library/react` 16.x** with
+    `@testing-library/jest-dom` — because `web/` currently ships only `vitest` and `jsdom` and the
+    criteria below cannot otherwise be written. *(If W13 has already added it, this is a no-op;
+    do not add a second one.)*
+  - 🔴 **`ReportPanel` renders `sandbox="allow-scripts"` and the rendered attribute does NOT
+    contain `allow-same-origin`.** Asserted on the DOM attribute string, with a comment naming why:
+    adding `allow-same-origin` alongside `allow-scripts` converts a bounded risk into a session
+    compromise. This is the highest-value test in the feature.
+  - A test asserts `dangerouslySetInnerHTML` appears nowhere under `web/src` **excluding the
+    asserting test file itself**, so the check cannot fail on its own text.
+  - No report → an explicit empty state naming why ("no report yet — the first tick has not run"),
+    never a blank frame.
+  - `stripped_count > 0` renders a visible notice with the count; drift renders a visible notice
+    naming the orphan and unfilled slots.
+  - `VerdictBand` renders status, score and the tripped/holding/**indeterminate** counts, with
+    `indeterminate` visually distinct from `holding` — the same rule W14 applies to the condition
+    table, for the same reason. The word is `indeterminate` throughout; never "unknown".
+  - `VerdictBand` carries an explicit note that the score summarises and does not decide.
+- **TDD:** yes for the sandbox attribute, the empty state and the notices; no for layout.
+- **Validation:** `cd web && yarn test && yarn typecheck`
+- **Depends on:** W22, W14
+- [ ] done
+- Notes:
+
+### W24: Go Live review screen   [Status: pending | Model: sonnet]
+- **Scope:** The screen where a human approves a candidate report before go-live.
+- **Repo:** agent-wolf
+- **Files:** create `web/src/pages/GoLiveReview.tsx` and its test; modify `web/src/App.tsx`.
+- **Acceptance criteria:**
+  - The screen reads the newest `kind=report-candidate` for the hypothesis — that is the transport
+    by which the interview's proposed template leaves the container — and renders its HTML.
+  - The candidate renders **inside the real frame component**, with the real CSP and the real
+    sandbox. Reviewing a preview that differs from production defeats the purpose of reviewing.
+  - The external script and stylesheet URLs (`scriptSrcs`) are listed explicitly above the preview.
+    The human is approving remote code; they are shown exactly what it is.
+  - The Go Live button is disabled until the spec validates **and** a template has been accepted,
+    with the blocking reasons listed. Neither condition alone enables it.
+  - Accepting posts the candidate's HTML to `POST …/report-template` and surfaces a `422` as
+    per-path errors.
+  - A hypothesis with no candidate shows a clear state saying the interview has not produced one
+    yet, not an error.
+- **TDD:** yes for the gate logic and the URL listing; no for layout.
+- **Validation:** `cd web && yarn test && yarn typecheck`
+- **Depends on:** W23, W13
+- [ ] done
+- Notes:
+
+### W25: Report authoring prompts   [Status: pending | Model: opus]
+- **Scope:** `prompts/report-authoring.md`, the fixture that keeps it honest, and the interviewer
+  and researcher changes that reference it.
+- **Repo:** agent-wolf
+- **Files:** create `prompts/report-authoring.md`,
+  `api/src/report/__fixtures__/example-template.html`,
+  `api/src/report/fixture.test.ts`; modify `prompts/interviewer.md`,
+  `prompts/researcher-preamble.md`.
+- **Acceptance criteria:**
+  - `report-authoring.md` states the contract exactly: the template is an HTML **fragment**; slots
+    are `[data-wolf-slot]`; scripts, stylesheets and every URL live **only** in the template; the
+    daily tick fills declared slots and may emit no URLs at all; series arrive on
+    `window.__WOLF_SERIES__` keyed by metric slug with **`tMs`** in epoch milliseconds; a
+    `[data-wolf-fallback]` element is mandatory **and the template's own script must remove it once
+    the chart renders**, or every working report permanently displays a failure message; every URL
+    must be `https:`.
+  - It states that **the interviewer writes `kind=report-candidate`** and that **the researcher may
+    propose a template change but never enact one**, mirroring the spec-amendment rule.
+  - The worked example lives at `api/src/report/__fixtures__/example-template.html` and is
+    referenced from the prompt by path, not pasted twice. `api/src/report/fixture.test.ts` asserts
+    it passes `parseTemplate` and `validateTemplate`, so the documentation cannot rot away from the
+    parser.
+  - `interviewer.md` requires a candidate report as an interview output and restates that the
+    interviewer cannot go live.
+  - `researcher-preamble.md` requires a `kind=report` memory each tick, headline on line 1,
+    `embed: false`.
+- **TDD:** no for prose; **yes** for the fixture test.
+- **Validation:** `cd api && yarn test src/report/fixture && yarn typecheck`
+- **Depends on:** W17, W12
+- [ ] done
+- Notes:
+
+### W26: End-to-end verification   [Status: pending | Model: opus]
+- **Scope:** Prove the feature works against the running stack, and prove the security boundary
+  holds where it actually matters.
+- **Repo:** agent-wolf (extends X1's rig)
+- **Files:** create `e2e/features/report-layer.spec.ts`.
+- **Acceptance criteria:**
+  - **Happy path:** go live with a template → run a tick → open the detail page → the chart element
+    exists inside the frame and the headline appears on the board.
+  - **Sanitiser leg:** a tick whose slot content contains `<script>alert(1)</script>`, an `onerror`
+    handler and an `<img src="https://…">` renders with none of them present in the frame DOM, and
+    the strip-count notice is visible.
+  - **Boundary leg:** from inside the frame, `window.origin === "null"` — the origin is opaque.
+  - **Direct-navigation leg:** requesting `/api/hypotheses/:id/report/frame` **as a top-level
+    document** still yields an opaque origin, proving the CSP `sandbox` directive is doing the work
+    rather than the iframe attribute. This is the regression test for the hole an earlier draft had.
+  - **Cross-hypothesis leg:** a report memory labelled for a different hypothesis than the session
+    that wrote it does not render, and surfaces as tamper.
+  - **Retraction leg:** a template hidden by a retraction with non-empty provenance still renders,
+    with a tamper warning.
+  - **Drift leg:** a tick filling an undeclared slot shows the drift notice and does not render it.
+  - Full gates pass: `cd api && yarn typecheck && yarn test`; `cd web && yarn typecheck && yarn
+    test`; and in agent-orange `cd go && go build ./... && go vet ./... && go test ./...`.
+- **TDD:** no.
+- **Validation:** `./e2e/run.sh report-layer` plus the three gate command groups above. *(X1 must
+  give `run.sh` an optional spec-name filter — see § "Amendments to existing tickets".)*
+- **Depends on:** W24, W25, X1
 - [ ] done
 - Notes:
 
@@ -1983,37 +4109,124 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 ### X1: End-to-end verification   [Status: pending | Model: opus]
 - **Scope:** Prove the whole product works against both stacks in mock-model mode: create a
   hypothesis, run the interview, go live, run a tick, confirm a dataset was written, confirm the
-  chart renders, trip a condition, record a human verdict, verify teardown.
+  chart renders, trip a condition, record a human verdict, verify teardown — plus the two tamper
+  attacks, which are the only tests that grade the trust model at all. This ticket also owns the
+  rig every later e2e spec extends, so `e2e/run.sh` takes an optional spec-name filter.
 - **Repo:** agent-wolf (with agent-orange running alongside)
-- **Files:** `e2e/run.sh`, `e2e/playwright.config.ts`,
-  `e2e/features/{hypothesis-lifecycle,dataset-roundtrip,tamper-resistance}.spec.ts`,
-  `e2e/mock/{interview,tick}.json`.
+- **Files:** create `e2e/run.sh`, `e2e/playwright.config.ts`,
+  `e2e/features/hypothesis-lifecycle.spec.ts`, `e2e/features/dataset-roundtrip.spec.ts`,
+  `e2e/features/tamper-resistance.spec.ts`, `e2e/mock/script.json`, `e2e/orange-override.yml`.
+  **No file in agent-orange is edited by this ticket** — the mock script reaches agentd through
+  the override file, not through an edit to Orange's `docker-compose.yml`.
+- **The mechanisms, named — do not go looking for them:**
+  - agentd reads **one** mock script, from `AGENTKIT_MOCK_MODEL_SCRIPT` or
+    `AGENTKIT_MOCK_MODEL_SCRIPT_FILE` (`go/cmd/agentd/modelproxy.go:107-108`), at boot. Rules are
+    selected by **substring match on the raw request body** and turns by assistant-message count;
+    `Block.Input` is fixed JSON with no templating (`go/modelproxy/script.go:19-60`).
+  - `SESSION_TOKEN` is injected into each session container (`go/runner.go:2719`) and is the only
+    credential that can write a memory carrying non-empty provenance. Session containers carry
+    `curl` (`installations/core/Dockerfile:22-25`) and are labelled `agentkit.session-id=<id>`
+    (`go/execenv/docker/client.go:204`), so `docker exec <dind> docker ps --filter label=…` finds
+    one. agentd's `/mcp` is reachable from inside DinD at `http://localhost:8099/mcp` and from a
+    session container at `http://172.17.0.1:8099/mcp`.
 - **Acceptance criteria:**
-  - Runs **offline** against the mock model — no `ANTHROPIC_API_KEY`, no billable call. The
-    boot-log line proving mock mode is asserted, per `README-stack.md`.
-  - The mock-model scripts are deliverables of this ticket, not assumptions: one drives the
-    interview to a valid spec, one drives a tick that calls `series_fetch`, writes a CSV and calls
-    `dataset_put`.
+  - **Runs offline against the mock model** — no `ANTHROPIC_API_KEY`, no `CLAUDE_CODE_OAUTH_TOKEN`,
+    no billable call. `run.sh` asserts the boot line
+    `[agentd] ANTHROPIC_API_KEY unset → MOCK model proxy (set it for a real agent)` is present in
+    `docker compose logs agentd` and exits non-zero if it is not, per `README-stack.md` § "The
+    known-good local/mock invocation".
+  - **Ports are pinned explicitly for both stacks, because the defaults collide.** `run.sh` starts
+    Orange with `WEB_PORT=8090` and Wolf with `WOLF_WEB_PORT=8091`, and builds `wolf-web` with
+    `VITE_ORANGE_PUBLIC_URL=http://localhost:8090`. Wolf's default 8081 is exactly the port
+    `README-stack.md`'s known-good mock invocation gives Orange, and `docker compose up` then fails
+    on port allocation.
+  - **`http://localhost:8091` is in the `wolf` project's `allowed_origins`.** `run.sh` exports
+    `AGENTKIT_PROJECT_MAP` (forwarded to agentd at `docker-compose.yml:146`) in O8's object form,
+    with `api_key_env: WOLF_API_KEY` and that origin listed. Without the origin the embed page's
+    CSP is `frame-ancestors` over the configured origins only and the chat iframe is blocked
+    outright (`go/cmd/agentd/embedcsp.go`), which reads as a broken UI rather than a config error.
+    `run.sh` also exports `WOLF_API_KEY`, `WOLF_MCP_TOKEN` and `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN`,
+    which reach agentd only through the explicit compose lines O8 adds.
+  - **One mock rules table**, `e2e/mock/script.json`, with two rules: `{"match": "interviewer"}` and
+    `{"match": "researcher-"}` — the second matches the stable worker-name prefix, because the
+    hypothesis id is generated at runtime while the script is read at agentd boot. `tool_use` blocks
+    use fully-qualified names: `mcp__core__memory_create`, `mcp__core__dataset_put`,
+    `mcp__wolf__series_fetch`.
+  - `e2e/orange-override.yml` is passed to Orange's compose with `-f` and bind-mounts
+    `e2e/mock/script.json` to `/mock-model-script.json` on the `agentd` service, with
+    `AGENTKIT_MOCK_MODEL_SCRIPT_FILE` pointing at it.
+  - The interview rule drives the interviewer to deposit a valid `kind=hypothesis-spec-candidate`
+    memory (W12's deposit contract) whose spec validates — the Go Live gate reads it, so an invalid
+    one makes every later step untestable.
+  - **Go-live needs a locked report template.** W9, as amended by the report-layer plan, refuses
+    go-live unless a trusted `report-template` exists, so the interview rule also deposits a
+    `kind=report-candidate` memory and `run.sh` accepts it by POSTing its HTML to
+    `POST /api/hypotheses/:id/report-template` (expects **201**) before calling go-live. Skip this
+    and go-live is refused and every later step of the lifecycle spec is untestable.
+  - **The tick turns are:** (1) `mcp__wolf__series_fetch`; (2) a `Bash` heredoc writing a
+    **fixture** CSV to `/workspace/<id>-<metric>.csv`, chosen so it trips the hypothesis's
+    condition; (3) `mcp__core__dataset_put(name, path, if_version: 0)`. A comment in the spec states
+    that the mock **cannot** pipe `series_fetch`'s `download_url` into a later turn's tool input
+    (`go/modelproxy/script.go:19-60` — static inputs), so this leg proves tool reachability and the
+    dataset write path, **not** provider→dataset fidelity; the byte-level round trip is O9's job.
+  - The CSV fixture is the canonical dataset CSV: header exactly `timestamp,value`, RFC3339 UTC,
+    ascending, LF endings. A `t,value` header would make the poller read zero observations from a
+    legitimately written dataset with no error anywhere.
   - The schedule is created with `WOLF_SCHEDULE_CRON="* * * * *"` — there is **no force-fire
-    route**; the scheduler fires on cron minutes only.
-  - After the tick, `GET /agent/datasets/<id>-<metric>` reports version ≥ 1 and the detail page
-    renders points.
-  - `tamper-resistance.spec.ts` covers **both** attacks: (a) a forged
-    `kind=hypothesis, status=confirmed` memory appended from a session, and (b) a
-    `retracts=<trusted-id>` memory appended from a session. In both cases the board must still
-    show the real status **and** display a tamper warning naming the writer. Attack (b) is the one
-    that defeated revision 2's design; a suite that only covers (a) proves nothing.
+    route**; the scheduler fires on cron minutes only, and nicknames are refused
+    (`go/agentdb/schedules.go:827`).
+  - After the tick, `GET /agent/datasets/<id>-<metric>` reports `version >= 1` and the detail page
+    renders points. Dataset names carry the **bare** id and session names carry the `hyp-` prefix
+    (§ Vocabulary) — `hyp-hyp-…` is the failure this assertion catches.
+  - **Sign-in uses the test-only login.** `run.sh` sets `WOLF_TEST_LOGIN="email:password"` and every
+    spec signs in through `POST /api/auth/dev-login` (W8's route, per owner decision **B6**).
+    Playwright cannot obtain a real Google ID token offline, and forging a session cookie in the
+    test would prove the cookie, not the login.
+  - **`tamper-resistance.spec.ts` covers both attacks, and states how each is driven:**
+    - **(a) forged state** — a mock-script rule on the researcher worker emits
+      `mcp__core__memory_create` with the static labels
+      `{kind: hypothesis, name: <id>, status: confirmed}`. The labels are constant, so a static
+      script suffices.
+    - **(b) hostile retraction** — needs the trusted row's **runtime uuid**, which a static script
+      cannot carry. The spec reads that id from `GET /agent/memories?selector=kind%3Dhypothesis,
+      name%3D<id>` with `WOLF_API_KEY`; `run.sh` reads `SESSION_TOKEN` out of the running
+      `hyp-<id>` session container (`docker exec <dind> docker exec <session container> printenv
+      SESSION_TOKEN`); and the spec POSTs `memory_create` with `labels: {retracts: "<trusted-id>"}`
+      to agentd's `/mcp` using that token.
+    - 🔴 **The retraction must NOT be appended with `WOLF_API_KEY`.** That yields *empty*
+      provenance, which Wolf honours by design, so the test would pass while proving the opposite
+      of its claim. The spec asserts `created_by_session` on the retracting memory is **non-empty**
+      before asserting anything about the board.
+    - In both cases the board still shows the real status **and** displays a tamper warning naming
+      the writer, with `reason` `forged_row` for (a) and `hostile_retraction` for (b).
   - After the verdict: the schedule is gone, the worker is gone, the session is gone, **and the
-    dataset is still readable**.
-  - The run cleans up after itself. No leftover sessions hold ports — including the per-tick job
-    sessions, not just `hyp-<id>`.
+    dataset is still readable**. Teardown order is asserted by observed effect, not by trust.
+  - **The run cleans up after itself.** No leftover sessions hold ports — including the per-tick job
+    sessions, not just `hyp-<id>` — and `run.sh` cleans up on failure too, since a failed run that
+    leaks sessions poisons the next one (the pool is 100 and every session holds a host port).
+  - **`e2e/run.sh [<spec-name>]`**: with no argument it runs every spec; with one it runs
+    `e2e/features/<spec-name>.spec.ts` only, so `./e2e/run.sh report-layer` is a defined command
+    once W26 lands. An unknown name exits non-zero rather than passing vacuously with zero tests.
+  - `run.sh` calls W12's `scripts/load-image-into-dind.sh` before creating any hypothesis. A
+    host-built Wolf image is invisible to sessions, and the tick would otherwise run in an image
+    with no python.
 - **TDD:** no (verification is the deliverable).
-- **Validation — all four must pass:**
-  - `cd go && go build ./... && go vet ./... && go test ./...`   *(agent-orange)*
-  - `cd api && yarn typecheck && yarn test`   *(agent-wolf)*
-  - `cd web && yarn typecheck && yarn test`   *(agent-wolf)*
-  - `./e2e/run.sh`   *(agent-wolf)*
-- **Depends on:** O10, W14
+- **Validation — all five must pass:**
+  - `cd go && go build ./... && go vet ./... && go test ./...`   *(agent-orange; note this
+    excludes `go/systemtest` and every other `//go:build integration` package — O9 gates those)*
+  - `cd go && AGENTKIT_TEST_POSTGRES_URL=<see § "The throwaway Postgres"> go test ./agentdb/...
+    -run 'Live' -count=1 -v | grep -E '^--- (PASS|SKIP|FAIL)'` — every line must be `PASS`, with
+    **zero `--- SKIP`**. Without the variable the live cases skip silently and the gate above
+    proves much less than it appears to
+  - `cd api && yarn typecheck && yarn test`   *(agent-wolf; 0 skipped)*
+  - `cd web && yarn typecheck && yarn test`   *(agent-wolf; 0 skipped)*
+  - `./e2e/run.sh`   *(agent-wolf)*, and `./e2e/run.sh tamper-resistance` to prove the filter
+- **Depends on:** O8, O10, W10, W14, W21 *(O8 is the ticket that forwards `WOLF_API_KEY`,
+  `WOLF_MCP_TOKEN` and `AGENTKIT_MCP_ENV` to agentd and documents the project map — none of them
+  reaches the stack without it, and it is not implied transitively by O10. W10's poller is the only
+  thing that moves a hypothesis `live → challenged` and the only writer of the `kind=evaluation`
+  memory the board's `support_score` comes from — X1 cannot trip a condition without it. W21 owns
+  `POST …/report-template`, without which W9's amended go-live refuses every hypothesis)*
 - [ ] done
 - Notes:
 
@@ -2021,31 +4234,36 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 
 ## Dependency graph
 
-```
-  AGENT-ORANGE
-  O1 ─┬─ O2 ── O3 ─┬─ O5 ─ O6a ─ O6b ─ O9 ──┐
-      │            │                   ├── O10
-      │            └─ O8               │
-      └─ O4 ────────────────────────── │
-                                       │
-  O7 ── O11 ───────────────────────────┘
-         │
-         └──────────────┐   (O11 is also a hard dependency of W5)
-                        │
-  AGENT-WOLF            ▼
-  W1 ─┬─ W2 ────────┐   │
-      │             ├── W5 ── W8 ──┐
-      ├─ W3 ── W4 ──┘              │
-      │                            W9 ─┬─ W10
-      └─ W6 ── W7 ── W12 ──────────┘   └─ W11 ── W13 ── W14
+39 tickets. Verified acyclic by topological sort on 2026-08-21; every `Depends on` line resolves to
+a real ticket and no ticket depends on itself transitively.
 
-  X1 depends on O10 and W14.
+```
+wave  1   O1  O4  O7  W1          ← O1, O7 done; W1 at 19/22
+wave  2   O2  O11 W2  W3  W6
+wave  3   O3  W4  W7
+wave  4   O5  O6a O8  W5  W12
+wave  5   O6b W8  W15
+wave  6   O9  W9  W16 W18
+wave  7   O10 W10 W17 W20
+wave  8   W11 W19 W25
+wave  9   W13 W21
+wave 10   W14 W22
+wave 11   W23 X1
+wave 12   W24
+wave 13   W26
 ```
 
-Three tickets can start immediately with no dependency: **O1, O7, W1**.
-**O7 is on the critical path for Wolf's state layer** and has no dependencies — start it early.
+A wave is what the graph *permits* to run together, not what must. § "Parallelism and file
+ownership" is the binding constraint on top of it: two tickets in the same wave that share a file
+still run serially. In wave 4, for example, O5 and O6a are independent, but O5 → O6b → O8 all touch
+`go/cmd/agentd/main.go` and are strictly ordered.
 
----
+The report layer (W15–W26) enters at wave 5 and runs alongside the product tickets rather than
+after them, because W15's store reads are what W21's frame route needs.
+
+⚠️ **X1 is at wave 11, not last.** It depends on W21 (the `report-template` route), because W9's
+amended go-live refuses a hypothesis with no template, and X1 goes live. W26 — the report layer's
+own end-to-end — is last, at wave 13.
 
 ## Discovered Issues Log
 
@@ -2148,6 +4366,21 @@ new entries here; do not edit existing ones.
 | **R43** | **`172.17.0.1` is asserted as fact but is not stable.** § "Local topology and networking" states the DinD inner `docker0` gateway as `172.17.0.1` and W1 repeats it in an acceptance criterion; W1's verifier reproduced it becoming `172.18.0.1` when that subnet was already taken. The plan gives no guidance on whether Wolf should discover the gateway rather than hard-code it. | **Open** — affects W7's `WOLF_MCP_URL` and O8's forwarding |
 | **R44** | **`docs/19-embedding.md:415` ("Read-only. There is no HTTP write or delete") is a live lie on the O7 branch** until O10 lands, and nothing stops O7 merging first. O7's Files list is code-only and defers the doc fix to O10 by parenthetical. | Recorded; O10 must land before or with any merge to `main` |
 
+### Owner decisions, 2026-08-21 (second batch) — the audit's seven open questions
+
+All seven are now closed. The plan text has been edited to match; these lines record that a choice
+was made and why.
+
+| Audit | Decision | Consequence in the plan |
+| --- | --- | --- |
+| **B1** | **O5 owns `go/cmd/agentd/auth.go`** and fixes both halves in one edit: a `?token=` credential is accepted *only* on the dataset download path, and a dataset token presented as `Authorization: Bearer` is **rejected outright** rather than authenticating as an unrestricted project principal. | O5's Scope, Files and criteria; a new ownership row; unblocks O5, O6b, O9 |
+| **B2** | **A FRED API key exists.** `FRED_API_KEY` is a real variable; W6 records real responses against it and `series_search` works as designed. | Pinned-technology table; W6's criteria |
+| **B3** | **`challenged → live` is legal** when a human accepts an amendment — otherwise every amended hypothesis is stuck at `challenged` forever with its research still running. **Self-transitions are no-ops**, which is what makes W10's idempotence criterion mean anything. | § Hypothesis lifecycle's legal-pair table; W5, W9, W10 |
+| **B4** | **Candidates cross the container boundary as untrusted memories** — `hypothesis-spec-candidate` and `report-candidate` — mirroring each other, so there is one pattern rather than two. | § Memory kinds; W8, W9, W12, W13 |
+| **B5** | **O11 returns ALL retractions for a memory, not the newest.** As specified, an attacker could append their own retraction on top of Wolf's, have it discarded as untrusted, and thereby **resurrect** state Wolf had legitimately withdrawn. | O11's scope and response shape; W5's reader |
+| **B6** | **Wolf gets a dev-login route**, mounted only when `WOLF_TEST_LOGIN` is set, refusing to boot alongside production settings, and asserted absent from the production build by test. X1 `docker exec`s a real session token for the tamper case, because nothing weaker proves the property. | W8; X1's criteria |
+| **B7** | Signed `HttpOnly` cookie via `cookie-parser` (no session store — Wolf holds no server-side state); **React Router 7**; port-pool exhaustion maps to **`unavailable`**, where retryable is correct because deleting a session frees a port. | Pinned-technology table; § Shared error taxonomy |
+
 ### Executability audit, 2026-08-21 — READ BEFORE DISPATCHING ANY TICKET
 
 After wave 1, six independent auditors reviewed the 24 unbuilt tickets for the defect shapes wave 1
@@ -2181,3 +4414,24 @@ graded minor: the `.dockerignore` (host `node_modules` overwriting the installed
 image), SSE-safe directives on nginx's `/mcp` location, exact `18.3.1` React pins, and a Validation
 step that **proves** the `/api` prefix survives the proxy rather than reading the config
 (**R41** — the omission that let fix round 1's bug through the first pass).
+
+### Still open after revision 4 (2026-08-21)
+
+The ticket rewrites closed the audit's 26 blocking defects and the seven owner decisions. Six
+agents drafting them raised 79 further items; most were closed in the same pass (the
+`config.ts` ownership rule, the legal-transition table, the stale units in § "Wolf API routes",
+the missing `reason` field on condition results, the unparseable spec example). **These did not
+close, and an executor hitting one should log it rather than invent an answer.**
+
+| # | Open item | Who is blocked |
+| --- | --- | --- |
+| **R45** | **W9's go-live cannot require a `report-template` without a cycle.** The report-layer amendment says go-live refuses a hypothesis with no template, but W21 is the only writer of one and W21 depends transitively on W9. Either go-live warns instead of refusing until W21 lands, or the amendment moves to W22. **Needs an owner decision.** | W9, W21, X1 |
+| **R46** | **W2's route list is declared "exhaustive and closed" and is not.** W5 needs `GET /agent/sessions` (list, with `worker=`) and `include_retracted=1`; W8 needs `GET /agent/attention-requests`; W12 needs `GET`/`PUT /agent/project-settings`. § "Parallelism" gives `client.ts` to W2 and W15 only, so W2 must gain them before wave 3. | W5, W8, W12 |
+| **R47** | **`O3`'s `minAge` guard cannot be honoured as specified.** `DatasetBlobLister.List(ctx, prefix)` returns keys with no timestamps and no `extension.BlobStore` implementation exposes an age. Either the seam gains an age, or the guard is dropped and the sweep relies on the prefix re-assertion alone. | O3, O8 |
+| **R48** | **`TRUSTED_KINDS` has two claimed owners** — W5 (the trusted store) and W15 (`api/src/report/kinds.ts`). One must define and the other re-export; the plan currently reads as though both define it. | W5, W15 |
+| **R49** | **Several variable names are used but pinned nowhere:** `WOLF_MCP_TOKEN`'s length and charset, `WOLF_SCHEDULE_CRON`'s exact default expression, `WOLF_SERIES_TOKEN_SECRET`, `WOLF_SERIES_URL_TTL_SECONDS`, `WOLF_MARKETDATA_CACHE_TTL_SECONDS`, Orange's base-URL variable, and the browser-side `VITE_ORANGE_PUBLIC_URL` / `VITE_GOOGLE_CLIENT_ID` build args. Each is named in the ticket that needs it; none is in a shared table, so two tickets could still diverge. | W6, W7, W9, W10, W11, W12, W13 |
+| **R50** | **"React Router 7" does not name the npm package** — `react-router` 7 or the `react-router-dom` 7 shim. The executor must pick and log it. | W13 |
+| **R51** | **No memory kind records a *rejected* amendment.** `spec-amendment` is the agent's proposal; `TRUSTED_KINDS` is closed; a Wolf-authored decision record has nowhere to go. Today a rejection leaves no trace. | W9, W14 |
+| **R52** | **The prompt-injection literals `{{LOCKED_SPEC_JSON}}` and `<!-- WOLF:METHOD-BODY -->` are used by both W9 and W12** and pinned in neither § Interfaces nor § "Pinned technology choices". They agree today by coincidence. | W9, W12 |
+| **R53** | **`RetractedBy` is unbounded.** A container can append arbitrarily many `retracts=<id>` memories and inflate every search response carrying that row. A cap plus a truncation flag needs a number the plan does not pin. | O11 |
+| **R54** | **No HTTP-assertion library is pinned for `api/` route tests.** W1's shipped `app.test.ts` uses `app.listen(0)` + `fetch`; W8 onward assume that house pattern rather than `supertest`, but the pinned table is silent. | W8–W11, W21 |
