@@ -79,10 +79,18 @@ type Config struct {
 	// 501 without one. Read-only by design — see attention.go.
 	Attention AttentionStore
 
-	// Memories backs the §7.6 memory read paths — the snippet search at
-	// GET /agent/memories and the two full-content reads beside it (memories.go).
-	// Same defaulting rule as Workers: auto-filled from AgentDB, 501 without one.
-	// Read-only by design — memories are appended by workers, never by the UI.
+	// Memories backs the §7.6 memory paths — the snippet search at
+	// GET /agent/memories, the two full-content reads beside it, and the one
+	// append (memories.go). Same defaulting rule as Workers: auto-filled from
+	// AgentDB, 501 without one.
+	//
+	// It used to say "read-only by design — memories are appended by workers,
+	// never by the UI", and that was the whole problem: an application embedding
+	// Orange had no way to hold state, because the only write surface was the
+	// memory_create tool, authenticated by a session token it does not hold.
+	// POST /agent/memories (O7) is that write. It is still not an update and
+	// still not a delete, and its provenance is stamped EMPTY by the server —
+	// see memories.go's header for why that single fact is load-bearing.
 	Memories MemoryStore
 
 	// MemoryEmbedder, when set, supplies the query-side embedding for that
@@ -317,12 +325,22 @@ type Endpoints struct {
 	ConfigEvents string // "GET /agent/config-events"
 	// Attention requests (design B1) — read-only; the project comes from the JWT.
 	AttentionRequests string // "GET /agent/attention-requests"
-	// Memory (§7.6) — read-only; the project comes from the JWT. ListMemories
-	// answers 500-byte snippets; the other two answer one memory in full (T18),
-	// which is what an embedding application renders its state from.
+	// Memory (§7.6) — the project comes from the JWT, never from the request.
+	// ListMemories answers 500-byte snippets; the next two answer one memory in
+	// full (T18), which is what an embedding application renders its state from.
+	//
+	// ListMemories also carries the audit view, ?include_retracted=1 (O11): the
+	// one read that can see a withdrawn row, and who withdrew it. It is refused
+	// to a session-scoped (embed) credential, because that is the credential
+	// class an erasure would most likely have come from.
 	ListMemories  string // "GET /agent/memories"
 	GetMemory     string // "GET /agent/memories/{id}"
 	CurrentMemory string // "GET /agent/memories/current"
+	// CreateMemory is the one write on the memory surface (O7): an append with
+	// server-stamped EMPTY provenance, which is what lets a reader tell the
+	// application's own word from anything written inside a container. Still no
+	// update and no delete — memories are append-only (§7.1).
+	CreateMemory string // "POST /agent/memories"
 	// Topologies (T2). The catalogue is read-only; preview computes and writes
 	// nothing; apply is the one write, atomic in the store.
 	ListTopologies  string // "GET /agent/topologies"
@@ -383,6 +401,7 @@ var DefaultEndpoints = Endpoints{
 	ConfigEvents:       "GET /agent/config-events",
 	AttentionRequests:  "GET /agent/attention-requests",
 	ListMemories:       "GET /agent/memories",
+	CreateMemory:       "POST /agent/memories",
 	// The literal segment beats the {id} wildcard in ServeMux precedence, so
 	// these two coexist without an ordering rule to remember.
 	GetMemory:       "GET /agent/memories/{id}",
@@ -461,6 +480,7 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ConfigEvents:      h.ListConfigEvents,
 		e.AttentionRequests: h.ListAttentionRequests,
 		e.ListMemories:      h.ListMemories,
+		e.CreateMemory:      h.CreateMemory,
 		e.GetMemory:         h.GetMemory,
 		e.CurrentMemory:     h.CurrentMemory,
 		e.ListTopologies:    h.ListTopologies,

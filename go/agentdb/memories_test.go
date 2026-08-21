@@ -2,6 +2,7 @@ package agentdb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -174,5 +175,44 @@ func TestMemorySizeCeilingsAreDistinct(t *testing.T) {
 	if MaxEmbeddedMemoryBytes >= MaxMemoryBytes {
 		t.Fatalf("the embedding ceiling (%d) must sit below the storage ceiling (%d): the whole point of embed:false is storing what cannot be embedded",
 			MaxEmbeddedMemoryBytes, MaxMemoryBytes)
+	}
+}
+
+// A result that was not retracted must encode EXACTLY as it did before O11
+// added the field. `omitempty` is the whole reason: every existing consumer of
+// GET /agent/memories — the console's memory browser included — decodes this
+// shape, and a `"retracted_by": null` appearing on every row of every ordinary
+// search would be a wire change for a facility almost no caller asked for.
+func TestMemorySearchResultOmitsRetractedByWhenAbsent(t *testing.T) {
+	plain, err := json.Marshal(&MemorySearchResult{
+		ID: "mem-1", Labels: LabelSet{"kind": "fact"}, Snippet: "s",
+		CreatedByWorker: "w", CreatedBySession: "sess-1", CreatedAt: 1789000000123,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const want = `{"id":"mem-1","labels":{"kind":"fact"},"snippet":"s","score":0,` +
+		`"created_by_worker":"w","created_by_session":"sess-1","created_at":1789000000123}`
+	if string(plain) != want {
+		t.Fatalf("an unretracted result changed shape:\n got %s\nwant %s", plain, want)
+	}
+
+	// And when it IS retracted, every key of every retraction is on the wire —
+	// a reader that cannot see the retractor's provenance cannot tell an
+	// application's own withdrawal from an attacker's.
+	withRetraction, err := json.Marshal(&MemorySearchResult{
+		ID: "mem-1", Labels: LabelSet{}, CreatedAt: 1,
+		RetractedBy: []MemoryRetraction{{
+			MemoryID: "mem-2", CreatedByWorker: "researcher",
+			CreatedBySession: "sess-9", CreatedAt: 1789000000456,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	const wantRetraction = `"retracted_by":[{"memory_id":"mem-2","created_by_worker":"researcher",` +
+		`"created_by_session":"sess-9","created_at":1789000000456}]`
+	if !strings.Contains(string(withRetraction), wantRetraction) {
+		t.Fatalf("retraction shape:\n got %s\nwant it to contain %s", withRetraction, wantRetraction)
 	}
 }

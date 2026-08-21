@@ -5,12 +5,25 @@ package httpapi
 //	GET /agent/memories
 //	  query: ?selector=<k8s label selector>&query=<free text>&limit=<n>
 //	         &since=<bound>&until=<bound>&latest_per=<label key>
+//	         &include_retracted=1
 //	         A bound is RFC3339, unix milliseconds, or a relative age ("7d").
 //	  auth : the ordinary session JWT; the project comes from the Customer claim,
 //	         never from the query (P5) — same posture as GET /agent/config-events.
 //	  200  : {"memories": [MemorySearchResult, …]}
-//	  400  : a malformed selector, reported with the parser's own message
+//	  400  : a malformed selector, reported with the parser's own message; or an
+//	         include_retracted that is not exactly `1`
+//	  403  : include_retracted asked for by a session-scoped (embed) credential
 //	  501  : no store wired, or a store that is not Postgres
+//
+// include_retracted (O11 of design/2026-08-20-agent-wolf.md) is the audit view.
+// `retracts` is an ordinary label, so anything holding the core MCP tools can
+// withdraw any row in its project — including one appended through the POST
+// below as the application's own authoritative state — and with the filter
+// always on, that erasure is indistinguishable from the row never having
+// existed. With the flag, withdrawn rows come back carrying EVERY retraction
+// against them (`retracted_by`), each with its own provenance, so a reader can
+// tell "the application took this back" from "something in a container erased
+// it". It is available to project API keys and console JWTs only.
 //
 // This is the same §7.6 relevance contract the memory_search MCP tool calls, and
 // deliberately the same one: selector filter, free text fused by RRF, recency as
@@ -39,9 +52,40 @@ package httpapi
 // path would be a second set of scoping rules to keep true, and the scoping is
 // the whole security story here.
 //
-// Read-only: memories are append-only (§7.1) and are written by workers through
-// their tools, so there is no POST counterpart — and no PUT or DELETE anywhere
-// on this file's routes either.
+// And, since O7 of design/2026-08-20-agent-wolf.md, the ONE write:
+//
+//	POST /agent/memories
+//	  body : {"labels": {...}, "content": "...", "embed": true}
+//	  auth : a project API key or a console JWT — NOT a session token (which the
+//	         host's middleware rejects 401 before this handler runs) and NOT an
+//	         embed token (403 here, on Identity.SessionScope).
+//	  201  : the stored row, in memoryRecordResp shape
+//	  400  : a body carrying provenance, bad labels, blank or oversized content
+//	  403  : no project in the credential, or a session-scoped one
+//	  501  : no store wired, a store that is not Postgres, or an embedding this
+//	         database has no column to hold
+//
+// This file used to say memories were written by workers through their tools and
+// that there was therefore no POST counterpart. That was true, and it was also
+// the reason an application embedding Orange could hold no state of its own: the
+// only write surface was memory_create on the core MCP server, authenticated by
+// a session token an embedder does not hold.
+//
+// What the new route adds is not just a write — it is the TRUST ANCHOR. The
+// server stamps provenance EMPTY, from the credential's class, and refuses a
+// body that tries to supply it. Everything written from inside a container
+// carries a worker name or a session id, so a reader can tell "the application
+// wrote this" from "something in a container wrote this" and decline to take
+// authoritative state from the second. A prompt-injected page read during deep
+// research can append a memory; it cannot append one that looks like the
+// application's.
+//
+// (Empty provenance is necessary, not sufficient: agentdb.ApplyTopology also
+// writes provenance-free seeds and is reachable by any API-class credential. A
+// reader that depends on this must also pin the label vocabulary it trusts.)
+//
+// Still append-only, and still no PUT and no DELETE anywhere on this file's
+// routes: "changing" a memory is appending a newer one (§7.1).
 //
 // Postgres-only, like the store itself (jsonb selectors + tsvector). On the
 // SQLite fallback the store returns ErrMemoryRequiresPostgres and these routes
@@ -50,24 +94,36 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 )
 
-// MemoryStore is the slice of agentdb.Store these routes need. Note what is not
-// in it: no create and no delete, so the append-only invariant survives the seam
-// exactly as it does for the MCP tools (cmd/agentd/mcp_memory.go:46-52, whose
-// memoryStore is this set plus CreateMemory). *agentdb.Store satisfies it.
+// MemoryStore is the slice of agentdb.Store these routes need. It is now the
+// SAME set the MCP tools take (cmd/agentd/mcp_memory.go:46-52) — create, get,
+// search, newest — and note what is still not in it: no update and no delete, so
+// the append-only invariant survives the seam (§7.1). *agentdb.Store satisfies
+// it.
 //
-// GetMemory and NewestMemory joined SearchMemories here rather than arriving as
-// a second Config field: one field cannot be wired to two different stores by
-// accident, and a host that has a memory store at all has these.
+// GetMemory, NewestMemory and CreateMemory joined SearchMemories here rather
+// than arriving as further Config fields: one field cannot be wired to two
+// different stores by accident, and a host that has a memory store at all has
+// these.
 type MemoryStore interface {
 	SearchMemories(ctx context.Context, q *agentdb.MemorySearchQuery) ([]*agentdb.MemorySearchResult, error)
+	// CreateMemory appends one row. The second return says whether it landed
+	// WITH an embedding, read back from the database rather than inferred from
+	// the argument; this route does not report it (the response is the stored
+	// row in memoryRecordResp shape, which has no such field), but the seam
+	// keeps the store's signature rather than narrowing it, so *agentdb.Store
+	// and the MCP tools' memoryStore stay one contract.
+	CreateMemory(ctx context.Context, m *agentdb.Memory, embedding []float32) (*agentdb.Memory, bool, error)
 	// GetMemory takes the project as an argument, not as a filter the caller
 	// applies afterwards: a memory of another project is simply not found.
 	GetMemory(ctx context.Context, project, id string) (*agentdb.Memory, error)
@@ -79,12 +135,21 @@ type MemoryStore interface {
 // The concrete store must always satisfy the seam.
 var _ MemoryStore = (*agentdb.Store)(nil)
 
-// MemoryEmbedder supplies the query-side embedding for the semantic leg. It is
-// optional and returns nil freely: a nil embedder, or a nil return from a
-// provider that failed, costs this one query its semantic leg and nothing else
-// (§7.6.5 — the result shape never changes). The host wires it from whatever
-// embedding provider it already built, which is why the seam is a func rather
-// than the provider type: httpapi stays free of the extension packages.
+// MemoryEmbedder supplies the embedding for the semantic leg. It is optional and
+// returns nil freely: a nil embedder, or a nil return from a provider that
+// failed, costs this one query its semantic leg and nothing else (§7.6.5 — the
+// result shape never changes). The host wires it from whatever embedding
+// provider it already built, which is why the seam is a func rather than the
+// provider type: httpapi stays free of the extension packages.
+//
+// CreateMemory reuses it on the WRITE path, and there the "returns nil freely"
+// clause bites differently: memories are never re-embedded (§7.1), so a provider
+// outage during an append writes a row that is permanently invisible to semantic
+// search, and this seam cannot say so — it has no error to return. The MCP tool
+// fails the create instead (cmd/agentd/mcp_memory.go:313-319, the D2 asymmetry).
+// Closing that gap needs a second, error-returning seam and a host wiring for
+// it; until then the degradation is silent, and label and keyword search still
+// find the row.
 type MemoryEmbedder func(ctx context.Context, text string) []float32
 
 // memoryReadable is the gate every memory route shares: a store must be wired,
@@ -108,6 +173,32 @@ func (h *Handlers) memoryReadable(w http.ResponseWriter, id Identity) bool {
 	return true
 }
 
+// memoryIncludeRetracted reads ?include_retracted, which is the audit view's
+// switch (O11 of design/2026-08-20-agent-wolf.md).
+//
+// EXACTLY `1` turns it on and absence turns it off. Every other spelling — `0`,
+// `true`, `yes`, the empty string, and `?include_retracted` with no `=` at all —
+// is a 400 naming the parameter, and that strictness is the point rather than
+// pedantry: the caller of this parameter is auditing whether its own state was
+// erased, and a value that quietly degraded to "filtered" would hand it an
+// erasure dressed as an absence. `strconv.ParseBool` is deliberately not used
+// for the same reason — it would accept `0` and answer false.
+//
+// It writes the error response and returns ok=false; the caller just returns.
+func memoryIncludeRetracted(w http.ResponseWriter, q url.Values) (bool, bool) {
+	// Has(), not Get(): a present-but-empty parameter is a caller that thinks it
+	// said something, and Get() cannot tell it from absent.
+	if !q.Has("include_retracted") {
+		return false, true
+	}
+	if q.Get("include_retracted") == "1" {
+		return true, true
+	}
+	http.Error(w, `include_retracted: the only accepted value is 1 — omit the parameter for the default, `+
+		`which hides retracted memories`, http.StatusBadRequest)
+	return false, false
+}
+
 // ListMemories serves GET /agent/memories — the memory browser's read path.
 func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 	id, ok := h.identify(w, r)
@@ -118,6 +209,26 @@ func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	// include_retracted is settled BEFORE anything else about the query, because
+	// both of its answers are refusals and neither depends on the rest of it.
+	includeRetracted, ok := memoryIncludeRetracted(w, q)
+	if !ok {
+		return
+	}
+	if includeRetracted && id.SessionScope != "" {
+		// An embed token: API-class (same secret, empty `sid`), but minted for a
+		// browser inside a third-party page, so it reaches exactly the places a
+		// container's output reaches. The audit view exists to catch an actor
+		// with that reach erasing the application's own state; handing the view
+		// to that actor tells it precisely which erasure was noticed.
+		//
+		// The ORDINARY read is untouched — this restricts the parameter, not the
+		// route. A session token, meanwhile, never gets here at all: different
+		// signing key, and agentd's middleware rejects a non-empty `sid` with 401
+		// before routing (cmd/agentd/auth.go, doc 22 RD30).
+		http.Error(w, "this credential is scoped to a single session and may not read retracted memories", http.StatusForbidden)
+		return
+	}
 	text := q.Get("query")
 	// The embedding is computed only when there is text to embed: an empty query
 	// is a recency question, not a relevance one.
@@ -156,7 +267,8 @@ func (h *Handlers) ListMemories(w http.ResponseWriter, r *http.Request) {
 		// The store validates the key and refuses an inverted range; this route
 		// deliberately does not duplicate either check, because the catch-all
 		// below already reports a store error as 400 with its own message.
-		LatestPer: strings.TrimSpace(q.Get("latest_per")),
+		LatestPer:        strings.TrimSpace(q.Get("latest_per")),
+		IncludeRetracted: includeRetracted,
 	})
 	if err != nil {
 		if errors.Is(err, agentdb.ErrMemoryRequiresPostgres) {
@@ -295,6 +407,167 @@ func writeMemoryReadError(w http.ResponseWriter, err error) {
 	case errors.Is(err, agentdb.ErrMemoryNotFound):
 		http.Error(w, memoryNotFound, http.StatusNotFound)
 	case errors.Is(err, agentdb.ErrMemoryRequiresPostgres):
+		http.Error(w, err.Error(), http.StatusNotImplemented)
+	default:
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The append route (O7 of design/2026-08-20-agent-wolf.md).
+// ---------------------------------------------------------------------------
+
+// createMemoryBody is POST /agent/memories' request.
+//
+// There is no `project` field: the project is the credential's, exactly as it is
+// on every read here (P5). A `project` key in the body is ignored rather than
+// refused, which is the same answer ?project= already gets on the read route.
+//
+// The two provenance keys ARE fields, and that is the point: they exist only so
+// that a body carrying them can be REFUSED. Decoding them as json.RawMessage
+// makes "the key is present" the test — including `"created_by_worker": ""` and
+// `"created_by_session": null`, both of which a caller could otherwise send
+// believing it had said something. Silently dropping them would leave that
+// caller believing it had attributed the memory, while every reader downstream
+// read the memory as the application's own word.
+type createMemoryBody struct {
+	Labels  map[string]string `json:"labels"`
+	Content string            `json:"content"`
+	// Embed is a POINTER so "absent" and "false" are distinguishable — absent
+	// means true, the same default memory_create has.
+	Embed *bool `json:"embed"`
+
+	CreatedByWorker  json.RawMessage `json:"created_by_worker"`
+	CreatedBySession json.RawMessage `json:"created_by_session"`
+}
+
+// CreateMemory serves POST /agent/memories — the one write on this surface.
+//
+// Every check that can be answered without the database is answered before it:
+// an oversized or malformed append costs a round trip to nothing, and comes back
+// with the sentence that fixes it.
+func (h *Handlers) CreateMemory(w http.ResponseWriter, r *http.Request) {
+	id, ok := h.identify(w, r)
+	if !ok {
+		return
+	}
+	// Store-wired and project-claimed, the same two gates the reads share.
+	if !h.memoryReadable(w, id) {
+		return
+	}
+	// The one gate the reads do NOT share. A session-scoped credential is an
+	// embed token: API-class (same secret, empty `sid`), confined only by a
+	// scope claim that ownsSession checks on session-by-id routes and nowhere
+	// else. It is minted for a browser inside a third-party page, so it reaches
+	// exactly the places a container's output reaches — and a credential that
+	// can reach a container must never mint state the application will later
+	// read back as its own.
+	//
+	// A SESSION token cannot get this far at all: it is signed with a different
+	// key, and the host's middleware rejects any token carrying a non-empty
+	// `sid` with 401 before routing (cmd/agentd/auth.go, doc 22 RD30).
+	if id.SessionScope != "" {
+		http.Error(w, "this credential is scoped to a single session and may not append memories", http.StatusForbidden)
+		return
+	}
+
+	var body createMemoryBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	// Provenance first, before anything that could make the request look
+	// accepted-then-adjusted.
+	for _, field := range []struct {
+		name string
+		raw  json.RawMessage
+	}{{"created_by_worker", body.CreatedByWorker}, {"created_by_session", body.CreatedBySession}} {
+		if field.raw != nil {
+			http.Error(w, field.name+" is stamped by the server from your credential and cannot be set by the caller: "+
+				"a memory appended through this route always has EMPTY provenance, which is exactly what marks it as the "+
+				"application's own word rather than something written from inside a container. Remove the field.",
+				http.StatusBadRequest)
+			return
+		}
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		http.Error(w, "content is required and must not be blank", http.StatusBadRequest)
+		return
+	}
+	// The hard ceiling first, so a caller 2MB over is not told to retry with
+	// `embed: false` and then refused again for a reason that was true all
+	// along. Both ceilings are the STORE's (agentdb/memories.go:235-256) and are
+	// checked here only so the answer is ours, before the round trip.
+	if len(body.Content) > agentdb.MaxMemoryBytes {
+		http.Error(w, fmt.Sprintf(
+			"this memory is %d bytes, over the %d-byte ceiling for any memory — store the document as an artifact and keep a memory that points at it",
+			len(body.Content), agentdb.MaxMemoryBytes), http.StatusBadRequest)
+		return
+	}
+	wantEmbed := body.Embed == nil || *body.Embed
+	if wantEmbed && len(body.Content) > agentdb.MaxEmbeddedMemoryBytes {
+		http.Error(w, fmt.Sprintf(
+			`this memory is %d bytes, over the %d-byte limit for meaning-based indexing — pass "embed": false to store it whole `+
+				`(it stays searchable by label and by keyword), or split it`,
+			len(body.Content), agentdb.MaxEmbeddedMemoryBytes), http.StatusBadRequest)
+		return
+	}
+	// Validated here as well as in the store so the caller gets the validator's
+	// specific complaint rather than a wrapped database error — and so nothing
+	// reaches the embedding provider that the INSERT was going to reject anyway.
+	// Same reason the memory_create tool double-checks (mcp_memory.go:294-297).
+	if err := agentdb.ValidateLabels(agentdb.LabelSet(body.Labels)); err != nil {
+		http.Error(w, "labels: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var vec []float32
+	if wantEmbed && h.cfg.MemoryEmbedder != nil {
+		vec = h.cfg.MemoryEmbedder(r.Context(), body.Content)
+	}
+
+	stored, _, err := h.cfg.Memories.CreateMemory(r.Context(), &agentdb.Memory{
+		Project: id.Customer, // from the claim, always — never from the body
+		Labels:  agentdb.LabelSet(body.Labels),
+		Content: body.Content,
+		// Named rather than left to the zero value, because they are the
+		// invariant: this route's memories are the ones with NO author inside
+		// the system, and a future edit that starts filling them in should have
+		// to delete these two lines to do it.
+		CreatedByWorker:  "",
+		CreatedBySession: "",
+	}, vec)
+	if err != nil {
+		writeMemoryWriteError(w, err)
+		return
+	}
+	// §9 read-back: what the database holds, not the caller's struct — the same
+	// rule memory_create follows, and the reason the response can be trusted as
+	// the row a later GET will return.
+	//
+	// No config event is written, here or in the store: a memory is data, not
+	// configuration (§15.4). If every append appeared in the changelog, one
+	// hypothesis ticking daily would bury the project's actual configuration
+	// history within a week.
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(memoryRecordOf(stored))
+}
+
+// writeMemoryWriteError maps an append failure onto a status. It is the read
+// path's twin (writeMemoryReadError) with one extra case and no 404: nothing is
+// being looked up, so nothing can be missing.
+//
+// ErrMemoryEmbeddingUnstorable is 501 rather than 500: the request was
+// well-formed and the store is healthy — this database simply has no
+// content_embedding column to put the vector in (pgvector was unavailable when
+// migration 022 ran), so the functionality required to fulfil the request is not
+// supported here. The store's own message survives, and it names the way
+// through: append it without an embedding.
+func writeMemoryWriteError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, agentdb.ErrMemoryRequiresPostgres),
+		errors.Is(err, agentdb.ErrMemoryEmbeddingUnstorable):
 		http.Error(w, err.Error(), http.StatusNotImplemented)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)

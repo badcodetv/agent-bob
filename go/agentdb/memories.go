@@ -105,6 +105,21 @@ type MemorySearchQuery struct {
 	// It is the set-valued form of NewestMemory: `memory_current` answers "the
 	// current value of x" for one name, this answers it for every name at once.
 	LatestPer string
+	// IncludeRetracted lifts the retraction filter. False is the default and is
+	// every existing caller: the withdrawn row stays hidden from every leg,
+	// exactly as before.
+	//
+	// It is a property of the HARD filter — the same clause that governs the
+	// recency leg, both relevance legs and the LatestPer pre-reduction — so
+	// when it is true a retracted row participates in that reduction and can
+	// win its name's slot. Anything softer (a post-filter, or a second query
+	// unioned in) would answer "the newest state of x" differently depending on
+	// which leg found it.
+	//
+	// This is an AUDIT facility for a caller already checked as trusted, not a
+	// new default: see the comment above notRetractedSQL for why, and for why
+	// results then carry EVERY retraction rather than the newest.
+	IncludeRetracted bool
 }
 
 // MemorySearchResult is one hit. Provenance is part of the result, not an
@@ -118,6 +133,33 @@ type MemorySearchResult struct {
 	CreatedByWorker  string   `json:"created_by_worker"`
 	CreatedBySession string   `json:"created_by_session"`
 	CreatedAt        int64    `json:"created_at"`
+	// RetractedBy carries EVERY memory that withdraws this one, newest first.
+	// It is populated only when the query asked for retracted rows
+	// (MemorySearchQuery.IncludeRetracted), and is omitted entirely — from the
+	// struct and from the wire — for a row nothing retracts, so an ordinary
+	// search is byte-identical to what it was before this field existed.
+	//
+	// `gorm:"-"` because it is filled by a second, whole-page query rather than
+	// scanned from the row.
+	RetractedBy []MemoryRetraction `json:"retracted_by,omitempty" gorm:"-"`
+}
+
+// MemoryRetraction is one withdrawal of one memory, seen from the withdrawn
+// row. Its provenance is the point: a retraction written from inside a
+// container carries a worker or a session, and one written by an application
+// over HTTP carries neither — which is the only thing that lets a reader tell
+// "the application took this back" from "something in a container erased it".
+type MemoryRetraction struct {
+	// MemoryID is the RETRACTING memory's own id, not the retracted row's (that
+	// is the result this rides on). GetMemory it to read why it was written —
+	// a retraction is an ordinary memory with a body.
+	MemoryID string `json:"memory_id" gorm:"column:memory_id"`
+	// CreatedByWorker and CreatedBySession are the RETRACTION's provenance.
+	CreatedByWorker  string `json:"created_by_worker" gorm:"column:created_by_worker"`
+	CreatedBySession string `json:"created_by_session" gorm:"column:created_by_session"`
+	// CreatedAt is unix MILLISECONDS — the unit the `memories` table is stamped
+	// in throughout (the agent_* tables use seconds; do not unify them).
+	CreatedAt int64 `json:"created_at" gorm:"column:created_at"`
 }
 
 // CreateMemory appends a memory. The embedding is optional: pass nil when no
@@ -281,6 +323,22 @@ const RetractionLabel = "retracts"
 // Deliberately NOT applied to GetMemory: fetching a specific id is an explicit
 // request for that row, and being able to read what was withdrawn — and the
 // retraction that withdrew it — is the point of not deleting anything.
+//
+// MemorySearchQuery.IncludeRetracted is the SEARCH-side equivalent of that
+// exemption, and it exists because `retracts` is an ordinary label: anything
+// holding the core MCP tools can withdraw any row in its project, including one
+// an embedding application wrote as its own authoritative state, and with this
+// clause always applied the erasure is indistinguishable from the row never
+// having existed. Set the flag and the clause is omitted, and every result
+// carries the retractions against it in MemorySearchResult.RetractedBy.
+//
+// Those are ALL of them, newest first, and not merely the newest — which is not
+// a convenience. A reader decides whether to honour a withdrawal by asking
+// whether ANY retraction of the row has empty provenance (i.e. was written by
+// the application rather than from inside a container). With only the newest,
+// an attacker appends its own retraction on top of a legitimate one, the reader
+// discards that single untrusted retractor, and state that was properly taken
+// back is resurrected.
 func notRetractedSQL(alias string) string {
 	return fmt.Sprintf(
 		"NOT EXISTS (SELECT 1 FROM memories r WHERE r.project = %[1]s.project AND r.labels->>'%[2]s' = %[1]s.id)",
@@ -403,8 +461,12 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 	}
 	// Retraction is part of the hard filter, so it applies identically to the
 	// recency leg and to both relevance legs below — a withdrawn memory cannot
-	// come back by scoring well.
-	where += " AND " + notRetractedSQL("f")
+	// come back by scoring well. IncludeRetracted lifts it in that one place,
+	// for the same reason: the audit view must be one view, not a fourth leg
+	// with its own answer.
+	if !q.IncludeRetracted {
+		where += " AND " + notRetractedSQL("f")
+	}
 
 	// Time bounds join the SAME hard filter, for the same reason: the string
 	// built here is interpolated into the recency query and into the `filtered`
@@ -452,6 +514,24 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 		"CASE WHEN length(%[1]s.content) > %[2]d THEN substring(%[1]s.content, 1, %[2]d) ELSE %[1]s.content END AS snippet",
 		"f", memorySnippetLen)
 
+	// finish wraps every exit so the retraction lookup cannot be forgotten on
+	// one leg — which is exactly how a reader would come to trust a row that
+	// had in fact been withdrawn. It is one query for the whole page, run only
+	// when the caller asked for retracted rows; when it did not, no row in the
+	// page can be retracted and there is nothing to look up.
+	finish := func(res []*MemorySearchResult, err error) ([]*MemorySearchResult, error) {
+		if err != nil {
+			return nil, err
+		}
+		if !q.IncludeRetracted {
+			return res, nil
+		}
+		if err := s.attachRetractions(ctx, q.Project, res); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+
 	// 2. No query text ⇒ a recency question, not a relevance one.
 	if strings.TrimSpace(q.Query) == "" {
 		inner := `SELECT ` + distinctOn + `f.id, f.labels, ` + snippet + `,
@@ -459,9 +539,9 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 			FROM memories f
 			WHERE ` + where
 		if latestPer == "" {
-			return s.scanMemoryResults(ctx,
+			return finish(s.scanMemoryResults(ctx,
 				inner+"\n\t\t\tORDER BY f.created_at DESC, f.id DESC\n\t\t\tLIMIT ?",
-				append(append([]any{}, whereArgs...), limit))
+				append(append([]any{}, whereArgs...), limit)))
 		}
 		// DISTINCT ON requires ORDER BY to lead with its own expression, which
 		// is not the order the caller wants back — so reduce inside, then
@@ -469,7 +549,7 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 		sql := `SELECT * FROM (` + inner + "\n\t\t\t" + latestOrder + `) d
 			ORDER BY d.created_at DESC, d.id DESC
 			LIMIT ?`
-		return s.scanMemoryResults(ctx, sql, append(append([]any{}, whereArgs...), limit))
+		return finish(s.scanMemoryResults(ctx, sql, append(append([]any{}, whereArgs...), limit)))
 	}
 
 	// 3. Hybrid retrieval, fused. Both legs run over the same filtered set.
@@ -550,7 +630,56 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 		LIMIT ?`)
 	args = append(args, limit)
 
-	return s.scanMemoryResults(ctx, b.String(), args)
+	return finish(s.scanMemoryResults(ctx, b.String(), args))
+}
+
+// attachRetractions fills RetractedBy on every row of one result page.
+//
+// One query for the page, never one per row: a page is capped at 100 and this
+// runs on the read path an operator console hits on every keystroke. The lookup
+// lives here rather than in httpapi because httpapi writes no SQL — and because
+// the project correlation below is the same P5 rule notRetractedSQL enforces,
+// which is not a rule two packages should each hold a copy of.
+//
+// Newest first (created_at DESC, id DESC — the store's tiebreak throughout), and
+// ALL of them: see the comment above notRetractedSQL for why the newest alone
+// is a resurrection attack.
+func (s *Store) attachRetractions(ctx context.Context, project string, res []*MemorySearchResult) error {
+	if len(res) == 0 {
+		return nil
+	}
+	ids := make([]string, len(res))
+	for i, r := range res {
+		ids[i] = r.ID
+	}
+	// The retracted id is a jsonb text extraction, not a column, so it is
+	// selected as `target` and grouped in Go. `->>` binds no placeholder, so
+	// nothing here collides with the jsonb `?` operator (see labels.go).
+	sql := fmt.Sprintf(`SELECT r.labels->>'%[1]s' AS target, r.id AS memory_id,
+			r.created_by_worker, r.created_by_session, r.created_at
+		FROM memories r
+		WHERE r.project = ? AND r.labels->>'%[1]s' IN (?)
+		ORDER BY r.created_at DESC, r.id DESC`, RetractionLabel)
+
+	var rows []struct {
+		Target string `gorm:"column:target"`
+		MemoryRetraction
+	}
+	if err := s.gdb.WithContext(ctx).Raw(sql, project, ids).Scan(&rows).Error; err != nil {
+		return fmt.Errorf("agentdb: search memories: retractions: %w", err)
+	}
+	byTarget := make(map[string][]MemoryRetraction, len(rows))
+	for _, row := range rows {
+		byTarget[row.Target] = append(byTarget[row.Target], row.MemoryRetraction)
+	}
+	for _, r := range res {
+		// Left nil when nothing retracts the row, so `omitempty` keeps it off
+		// the wire entirely rather than sending an empty list.
+		if hits := byTarget[r.ID]; len(hits) > 0 {
+			r.RetractedBy = hits
+		}
+	}
+	return nil
 }
 
 func (s *Store) scanMemoryResults(ctx context.Context, sql string, args []any) ([]*MemorySearchResult, error) {
