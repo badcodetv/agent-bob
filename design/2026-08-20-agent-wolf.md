@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R98. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R100. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -2011,7 +2011,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   independently and it matched; (3) `TestPullWorkspaceFile_ArgvNotShell` is near-redundant because
   the fake already rejects any unknown `cmd[0]`, so the verifier wrote a real exact-argv assertion
   itself to prove the criterion. 8 guesses. Found **R87**.
-### O6b: Dataset MCP tools   [Status: pending | Model: opus]
+### O6b: Dataset MCP tools   [Status: done | Model: opus]
 - **Scope:** `dataset_list`, `dataset_get`, `dataset_put` on the existing `core` MCP server, built
   on O6a's pull function plus O2's CAS store — **and the one engine change O6a's seam requires**: an
   exported `Runner.ExecInSession`, because nothing exported today can turn a session id into a
@@ -2109,9 +2109,33 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     find it.
 - **Depends on:** O6a, O5 *(O5 brings O4 transitively: `dataset_get` mints with O4's helper and
   points at O5's download route)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 17/17 criteria, zero defects, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 17 of 17 criteria PASS, zero
+  defects, zero fix rounds.** Branch `O6b-dataset-mcp-tools`, commit `e31d4d4`, merged to `main`.
+  Three tools in one new file plus one `mcpSrv.register(...)` line inside main.go's
+  `if agentDB != nil` block, so they are absent off Postgres exactly like the rest of the core
+  surface. **No tool carries bytes.** `dataset_get` returns a short-lived URL built on
+  `AGENTKIT_SELF_URL` — never the public base — minted by O4's helper and scoped to
+  `(project, name)` with **no version**, so a v3 and a v7 URL round-trip to the same pair; its
+  description tells the model to `curl -o` and never to echo the URL, which carries a bearer
+  credential into the transcript and the event stream. `dataset_put` names a `/workspace` file
+  agentd pulls out of the calling container with O6a's pipeline. Writes go through CAS with the
+  blob written first, so a conflict deletes it best-effort and names the real current version; a
+  delete failure is logged, never fatal, and a test proves the conflict error survives a blob store
+  whose `Delete` always errors. Provenance comes from `mcpCaller` alone — there is no argument for
+  it and an unidentified caller is refused rather than written with empty provenance, which is what
+  keeps O7's trust anchor meaningful. **The interface break was the real risk and it was handled:**
+  `agentkit.Runner` gained `ExecInSession`, and both out-of-package `stubRunner`s
+  (`httpapi/fakes_test.go`, `cmd/agentd/router_test.go`) gained the method — the verifier re-ran
+  the whole-module `go vet ./...` and `go test ./...` itself to confirm, since a package-scoped
+  green run proves nothing there. **O5's ten-field contract was checked, not assumed**: the test
+  holds O5's literal pinned HTTP body and compares names and values field for field. They agree.
+  Field **order** differs between the two surfaces (O5 leads with `id`, the tool follows the plan's
+  printed order) — not a defect, since the criterion is about names, but a consumer comparing
+  serialised bytes would see two strings for one row. 25 guesses. Also flagged: `dataset_list`'s
+  argument is `selector` while `memory_search` and `skill_list` use `label_selector` for the
+  identical grammar — pinned by the plan, implemented as written, loud rather than silent when a
+  model trips on it because `decodeArgs` rejects unknown fields.
 ### O7: `POST /agent/memories` — the trust anchor   [Status: done | Model: opus]
 - **Scope:** The authenticated memory append route specified in **Interfaces**. This is what makes
   an embedding application able to hold state at all, and its server-stamped empty provenance is
@@ -3502,7 +3526,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   FRED** and `"USD"` for Stooq, because W6's FRED connector exposes units only through `search()` —
   the tool description tells the model to take FRED units from `series_search` (**R78**).
 
-### W8: Auth and hypothesis read routes   [Status: pending | Model: opus]
+### W8: Auth and hypothesis read routes   [Status: done | Model: opus]
 - **Scope:** `POST /api/auth/google`, `GET /api/hypotheses`, `GET /api/hypotheses/:id`,
   `POST /api/hypotheses` — plus the two things every later Wolf route inherits and that no other
   ticket owns: the signed-cookie session module (`requireSignedIn`, which W9, W10 and W11 mount)
@@ -3626,12 +3650,32 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     **0** — a green run that proved nothing is the third trap in § "The Validation rule".
 - **Depends on:** W5 *(which brings W2, W3, W4 and O11)*. O7 must be merged before any live-stack
   run: the trusted memory append is its route, and it answers **201**.
-- [ ] done
-- Notes: The report layer amends this ticket's two response shapes — `GET /api/hypotheses` gains
-  `headline` and `GET /api/hypotheses/:id` gains a `report` block — but **W22 delivers both**, from
-  the same two files, once a `kind=report` memory can exist. Keep the shapes open for extension and
-  do not implement them here.
-
+- [x] done — verified 2026-08-21, 21/21 criteria, zero defects, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 21 of 21 criteria PASS, zero
+  defects, zero fix rounds.** Branch `W8-auth-hypothesis-routes`, commit `63a24b0`, merged to
+  `main`. 17 files; api/ went from 489 tests to **572**. **R79 held**: `requireSignedIn` is mounted
+  per router, and the verifier issued real cookie-less requests to `/mcp` and `/series/download`
+  and confirmed neither 401s — the criterion this ticket gained specifically to pre-empt a failure
+  that would otherwise have surfaced inside a container at X1. R92 is closed: `ORANGE_BASE_URL` and
+  `WOLF_API_KEY` now have a home in `.env.example` and the typed `WolfConfig`, which is where R49
+  finally landed. All three R81 places were checked independently for every variable added.
+  **Three findings handed forward.** (1) Two defects in `api/src/orange/client.ts`, which W8 does
+  not own: `classifyStatus` has no 401 case, so an Orange 401 reads as kind `internal` (W8 detects
+  it by `err.status === 401` in its own route instead); and the port-pool override builds kind
+  `unavailable` carrying the **upstream** status, producing `unavailable` with HTTP 403 against a
+  taxonomy that says `unavailable → 503` — W8 restates it to 503 in its create route and left the
+  client alone, but **W10's poller will see the 403**, and `unavailable` is the one retryable kind.
+  Both are now criteria on **W15**, the next holder of that file. (2) **R99**: `WOLF_TEST_LOGIN`
+  with `NODE_ENV=production` is a boot failure and `.env.example` ships `NODE_ENV=production`, so
+  X1's `run.sh` must export `development` or `test` or the Wolf stack does not boot at all.
+  (3) **R100**: there is no `GET /api/auth/me` and no logout route anywhere in the plan, so W13 must
+  infer signed-in state from a 401 and a user cannot sign out short of the cookie's 12 hours.
+  Inherited and deliberately not made worse: the board still under-reports tamper relative to
+  W14's detail page (W5's known limit), and W12's bootstrap still reads `ORANGE_BASE_URL` from
+  `process.env` with its own default, so the two readers can disagree until a later ticket moves it.
+  Also: adding one dependency made yarn rewrite unrelated `yarn.lock` entries — the committed
+  lockfile had drifted from the manifests before this ticket; resolved versions are unchanged.
+  **48 guesses, the highest of any single ticket in five waves.**
 ### W9: Go-live provisioning and ordered teardown   [Status: pending | Model: opus]
 - **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live reads the
   candidate spec, validates it, writes it as a trusted locked memory, composes the researcher
@@ -4227,6 +4271,28 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     later tickets obtain either. Both use `include_retracted=1` and **ignore any retraction whose
     own provenance is non-empty**, exactly as W5 does — a template hidden by a hostile retraction
     must surface as `tamper`, never as absence.
+  - **Three defects in `api/src/orange/client.ts` that earlier tickets each found and each declined
+    to fix, because the file was not theirs.** W15 is the next holder of it in the serial order and
+    is the last chance before W10's poller consumes all three (added 2026-08-21 — collecting
+    standing assignments, not new scope):
+    1. **`classifyStatus` has no case for 401**, so an Orange 401 becomes kind `internal` with the
+       status preserved. W8 needed verify-google's 401 to read as `forbidden` and detected it by
+       `err.status === 401` in its own route rather than editing this file. Add the case; any other
+       caller that branches on `kind` currently mis-handles a 401.
+    2. **The port-pool override builds kind `unavailable` carrying the UPSTREAM status**, so it
+       produces `unavailable` with HTTP **403**, contradicting the taxonomy's `unavailable → 503`.
+       W8 restates it to 503 in its create route and left the client alone. **W10's poller will see
+       the 403** and, per § "Shared error taxonomy", `unavailable` is the one retryable kind — a
+       mismatched status here is how a retry loop mis-reads an outage.
+    3. **`mapMemorySearchRow` fails OPEN on missing provenance**: a row that OMITS
+       `created_by_worker`/`created_by_session` entirely is mapped to empty strings, so it satisfies
+       clause 1 of the trust rule and reads as **trusted**. Not reachable through today's `agentd`
+       (`agentdb.MemorySearchResult` tags both without `omitempty`, `go/agentdb/memories.go:133-134`,
+       so they are always emitted) — but it is the one place where the trust rule depends on a field
+       being **present** rather than on its value, and the defence cannot be mounted from
+       `store.ts`: by the time the store sees the row the distinction is gone. W5 found it and named
+       W15 as the owner. Reject the shape, or carry the distinction through.
+    A test drives each of the three.
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/report/kinds src/hypothesis/store src/orange/client && yarn typecheck`
 - **Depends on:** W5, O11
@@ -4921,3 +4987,5 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R96** | **O8's Validation named a path that does not exist.** The ticket said `TestProjectMapExample` reads the `AGENTKIT_PROJECT_MAP` line out of `../../.env.example` from `go/cmd/agentd/` — two `..` segments, which resolves to `go/.env.example`. `.env.example` is at the repo root, **three** levels up, matching the existing convention in `cmd/hypolabgen`, `cmd/triagelabgen` and `cmd/gauntletgen`, all of which use `filepath.Join("..","..","..", …)`. A strict literal reading would have produced a test that cannot open its own fixture. The executor implemented three segments and reported the discrepancy. Same family as **R87**: a path or argv written by hand in the plan and never executed. | **Resolved** — O8 |
 | **R97** | **Two operator traps O8 surfaced and correctly left for O10.** (1) `.env.example` now carries the worked `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` value only as an **indented in-prose comment** inside the Wolf block, while the file's column-0 declaration line `# AGENTKIT_MCP_ENV=` remains empty. An operator who uncomments the declaration gets an empty allowlist and `WOLF_MCP_TOKEN` **silently never reaches a session container** — the failure mode is a tool that is configured, mounted and inert. (2) `TestProjectMapExample` asserts the wolf project has exactly one allowed origin and that `validateOrigin` accepts it, but never that it **equals** `http://localhost:8081`; a typo'd port keeps the test green while the embed page's `frame-ancestors` CSP silently refuses to frame wolf-web. Both are one line each. Separately, `.env.example` now shows **two** `AGENTKIT_PROJECT_MAP` examples — the legacy flat form O8 does not own, and the new object form — with nothing inline explaining the relationship. | **Open** — O10 |
 | **R98** | **`api/src/hypothesis/store.ts`'s ownership row omitted W8 and printed an order the dependency graph contradicts.** W8's own Files line modifies `store.ts` and `store.test.ts`, but the row read *W5, W10, W15, W22* and never mentioned W8 — so the two tickets that became wave 5's chain heads would have run concurrently on the same file with nothing in the plan saying not to. The printed order was also wrong on its own terms: it put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9, so honouring it would have serialised the entire report layer behind the UI chain for no dependency reason. **Row corrected to W5, W8, W15, W10, W22**, and W8 goes first in wave 5 because its chain is the longer one. This is the **fourth** wave in a row to find a missing or wrong ownership row (R81, R86, R94, now R98) — the mechanical cross-check R94 describes would have caught every one of them, and is now the highest-value unbuilt item in this plan. | **Resolved** — W8, W15 |
+| **R99** | **`WOLF_TEST_LOGIN` plus `NODE_ENV=production` is now a boot failure, and `.env.example` ships `NODE_ENV=production`.** W8's `loadConfig` refuses the test-login variable outside development, which is correct — but it means **X1's `run.sh` must export `NODE_ENV=development` (or `test`) for the Wolf stack or nothing boots at all**, and the failure is at boot, before any test runs, in the one ticket with the most moving parts. Nobody would guess it from `.env.example`, which is the file an operator copies. Found by W8, which cannot fix it because `run.sh` is X1's. | **Open** — X1 |
+| **R100** | **There is no way for the UI to ask "am I signed in, and as whom?", and no way to sign out.** The plan's route table has no `GET /api/auth/me` and no logout route. W13 must therefore infer the signed-in state from a 401 on the board, and a signed-in user cannot sign out except by waiting the cookie's 12 hours or by the operator rotating `WOLF_SESSION_SECRET` — which signs *everyone* out. Not W8's to add (its criteria enumerate its routes and neither is among them) and not a blocker for W13, but it is a product gap rather than an implementation one, and it wants an owner decision before W13 designs around its absence. | **Open** — W13, or a plan revision |
