@@ -132,6 +132,21 @@ services:
       # (§13.7). Unset → 6h. The expiry itself is per project
       # (project_settings.snapshot_ttl_days). "off" disables either loop.
       AGENTKIT_SNAPSHOT_REAP_INTERVAL: ${AGENTKIT_SNAPSHOT_REAP_INTERVAL:-}
+      # Dataset version reaper + orphan blob sweep (gc.go, datasetreaper.go).
+      # Unset → 6h / keep 30 versions. Postgres-only, same lifecycle as the
+      # snapshot reaper above but owned entirely by cmd/agentd — see O8.
+      AGENTKIT_DATASET_REAP_INTERVAL: ${AGENTKIT_DATASET_REAP_INTERVAL:-}
+      AGENTKIT_DATASET_KEEP_VERSIONS: ${AGENTKIT_DATASET_KEEP_VERSIONS:-}
+      # dataset_put's per-write byte cap (O6b's knob — forwarded here so
+      # setting it in .env is not a silent no-op; unset → agentd's 64MiB
+      # default).
+      AGENTKIT_DATASET_MAX_BYTES: ${AGENTKIT_DATASET_MAX_BYTES:-}
+      # Agent Wolf project credentials (see .env.example). WOLF_API_KEY is
+      # resolved via AGENTKIT_PROJECT_MAP's object form (api_key_env);
+      # WOLF_MCP_TOKEN reaches session containers only because
+      # AGENTKIT_MCP_ENV below allowlists its name.
+      WOLF_API_KEY: ${WOLF_API_KEY:-}
+      WOLF_MCP_TOKEN: ${WOLF_MCP_TOKEN:-}
       AGENTKIT_JWT_SECRET: ${AGENTKIT_JWT_SECRET:-}
       # OPTIONAL. The signing key for per-session container tokens. Unset (the
       # normal case) agentd derives it from AGENTKIT_JWT_SECRET, so a session
