@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R97. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R98. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -346,7 +346,7 @@ allows:
 | `go/httpapi/memories.go` | O7, O11 | Strictly serial |
 | `go/cmd/agentd/main.go` | **O5**, O6b, O8 | Strictly serial. O5 was missing from this row for three revisions while its own Files line required modifying `main.go` to wire `DatasetBlobs`; the orchestrator caught it at the wave-4 cut and serialised O5 → O8 by hand. O5 and O8 are both landed, so O6b is the only one left — **R86** |
 | `api/src/routes/hypotheses.ts` | W8, W9 | Strictly serial |
-| `api/src/hypothesis/store.ts` | W5, W10, W15, W22 | Strictly serial in that order |
+| `api/src/hypothesis/store.ts`, `store.test.ts` | W5, **W8**, **W15**, W10, W22 | **Strictly serial in that order — corrected 2026-08-21, R98.** W8 was missing from this row entirely while its own Files line modifies both files, and the printed order put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9. Honouring the old order would have serialised the whole report layer behind the UI chain for no dependency reason. W8 and W15 are the two chain heads and must not run concurrently; W8 goes first because its chain (W9 → W10 → W11 → W13 → W14) is the longer one |
 | `go/cmd/agentd/auth.go`, `auth_test.go` | O5 only | O5 owns the middleware change; no other ticket may touch it |
 | `go/agentdb/memories.go` | O7, O11 | Strictly serial |
 | `api/src/orange/client.ts` | W2, W15 | Strictly serial; W2's route list is exhaustive and closed |
@@ -3514,7 +3514,9 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `api/src/routes/hypotheses.ts`, `api/src/routes/hypotheses.test.ts`, `api/src/auth/session.ts`,
   `api/src/auth/session.test.ts`; modify `api/src/hypothesis/store.ts`,
   `api/src/hypothesis/store.test.ts`, `api/src/app.ts` (mount `cookie-parser` and both routers),
-  `api/src/config.ts`, `.env.example`, `api/package.json` (`cookie-parser`,
+  `api/src/config.ts`, `.env.example`, **`docker-compose.yml`** (R81 — a variable in `.env.example`
+  and `config.ts` never reaches the container without an `environment:` entry, and W8 is on that
+  ownership row while this line omitted the file), `api/package.json` (`cookie-parser`,
   `@types/cookie-parser`). Every route is mounted under the literal `/api` prefix — no proxy
   rewrites it (**R37**).
 - **Acceptance criteria:**
@@ -3569,6 +3571,21 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `GET /agent/memories?selector=kind%3Devaluation&latest_per=name`. A test with twelve
     hypotheses asserts the request count is two. (W22 raises it to three when it adds `headline`;
     do not fold that read in here — nothing writes a `kind=report` memory until W21.)
+  - **`requireSignedIn` is exported and mounted PER ROUTER, never globally** (**R79**, promoted
+    from a log entry to a criterion 2026-08-21). W7's `/mcp` and `/series/download` sit
+    deliberately at the app root, outside `/api` and outside any cookie: a session container has no
+    cookie and reaches wolf-api directly at the DinD gateway. `app.use(requireSignedIn)` 401s the
+    entire market-data surface **inside containers**, where nothing in this repo's unit tests looks
+    — X1 is where it would first surface, nine tickets and one container later. A test asserts that
+    a request to `/mcp` and one to `/series/download`, both **with no cookie**, are NOT 401, and a
+    second asserts `app.ts` contains no unqualified `app.use(requireSignedIn)`.
+  - **`ORANGE_BASE_URL` is documented in `.env.example` and read through the typed `WolfConfig`**
+    (**R92**, assigned to W8 2026-08-21). W12's bootstrap reads it straight from `process.env` with
+    a hardcoded `http://localhost:8099` default because no ticket in its dependency set pinned it;
+    this ticket already edits `config.ts` and `.env.example`, so it is the first place the variable
+    can be given a home. This is where R49's "Orange's base-URL variable, pinned nowhere" finally
+    lands. Document `WOLF_API_KEY` in the same pass — the bootstrap needs it too and it is on this
+    ticket's own allowlist/secret edit.
   - **The evaluation summary parser lives in `api/src/hypothesis/store.ts` and there is exactly one
     of it.** It parses line 1 of each `kind=evaluation` snippet in the format pinned in § "Where the
     board's numbers come from" (`score=… tripped=… holding=… indeterminate=… evaluated=…`): all
@@ -4903,3 +4920,4 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R95** | **A wave that runs several tickets concurrently leaves throwaway containers behind, because house rule 9 forbids workers removing them.** Wave 4 ended with six `agentkit-testpg-*` instances on ports 5433–5438 plus a verifier's DinD: agents correctly created their own rather than colliding, correctly refused to `docker rm` anything, and correctly reported what they left. The rule is right — an agent removing a sibling's database mid-run is far worse than an idle container — but the sweep has no owner. **The orchestrator should sweep between waves**, and did. | **Informational** — orchestrator housekeeping |
 | **R96** | **O8's Validation named a path that does not exist.** The ticket said `TestProjectMapExample` reads the `AGENTKIT_PROJECT_MAP` line out of `../../.env.example` from `go/cmd/agentd/` — two `..` segments, which resolves to `go/.env.example`. `.env.example` is at the repo root, **three** levels up, matching the existing convention in `cmd/hypolabgen`, `cmd/triagelabgen` and `cmd/gauntletgen`, all of which use `filepath.Join("..","..","..", …)`. A strict literal reading would have produced a test that cannot open its own fixture. The executor implemented three segments and reported the discrepancy. Same family as **R87**: a path or argv written by hand in the plan and never executed. | **Resolved** — O8 |
 | **R97** | **Two operator traps O8 surfaced and correctly left for O10.** (1) `.env.example` now carries the worked `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` value only as an **indented in-prose comment** inside the Wolf block, while the file's column-0 declaration line `# AGENTKIT_MCP_ENV=` remains empty. An operator who uncomments the declaration gets an empty allowlist and `WOLF_MCP_TOKEN` **silently never reaches a session container** — the failure mode is a tool that is configured, mounted and inert. (2) `TestProjectMapExample` asserts the wolf project has exactly one allowed origin and that `validateOrigin` accepts it, but never that it **equals** `http://localhost:8081`; a typo'd port keeps the test green while the embed page's `frame-ancestors` CSP silently refuses to frame wolf-web. Both are one line each. Separately, `.env.example` now shows **two** `AGENTKIT_PROJECT_MAP` examples — the legacy flat form O8 does not own, and the new object form — with nothing inline explaining the relationship. | **Open** — O10 |
+| **R98** | **`api/src/hypothesis/store.ts`'s ownership row omitted W8 and printed an order the dependency graph contradicts.** W8's own Files line modifies `store.ts` and `store.test.ts`, but the row read *W5, W10, W15, W22* and never mentioned W8 — so the two tickets that became wave 5's chain heads would have run concurrently on the same file with nothing in the plan saying not to. The printed order was also wrong on its own terms: it put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9, so honouring it would have serialised the entire report layer behind the UI chain for no dependency reason. **Row corrected to W5, W8, W15, W10, W22**, and W8 goes first in wave 5 because its chain is the longer one. This is the **fourth** wave in a row to find a missing or wrong ownership row (R81, R86, R94, now R98) — the mechanical cross-check R94 describes would have caught every one of them, and is now the highest-value unbuilt item in this plan. | **Resolved** — W8, W15 |
