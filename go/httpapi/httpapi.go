@@ -24,6 +24,17 @@ type Identity struct {
 	// minted for, and nothing else in the project. Empty means unrestricted
 	// within Customer — the shape every console JWT and API key has.
 	SessionScope string
+	// DatasetScope, when non-empty, narrows this credential to a single
+	// dataset, spelled "<project>/<name>". It is what a dataset download token
+	// carries (?token= on GET /agent/datasets/{name}/download, verified by the
+	// host's middleware): the credential an agent inside a container is handed
+	// so its `curl` can pull one dataset's bytes without ever holding the
+	// project's API key. Enforcement is in datasets.go, on that route alone.
+	//
+	// It pins a NAME and never a version — a URL minted while a dataset is at
+	// v3 must still resolve to that name's requested version after a tick moved
+	// it to v4. Empty means unrestricted within Customer.
+	DatasetScope string
 }
 
 // IdentityFunc resolves the principal from a request. The host reads its own
@@ -142,6 +153,24 @@ type Config struct {
 	// read-only, the browser-side mirror of the image/skill MCP tools. Same
 	// defaulting rule as Workers: auto-filled from AgentDB, 501 without one.
 	Catalogue CatalogueStore
+
+	// Datasets backs the four dataset read routes (datasets.go). Same
+	// defaulting rule as Workers: auto-filled from AgentDB in New(), and 501
+	// without one — datasets are Postgres-only (jsonb labels plus the unique
+	// index their compare-and-swap depends on).
+	Datasets DatasetStore
+
+	// DatasetBlobs is the dataset BYTE plane, and is deliberately NOT
+	// auto-filled from AgentDB: agentdb cannot reach a blob store at all
+	// (extension imports agentdb, so the reverse is a cycle) and this package
+	// must not import extension. The host wires it in cmd/agentd from the one
+	// process-wide BlobStore.
+	//
+	// Nil is a supported deployment: the three metadata routes keep working and
+	// the download route alone answers 501. That asymmetry is the point — a
+	// host that can list datasets but not serve their bytes should say so on
+	// the one route that cannot be honoured.
+	DatasetBlobs DatasetBlobReader
 }
 
 // Tenancy contract
@@ -216,6 +245,12 @@ func New(cfg Config) (*Handlers, error) {
 	}
 	if cfg.Memories == nil && cfg.AgentDB != nil {
 		cfg.Memories = cfg.AgentDB
+	}
+	// Datasets defaults like every other metadata store. DatasetBlobs
+	// deliberately does not — there is nothing on AgentDB to fill it from; see
+	// its field comment.
+	if cfg.Datasets == nil && cfg.AgentDB != nil {
+		cfg.Datasets = cfg.AgentDB
 	}
 	if cfg.Topologies == nil && cfg.AgentDB != nil {
 		cfg.Topologies = cfg.AgentDB
@@ -341,6 +376,19 @@ type Endpoints struct {
 	// application's own word from anything written inside a container. Still no
 	// update and no delete — memories are append-only (§7.1).
 	CreateMemory string // "POST /agent/memories"
+	// Datasets (O5 of design/2026-08-20-agent-wolf.md) — the project comes from
+	// the credential, never from the request. All four are reads: a dataset is
+	// written from inside a session by the dataset_put tool, which pulls the
+	// bytes out of the container's workspace rather than carrying them through
+	// an HTTP body.
+	//
+	// DownloadDataset is the ONE route in this package that accepts a scoped
+	// query-parameter credential (?token=), verified by the host's middleware
+	// and delivered as Identity.DatasetScope.
+	ListDatasets    string // "GET /agent/datasets"
+	GetDataset      string // "GET /agent/datasets/{name}"
+	DatasetVersions string // "GET /agent/datasets/{name}/versions"
+	DownloadDataset string // "GET /agent/datasets/{name}/download"
 	// Topologies (T2). The catalogue is read-only; preview computes and writes
 	// nothing; apply is the one write, atomic in the store.
 	ListTopologies  string // "GET /agent/topologies"
@@ -404,8 +452,14 @@ var DefaultEndpoints = Endpoints{
 	CreateMemory:       "POST /agent/memories",
 	// The literal segment beats the {id} wildcard in ServeMux precedence, so
 	// these two coexist without an ordering rule to remember.
-	GetMemory:       "GET /agent/memories/{id}",
-	CurrentMemory:   "GET /agent/memories/current",
+	GetMemory:     "GET /agent/memories/{id}",
+	CurrentMemory: "GET /agent/memories/current",
+	ListDatasets:  "GET /agent/datasets",
+	// The literal `versions` and `download` segments beat the bare {name} route
+	// in ServeMux precedence, so the three coexist without an ordering rule.
+	GetDataset:      "GET /agent/datasets/{name}",
+	DatasetVersions: "GET /agent/datasets/{name}/versions",
+	DownloadDataset: "GET /agent/datasets/{name}/download",
 	ListTopologies:  "GET /agent/topologies",
 	PreviewTopology: "POST /agent/topologies/preview",
 	ApplyTopology:   "POST /agent/topologies/apply",
@@ -480,6 +534,10 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ConfigEvents:      h.ListConfigEvents,
 		e.AttentionRequests: h.ListAttentionRequests,
 		e.ListMemories:      h.ListMemories,
+		e.ListDatasets:      h.ListDatasets,
+		e.GetDataset:        h.GetDataset,
+		e.DatasetVersions:   h.ListDatasetVersions,
+		e.DownloadDataset:   h.DownloadDataset,
 		e.CreateMemory:      h.CreateMemory,
 		e.GetMemory:         h.GetMemory,
 		e.CurrentMemory:     h.CurrentMemory,

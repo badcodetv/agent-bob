@@ -20,6 +20,12 @@ type principal struct {
 	// third-party page. It confines the credential to that one session;
 	// enforcement lives in httpapi, beside the existing ownership check.
 	embedSession string
+	// datasetScope is non-empty only for a request authenticated by a dataset
+	// download token out of ?token= (see the middleware below). It is spelled
+	// "<project>/<name>" — NOT the "dataset:" scope value the token carries —
+	// and confines the credential to that one dataset. Enforcement lives in
+	// httpapi/datasets.go, on the download route alone.
+	datasetScope string
 }
 
 type ctxKey struct{}
@@ -44,16 +50,65 @@ func extensionScope(email, customer string) extension.ContextScope {
 // log filter can be taught about one without the other.
 const apiKeyHeader = "X-API-Key"
 
-// apiAuthMiddleware authenticates every API request from one of two credentials:
+// datasetTokenParam is the query parameter carrying a dataset download token.
+//
+// A query parameter, and not a header or a fragment, because of who the caller
+// is: a model inside a session container running `curl <download_url>`. curl
+// cannot send a fragment at all, and a header would force the model to compose
+// one from a URL it was handed. It is accepted on ONE route — see the middleware
+// — and read as a credential nowhere else in the tree.
+const datasetTokenParam = "token"
+
+// datasetScopeBearerPrefix is the namespace devclaims.DatasetScope stamps.
+//
+// devclaims keeps its own copy unexported (it is a sibling of the session
+// prefix), so this is a deliberate second spelling of one security-critical
+// string; TestDatasetDownloadAuth_ScopePrefixMatchesDevclaims pins the two
+// together so they cannot drift.
+const datasetScopeBearerPrefix = "dataset:"
+
+// datasetDownloadPath reports whether r is the one request shape the ?token=
+// credential is accepted on: GET /agent/datasets/<exactly one segment>/download.
+//
+// "Exactly one segment" is load-bearing rather than tidy. Without it a path like
+// /agent/datasets/a/b/download would be accepted here and routed somewhere else
+// entirely by the mux, and the leg would be authenticating a request it never
+// looked at.
+func datasetDownloadPath(r *http.Request) bool {
+	if r.Method != http.MethodGet {
+		return false
+	}
+	rest, ok := strings.CutPrefix(r.URL.Path, "/agent/datasets/")
+	if !ok {
+		return false
+	}
+	name, ok := strings.CutSuffix(rest, "/download")
+	if !ok {
+		return false
+	}
+	return name != "" && !strings.Contains(name, "/")
+}
+
+// datasetTokenEmail is the synthetic principal email a dataset token
+// authenticates as — obviously not a human, and distinguishable from
+// apiKeyEmail's, so anything recording "who did this" records the credential
+// class rather than an empty string.
+func datasetTokenEmail(project string) string { return "dataset-token:" + project }
+
+// apiAuthMiddleware authenticates every API request from one of three
+// credentials:
 //
 //	X-API-Key: <raw>            a long-lived project key, server-side only
 //	Authorization: Bearer <jwt> an HS256 token signed with secret
+//	?token=<jwt>                a short-lived DATASET token, and ONLY on
+//	                            GET /agent/datasets/{name}/download
 //
 // The key is tried first, because a caller that sent one meant to use it and
 // should get a 401 rather than falling through to an anonymous mode.
 //
-// Both paths produce the same principal. The JWT path additionally carries an
-// optional session scope (see principal.embedSession).
+// All three paths produce the same principal. The JWT path additionally carries
+// an optional session scope (see principal.embedSession); the ?token= path
+// always carries a dataset scope (principal.datasetScope) and nothing else.
 //
 // An empty secret still enables dev-open mode — a default principal, no
 // verification — for the zero-config demo, but ONLY when no project key is
@@ -75,6 +130,40 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
 				r.Context(), principal{email: apiKeyEmail(project), customer: project})))
 			return
+		}
+		// The ?token= leg (O5 of design/2026-08-20-agent-wolf.md): the ONE place
+		// in this tree where a credential arrives in the URL, and the ONE route
+		// it is accepted on.
+		//
+		// It exists because the caller is an agent inside a session container
+		// running `curl <download_url>` — a request carrying neither X-API-Key
+		// nor Authorization, which everything below answers 401 before any
+		// handler sees it. The token is short-lived (300s by default, ceiling
+		// 900s) and pins one (project, name) pair, so the worst a leaked one
+		// buys is one dataset's bytes for a few minutes.
+		//
+		// It sits AFTER the API-key branch — a caller that sent a key meant to
+		// use it — and BEFORE dev-open, which needs no credential at all. A
+		// verification failure falls through to the ordinary 401 rather than
+		// answering something more specific: an attacker probing this route
+		// must not be able to tell "expired" from "wrong secret" from "not a
+		// dataset token".
+		//
+		// The token's NAME is not compared to the path here. That comparison is
+		// httpapi's, on Identity.DatasetScope, precisely so a mismatch can be
+		// answered with the same 404 an absent dataset gets instead of a 401
+		// that confirms the name exists.
+		if len(secret) > 0 && datasetDownloadPath(r) {
+			if raw := strings.TrimSpace(r.URL.Query().Get(datasetTokenParam)); raw != "" {
+				if project, name, err := verifyDatasetToken(secret, raw); err == nil {
+					next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), principal{
+						email:        datasetTokenEmail(project),
+						customer:     project,
+						datasetScope: project + "/" + name,
+					})))
+					return
+				}
+			}
 		}
 		if devOpen {
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
@@ -117,6 +206,26 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// A DATASET token presented as a bearer token is refused outright, and
+		// for the same reason as the lock above: it is a credential that reaches
+		// a container, so it is not API-class.
+		//
+		// Without this it would authenticate as an UNRESTRICTED project
+		// principal on every /agent/* route — a dataset token is signed with
+		// this same secret and carries the same empty `sid` as an embed token,
+		// and the scope claim is read below only through ParseSessionScope,
+		// which says "not a session scope" and leaves the principal wide open.
+		// The narrow ?token= leg above is the only way this credential may
+		// authenticate anything.
+		//
+		// The lock is specific to the "dataset:" namespace and NOT to "any scope
+		// I do not recognise": a future scope kind gets its own explicit
+		// handling, and a token scoped `project:…` still authenticates exactly
+		// as it did (TestAuthMiddleware_UnknownScopeKindIsNotASessionScope).
+		if v, _ := claims[devclaims.ScopeClaim].(string); strings.HasPrefix(v, datasetScopeBearerPrefix) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		p := principal{}
 		if v, ok := claims["email"].(string); ok {
 			p.email = v
@@ -143,5 +252,6 @@ func identityFromRequest(r *http.Request) (httpapi.Identity, error) {
 		UserEmail:    p.email,
 		Customer:     p.customer,
 		SessionScope: p.embedSession,
+		DatasetScope: p.datasetScope,
 	}, nil
 }
