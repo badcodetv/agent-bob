@@ -40,6 +40,48 @@ func liveDataset(project, name string) *Dataset {
 	}
 }
 
+// seedDatasetRow inserts a row directly, bypassing CreateDatasetVersion, so a
+// test can control created_at (for the tiebreak test, where CreateDatasetVersion's
+// own time.Now() cannot be forced into a tie) or write a blob_path that is
+// deliberately outside DatasetBlobPrefix (for the "the reaper must never even
+// ask a foreign path to be deleted" test).
+func seedDatasetRow(t *testing.T, s *Store, project, name string, version int, blobPath string, createdAt int64) {
+	t.Helper()
+	if err := s.DB().Exec(
+		`INSERT INTO datasets (id, project, name, version, labels, blob_path, size_bytes, row_count,
+		                       sha256, content_type, created_by_worker, created_by_session, created_at)
+		 VALUES (?, ?, ?, ?, '{}'::jsonb, ?, 0, 0, 'seed', 'text/csv', '', '', ?)`,
+		"ds-"+uuid.New().String(), project, name, version, blobPath, createdAt,
+	).Error; err != nil {
+		t.Fatalf("seed dataset row: %v", err)
+	}
+}
+
+// recordingDeleter is a DatasetBlobDeleter that records every key it
+// successfully "deletes" and can be told to fail on specific keys.
+type recordingDeleter struct {
+	mu      sync.Mutex
+	deleted []string
+	failOn  map[string]bool
+}
+
+func (d *recordingDeleter) Delete(ctx context.Context, key string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.failOn[key] {
+		return fmt.Errorf("simulated delete failure for %s", key)
+	}
+	d.deleted = append(d.deleted, key)
+	return nil
+}
+
+// stubLister is a DatasetBlobLister that answers a fixed key set.
+type stubLister struct{ keys []string }
+
+func (l stubLister) List(ctx context.Context, prefix string) ([]string, error) {
+	return l.keys, nil
+}
+
 // TestDatasetLivePG_CreateFirstVersionAndReadItBack: ifVersion 0 on a name with
 // no row succeeds at version 1, the store fills exactly the three fields the
 // caller left zero, and both read paths return what was written.
@@ -477,5 +519,387 @@ func TestDatasetLivePG_UniqueIndexIsTheBackstop(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("exactly one row must exist, got %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// O3: ListDatasets — the reduction to "one row per name" must happen BEFORE
+// the selector is applied, or a superseded version's labels can decide
+// whether the CURRENT version is returned.
+// ---------------------------------------------------------------------------
+
+// TestDatasetLivePG_ListDatasetsOnlyCurrentVersionAndItsLabelsDecideTheSelector
+// is the ticket's central ListDatasets criterion: the exact fixture that
+// separates three plausible (and two wrong) implementations.
+func TestDatasetLivePG_ListDatasetsOnlyCurrentVersionAndItsLabelsDecideTheSelector(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+	const name = "d"
+
+	v1 := liveDataset(project, name)
+	v1.Labels = LabelSet{"hyp": "h1"}
+	if _, err := s.CreateDatasetVersion(ctx, v1, 0); err != nil {
+		t.Fatalf("create v1: %v", err)
+	}
+	// v2, current, deliberately unlabelled.
+	if _, err := s.CreateDatasetVersion(ctx, liveDataset(project, name), 1); err != nil {
+		t.Fatalf("create v2: %v", err)
+	}
+
+	got, err := s.ListDatasets(ctx, project, "hyp=h1", 0)
+	if err != nil {
+		t.Fatalf("list with selector: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("v2 is current and unlabelled — selector hyp=h1 must NOT match it via v1's labels, got %+v", got)
+	}
+
+	// No selector: exactly one row for the name, and it is the CURRENT version.
+	all, err := s.ListDatasets(ctx, project, "", 0)
+	if err != nil {
+		t.Fatalf("list without selector: %v", err)
+	}
+	if len(all) != 1 || all[0].Version != 2 {
+		t.Fatalf("want exactly one row at version 2, got %+v", all)
+	}
+
+	// v3 relabelled brings the name back.
+	v3 := liveDataset(project, name)
+	v3.Labels = LabelSet{"hyp": "h1"}
+	if _, err := s.CreateDatasetVersion(ctx, v3, 2); err != nil {
+		t.Fatalf("create v3: %v", err)
+	}
+	got, err = s.ListDatasets(ctx, project, "hyp=h1", 0)
+	if err != nil {
+		t.Fatalf("list with selector after relabel: %v", err)
+	}
+	if len(got) != 1 || got[0].Version != 3 {
+		t.Fatalf("relabelling at v3 must bring the name back at its current version, got %+v", got)
+	}
+}
+
+// TestDatasetLivePG_ListDatasetsOrderingTiebreakAndLimit: created_at DESC,
+// name ASC as the tiebreak (two rows can share a millisecond), and the
+// limit<=0 -> 20 / limit>100 -> 100 clamp.
+func TestDatasetLivePG_ListDatasetsOrderingTiebreakAndLimit(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+
+	const sameMs = int64(1700000000000)
+	seedDatasetRow(t, s, project, "zeta", 1, "_datasets/bytes/"+uuid.New().String(), sameMs)
+	seedDatasetRow(t, s, project, "alpha", 1, "_datasets/bytes/"+uuid.New().String(), sameMs)
+	seedDatasetRow(t, s, project, "middle", 1, "_datasets/bytes/"+uuid.New().String(), sameMs+1000)
+
+	got, err := s.ListDatasets(ctx, project, "", 0)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 rows, got %d", len(got))
+	}
+	if got[0].Name != "middle" {
+		t.Fatalf("position 0: want the later created_at (\"middle\") first, got %q", got[0].Name)
+	}
+	if got[1].Name != "alpha" || got[2].Name != "zeta" {
+		t.Fatalf("tied created_at must break by name ASC: got [%q, %q], want [alpha, zeta]",
+			got[1].Name, got[2].Name)
+	}
+
+	limited, err := s.ListDatasets(ctx, project, "", 2)
+	if err != nil {
+		t.Fatalf("list limit=2: %v", err)
+	}
+	if len(limited) != 2 {
+		t.Fatalf("limit=2: got %d rows, want 2", len(limited))
+	}
+
+	huge, err := s.ListDatasets(ctx, project, "", 100000)
+	if err != nil {
+		t.Fatalf("list limit=100000 (clamps to 100): %v", err)
+	}
+	if len(huge) != 3 {
+		t.Fatalf("limit clamped to 100 must still return all 3 present rows, got %d", len(huge))
+	}
+}
+
+// TestDatasetLivePG_ListDatasetVersionsOrderingAndNotFound: version DESC,
+// the limit clamp, and ErrDatasetNotFound (not an empty slice) for a name
+// with no rows in the project.
+func TestDatasetLivePG_ListDatasetVersionsOrderingAndNotFound(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+	const name = "versions-order"
+
+	for n := 0; n < 3; n++ {
+		if _, err := s.CreateDatasetVersion(ctx, liveDataset(project, name), n); err != nil {
+			t.Fatalf("create at ifVersion %d: %v", n, err)
+		}
+	}
+
+	got, err := s.ListDatasetVersions(ctx, project, name, 0)
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 versions, got %d", len(got))
+	}
+	for i, want := range []int{3, 2, 1} {
+		if got[i].Version != want {
+			t.Fatalf("position %d: version %d, want %d (newest first)", i, got[i].Version, want)
+		}
+	}
+
+	limited, err := s.ListDatasetVersions(ctx, project, name, 1)
+	if err != nil {
+		t.Fatalf("list versions limit=1: %v", err)
+	}
+	if len(limited) != 1 || limited[0].Version != 3 {
+		t.Fatalf("limit=1: want [version 3], got %+v", limited)
+	}
+
+	if _, err := s.ListDatasetVersions(ctx, project, "never-written", 0); !errors.Is(err, ErrDatasetNotFound) {
+		t.Fatalf("unwritten name: want ErrDatasetNotFound, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// O3: ReapDatasetVersions
+// ---------------------------------------------------------------------------
+
+// TestDatasetLivePG_ReapNeverDeletesHighestVersion: 5 versions, keepPerName 2
+// -> the 2 highest survive, the 3 oldest are gone, and the blob deleter is
+// called with exactly their blob paths.
+func TestDatasetLivePG_ReapNeverDeletesHighestVersion(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+	const name = "reap-basic"
+
+	var blobPaths []string
+	for n := 0; n < 5; n++ {
+		got, err := s.CreateDatasetVersion(ctx, liveDataset(project, name), n)
+		if err != nil {
+			t.Fatalf("create at ifVersion %d: %v", n, err)
+		}
+		blobPaths = append(blobPaths, got.BlobPath) // index i == version i+1
+	}
+
+	d := &recordingDeleter{}
+	deleted, err := s.ReapDatasetVersions(ctx, 2, d)
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("deleted = %d, want 3", deleted)
+	}
+
+	for _, v := range []int{4, 5} {
+		if _, err := s.GetDatasetVersion(ctx, project, name, v); err != nil {
+			t.Fatalf("version %d must survive (top 2 kept): %v", v, err)
+		}
+	}
+	for _, v := range []int{1, 2, 3} {
+		if _, err := s.GetDatasetVersion(ctx, project, name, v); !errors.Is(err, ErrDatasetNotFound) {
+			t.Fatalf("version %d must be reaped, got %v", v, err)
+		}
+	}
+
+	wantDeleted := map[string]bool{blobPaths[0]: true, blobPaths[1]: true, blobPaths[2]: true}
+	if len(d.deleted) != 3 {
+		t.Fatalf("deleter was called %d times, want 3", len(d.deleted))
+	}
+	for _, k := range d.deleted {
+		if !wantDeleted[k] {
+			t.Fatalf("unexpected delete call for %q — the two kept versions' blobs must never be touched", k)
+		}
+	}
+}
+
+// TestDatasetLivePG_ReapDeleterFailureLeavesThatRowIntactButOtherNamesContinue
+// exercises the failure contract precisely: a Delete failure leaves ITS row
+// intact, stops further reaping of THAT name (the other excess version of
+// the same name is never even attempted), but a DIFFERENT name's reaping
+// proceeds unaffected, and the returned count is exactly what succeeded.
+func TestDatasetLivePG_ReapDeleterFailureLeavesThatRowIntactButOtherNamesContinue(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+
+	// "aaa..." sorts before "bbb..." — the reaper processes names in
+	// project ASC, name ASC order, so aaa's failure is guaranteed to be
+	// encountered before bbb is even reached.
+	const nameA = "aaa-reap-fail"
+	var blobsA []string
+	for n := 0; n < 3; n++ { // keepPerName 1 -> excess is v1, v2
+		got, err := s.CreateDatasetVersion(ctx, liveDataset(project, nameA), n)
+		if err != nil {
+			t.Fatalf("create aaa at %d: %v", n, err)
+		}
+		blobsA = append(blobsA, got.BlobPath)
+	}
+	const nameB = "bbb-reap-ok"
+	for n := 0; n < 2; n++ { // keepPerName 1 -> excess is v1 only
+		if _, err := s.CreateDatasetVersion(ctx, liveDataset(project, nameB), n); err != nil {
+			t.Fatalf("create bbb at %d: %v", n, err)
+		}
+	}
+
+	d := &recordingDeleter{failOn: map[string]bool{blobsA[0]: true}}
+	deleted, err := s.ReapDatasetVersions(ctx, 1, d)
+	if err == nil {
+		t.Fatalf("want a non-nil error naming the failed blob path")
+	}
+	if !strings.Contains(err.Error(), blobsA[0]) {
+		t.Fatalf("error must name the blob path %q, got %v", blobsA[0], err)
+	}
+
+	// aaa: v1's delete failed -> its row survives; v2 (the OTHER excess
+	// version of the SAME name) must never even be attempted, so it survives
+	// too; v3 (kept, top 1) obviously survives.
+	for _, v := range []int{1, 2, 3} {
+		if _, gerr := s.GetDatasetVersion(ctx, project, nameA, v); gerr != nil {
+			t.Fatalf("aaa version %d must survive: %v", v, gerr)
+		}
+	}
+	// bbb: unaffected by aaa's failure — its own excess version IS reaped.
+	if _, gerr := s.GetDatasetVersion(ctx, project, nameB, 1); !errors.Is(gerr, ErrDatasetNotFound) {
+		t.Fatalf("bbb v1 must still be reaped despite aaa's failure, got %v", gerr)
+	}
+	if _, gerr := s.GetDatasetVersion(ctx, project, nameB, 2); gerr != nil {
+		t.Fatalf("bbb v2 (kept) must survive: %v", gerr)
+	}
+	if deleted != 1 {
+		t.Fatalf("deleted = %d, want 1 (only bbb's v1)", deleted)
+	}
+	for _, k := range d.deleted {
+		if k == blobsA[0] {
+			t.Fatalf("a FAILED delete must not appear among the successful deletes")
+		}
+	}
+}
+
+// TestDatasetLivePG_ReapSkipsRowsWhoseBlobPathLacksThePrefix: the belt-and-
+// braces re-check. A row whose blob_path is not under DatasetBlobPrefix must
+// never reach Delete, and must not be counted as deleted.
+func TestDatasetLivePG_ReapSkipsRowsWhoseBlobPathLacksThePrefix(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+	const name = "reap-bad-prefix"
+
+	seedDatasetRow(t, s, project, name, 1, "_artifacts/bytes/not-ours", time.Now().UnixMilli())
+	if _, err := s.CreateDatasetVersion(ctx, liveDataset(project, name), 1); err != nil {
+		t.Fatalf("create v2: %v", err)
+	}
+
+	d := &recordingDeleter{}
+	deleted, err := s.ReapDatasetVersions(ctx, 1, d)
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	if deleted != 0 {
+		t.Fatalf("deleted = %d, want 0 — the only excess row has a foreign blob_path", deleted)
+	}
+	if len(d.deleted) != 0 {
+		t.Fatalf("the deleter must never be called for a foreign blob_path, got %v", d.deleted)
+	}
+	if _, gerr := s.GetDatasetVersion(ctx, project, name, 1); gerr != nil {
+		t.Fatalf("v1 must survive (skipped, not deleted): %v", gerr)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// O3: ListOrphanBlobPaths
+// ---------------------------------------------------------------------------
+
+// TestDatasetLivePG_ListOrphanBlobPathsReturnsExactlyTheUnreferencedKey: three
+// keys under the prefix, two with rows, returns exactly the third; a foreign
+// (`_artifacts/bytes/…`) key the lister happens to answer is never returned.
+func TestDatasetLivePG_ListOrphanBlobPathsReturnsExactlyTheUnreferencedKey(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+
+	k1 := "_datasets/bytes/" + uuid.New().String()
+	k2 := "_datasets/bytes/" + uuid.New().String()
+	k3 := "_datasets/bytes/" + uuid.New().String() // referenced by no row
+	artifactKey := "_artifacts/bytes/" + uuid.New().String()
+
+	ds1 := liveDataset(project, "orphan-a")
+	ds1.BlobPath = k1
+	if _, err := s.CreateDatasetVersion(ctx, ds1, 0); err != nil {
+		t.Fatalf("create referencing k1: %v", err)
+	}
+	ds2 := liveDataset(project, "orphan-b")
+	ds2.BlobPath = k2
+	if _, err := s.CreateDatasetVersion(ctx, ds2, 0); err != nil {
+		t.Fatalf("create referencing k2: %v", err)
+	}
+
+	lister := stubLister{keys: []string{k1, k2, k3, artifactKey}}
+	orphans, err := s.ListOrphanBlobPaths(ctx, lister, 0)
+	if err != nil {
+		t.Fatalf("list orphans: %v", err)
+	}
+	if len(orphans) != 1 || orphans[0] != k3 {
+		t.Fatalf("orphans = %v, want exactly [%q]", orphans, k3)
+	}
+}
+
+// TestDatasetLivePG_ListOrphanBlobPathsMinAgeDoesNotFilter pins the
+// inertness: DatasetBlobLister.List returns keys, not timestamps, so blob
+// age is simply not knowable here. The same fixture must answer identically
+// for minAge=0 and minAge=1h.
+func TestDatasetLivePG_ListOrphanBlobPathsMinAgeDoesNotFilter(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+	project := newLiveDatasetProject(t, s)
+
+	k1 := "_datasets/bytes/" + uuid.New().String()
+	k2 := "_datasets/bytes/" + uuid.New().String() // orphan
+
+	ds1 := liveDataset(project, "minage-a")
+	ds1.BlobPath = k1
+	if _, err := s.CreateDatasetVersion(ctx, ds1, 0); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	lister := stubLister{keys: []string{k1, k2}}
+
+	zero, err := s.ListOrphanBlobPaths(ctx, lister, 0)
+	if err != nil {
+		t.Fatalf("minAge=0: %v", err)
+	}
+	hour, err := s.ListOrphanBlobPaths(ctx, lister, time.Hour)
+	if err != nil {
+		t.Fatalf("minAge=1h: %v", err)
+	}
+
+	if len(zero) != 1 || zero[0] != k2 {
+		t.Fatalf("minAge=0: got %v, want [%q]", zero, k2)
+	}
+	if len(hour) != 1 || hour[0] != k2 {
+		t.Fatalf("minAge=1h: got %v, want [%q] — minAge must not filter", hour, k2)
+	}
+}
+
+// TestDatasetLivePG_ListOrphanBlobPathsEmptyListerReturnsEmptyNonNilSlice:
+// nothing to list is an empty slice, never an error, and never nil.
+func TestDatasetLivePG_ListOrphanBlobPathsEmptyListerReturnsEmptyNonNilSlice(t *testing.T) {
+	s := openLivePG(t)
+	ctx := context.Background()
+
+	orphans, err := s.ListOrphanBlobPaths(ctx, stubLister{keys: nil}, 0)
+	if err != nil {
+		t.Fatalf("empty lister: %v", err)
+	}
+	if orphans == nil {
+		t.Fatalf("want a non-nil empty slice, got nil")
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("want empty, got %v", orphans)
 	}
 }

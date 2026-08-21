@@ -155,3 +155,119 @@ func TestDatasetVersionConflictIsAValueCarryingCurrent(t *testing.T) {
 		t.Fatalf("zero conflict must still report a version, got %q", zero.Error())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// O3: listing, the reaper and the orphan sweep — the dialect-free half.
+// ---------------------------------------------------------------------------
+
+// alwaysFailDeleter is a DatasetBlobDeleter whose Delete always fails, used to
+// prove a code path never calls it.
+type alwaysFailDeleter struct{ calls int }
+
+func (d *alwaysFailDeleter) Delete(ctx context.Context, key string) error {
+	d.calls++
+	return errors.New("must not have been called")
+}
+
+// TestDatasetBlobPrefixIsExactlyThePinnedConstant: § "The blob namespace"
+// pins this literal because agentd runs ONE global BlobStore shared with
+// `_artifacts/bytes/` and with snapshots — a drift here would enumerate, and
+// could delete, someone else's bytes.
+func TestDatasetBlobPrefixIsExactlyThePinnedConstant(t *testing.T) {
+	if DatasetBlobPrefix != "_datasets/bytes/" {
+		t.Fatalf("DatasetBlobPrefix = %q, want %q", DatasetBlobPrefix, "_datasets/bytes/")
+	}
+}
+
+// TestDatasetListRejectsBadArguments: ListDatasets and ListDatasetVersions
+// validate their arguments BEFORE the dialect check, proved the same way as
+// CreateDatasetVersion's rejections — the error must not be
+// ErrDatasetRequiresPostgres, and the store here is sqlite.
+func TestDatasetListRejectsBadArguments(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.ListDatasets(ctx, "", "", 0); err == nil || errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasets empty project: want an argument error, got %v", err)
+	}
+	if _, err := s.ListDatasets(ctx, "wolf", "not a valid selector===", 0); err == nil || errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasets malformed selector: want an argument error, got %v", err)
+	}
+	if _, err := s.ListDatasetVersions(ctx, "", "n", 0); err == nil || errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasetVersions empty project: want an argument error, got %v", err)
+	}
+	if _, err := s.ListDatasetVersions(ctx, "wolf", "bad name", 0); err == nil || errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasetVersions illegal name: want an argument error, got %v", err)
+	}
+}
+
+// TestDatasetListMethodsRequirePostgres: past validation, both list methods
+// guard the dialect with the DATASET sentinel, same as every other method in
+// this file.
+func TestDatasetListMethodsRequirePostgres(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.ListDatasets(ctx, "wolf", "", 0); !errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasets: want ErrDatasetRequiresPostgres, got %v", err)
+	}
+	if _, err := s.ListDatasetVersions(ctx, "wolf", "some-name", 0); !errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("ListDatasetVersions: want ErrDatasetRequiresPostgres, got %v", err)
+	}
+}
+
+// TestDatasetReapKeepPerNameNonPositiveIsANoOp: keepPerName <= 0 means "keep
+// everything" — it must not touch the blob deleter, must not need Postgres
+// (checked first, before even the dialect guard), and returns (0, nil).
+func TestDatasetReapKeepPerNameNonPositiveIsANoOp(t *testing.T) {
+	s := newTestStore(t) // sqlite: proves this path never reaches the dialect guard
+	ctx := context.Background()
+
+	for _, keepPerName := range []int{0, -1, -100} {
+		d := &alwaysFailDeleter{}
+		deleted, err := s.ReapDatasetVersions(ctx, keepPerName, d)
+		if err != nil {
+			t.Fatalf("keepPerName %d: want no error, got %v", keepPerName, err)
+		}
+		if deleted != 0 {
+			t.Fatalf("keepPerName %d: want 0 deleted, got %d", keepPerName, deleted)
+		}
+		if d.calls != 0 {
+			t.Fatalf("keepPerName %d: the blob deleter must never be called, got %d calls", keepPerName, d.calls)
+		}
+	}
+}
+
+// TestDatasetReapNilDeleterIsRefused: a nil DatasetBlobDeleter is an error,
+// never a silent row-only sweep — deleting rows without their blobs would
+// manufacture exactly the orphans ListOrphanBlobPaths exists to clean up.
+// keepPerName is positive here, so this proves the nil check runs before the
+// dialect guard too (sqlite, no ErrDatasetRequiresPostgres).
+func TestDatasetReapNilDeleterIsRefused(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.ReapDatasetVersions(ctx, 3, nil)
+	if err == nil {
+		t.Fatalf("nil deleter must be refused")
+	}
+	if errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("the nil-deleter check must run before the dialect guard, got %v", err)
+	}
+}
+
+// TestDatasetOrphanNilListerIsRefused: same posture as the reaper — a nil
+// DatasetBlobLister is refused before the dialect guard, never treated as
+// "nothing to list".
+func TestDatasetOrphanNilListerIsRefused(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	_, err := s.ListOrphanBlobPaths(ctx, nil, 0)
+	if err == nil {
+		t.Fatalf("nil lister must be refused")
+	}
+	if errors.Is(err, ErrDatasetRequiresPostgres) {
+		t.Fatalf("the nil-lister check must run before the dialect guard, got %v", err)
+	}
+}

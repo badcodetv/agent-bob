@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -351,4 +352,282 @@ func (s *Store) GetDatasetVersion(ctx context.Context, project, name string, ver
 		return nil, err
 	}
 	return getDatasetVersionTx(s.gdb.WithContext(ctx), project, name, version)
+}
+
+// ---------------------------------------------------------------------------
+// The blob namespace (O3) — one constant, stated once (design § "The blob
+// namespace").
+//
+// 🔴 DatasetBlobPrefix is load-bearing for data safety. agentd runs ONE
+// global BlobStore (go/cmd/agentd/backends.go's newBlobs, the gcs branch
+// calling f.Global("")) shared with `_artifacts/bytes/` (dbartifacts.go,
+// blobartifacts.go) and with session snapshots. An orphan sweep or a reap
+// that enumerated or deleted with an empty or wrong prefix would return, and
+// could delete, every artifact and snapshot blob in the deployment — not
+// just this table's own bytes. Every lister and every Delete call in this
+// file re-asserts the prefix immediately before acting, belt and braces,
+// deliberately, and O8's sweep does the same on its side of the seam.
+const DatasetBlobPrefix = "_datasets/bytes/" // then a uuid4 per WRITE ATTEMPT
+
+// DatasetBlobDeleter and DatasetBlobLister are single-method seams, declared
+// HERE in agentdb rather than reusing extension.BlobStore directly, because
+// extension/extension.go:12 imports agentdb — the reverse direction would be
+// an import cycle. extension.BlobStore satisfies both structurally (it has
+// wider Delete/List methods with the same signatures), so agentd passes its
+// one global BlobStore in as both without any adapter.
+type DatasetBlobDeleter interface {
+	Delete(ctx context.Context, key string) error
+}
+
+type DatasetBlobLister interface {
+	List(ctx context.Context, prefix string) ([]string, error)
+}
+
+// clampDatasetListLimit applies the same house numbers memories' search
+// already uses (defaultMemorySearchLimit / maxMemorySearchLimit,
+// memories.go:36-37) — declared once there, reused here rather than
+// redeclared, so the two limits cannot drift apart.
+func clampDatasetListLimit(limit int) int {
+	if limit <= 0 {
+		return defaultMemorySearchLimit
+	}
+	if limit > maxMemorySearchLimit {
+		return maxMemorySearchLimit
+	}
+	return limit
+}
+
+// ListDatasets returns at most one row per (project, name): always the
+// highest version. This is NOT "filter by selector, then take the newest
+// survivor" — labels are per-version, so that would let a superseded
+// version's labels decide whether the CURRENT version is returned. Instead
+// the reduction to "one row per name, highest version" happens first, in an
+// inner query scoped only by project, and the selector is evaluated
+// afterwards against that reduced row's labels only. A name whose current
+// version is unlabelled is invisible to any selector, however an older
+// version of the same name was once labelled.
+//
+// On a non-Postgres dialect this returns O2's ErrDatasetRequiresPostgres,
+// never a silently empty result — an empty slice would read as "no datasets
+// match" when the true answer is "this deployment cannot answer".
+func (s *Store) ListDatasets(ctx context.Context, project, selector string, limit int) ([]*Dataset, error) {
+	if project == "" {
+		return nil, fmt.Errorf("agentdb: dataset project is required")
+	}
+	// Argument validation (selector syntax) runs before the dialect check, the
+	// same rule CreateDatasetVersion follows: a malformed selector is a 400
+	// regardless of what backend is behind the store, and checking it first is
+	// what makes the rejection provable on the sqlite unit store.
+	labelSQL, labelArgs, err := LabelSelectorSQL(selector, "cur.labels")
+	if err != nil {
+		return nil, fmt.Errorf("agentdb: dataset selector: %w", err)
+	}
+	if err := s.requireDatasetPostgres(); err != nil {
+		return nil, err
+	}
+	limit = clampDatasetListLimit(limit)
+
+	query := `SELECT * FROM (
+		SELECT DISTINCT ON (name) ` + datasetColumns + `
+		FROM datasets
+		WHERE project = ?
+		ORDER BY name, version DESC
+	) cur`
+	args := []any{project}
+	if labelSQL != "" {
+		query += " WHERE " + labelSQL
+		args = append(args, labelArgs...)
+	}
+	// created_at is milliseconds; two writes can land in the same millisecond,
+	// so name ASC is a real tiebreak and not decoration.
+	query += " ORDER BY cur.created_at DESC, cur.name ASC LIMIT ?"
+	args = append(args, limit)
+
+	rows := []*Dataset{}
+	if err := s.gdb.WithContext(ctx).Raw(query, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("agentdb: list datasets: %w", err)
+	}
+	return rows, nil
+}
+
+// ListDatasetVersions returns every version of (project, name), newest
+// first. A name with no rows in that project is ErrDatasetNotFound, not an
+// empty slice — O5's versions route needs to answer 404 rather than "exists,
+// but empty".
+func (s *Store) ListDatasetVersions(ctx context.Context, project, name string, limit int) ([]*Dataset, error) {
+	if project == "" {
+		return nil, fmt.Errorf("agentdb: dataset project is required")
+	}
+	if err := ValidateDatasetName(name); err != nil {
+		return nil, fmt.Errorf("agentdb: %w", err)
+	}
+	if err := s.requireDatasetPostgres(); err != nil {
+		return nil, err
+	}
+	limit = clampDatasetListLimit(limit)
+
+	var rows []*Dataset
+	err := s.gdb.WithContext(ctx).Model(&Dataset{}).
+		Where("project = ? AND name = ?", project, name).
+		Order("version DESC").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("agentdb: list dataset versions: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, ErrDatasetNotFound
+	}
+	return rows, nil
+}
+
+// datasetReapCandidate is a version NOT among the keepPerName highest
+// versions of its (project, name) — a candidate for the reaper to remove.
+type datasetReapCandidate struct {
+	Project  string
+	Name     string
+	Version  int
+	BlobPath string
+}
+
+// ReapDatasetVersions deletes every version of every (project, name) beyond
+// the keepPerName highest, across ALL projects — this is storage GC, a
+// global janitor, not a per-project operation.
+//
+// keepPerName <= 0 means "keep everything": it deletes nothing, returns
+// (0, nil), and — because agentdb has no logger (O8 logs at boot, not this
+// package) — prints nothing and touches neither the blob store nor the
+// database. It is checked first, before even the dialect guard, so it is a
+// legitimate no-op on any backend.
+//
+// A nil DatasetBlobDeleter is refused with an error, never silently treated
+// as a row-only sweep: deleting a row without its blob manufactures exactly
+// the orphan ListOrphanBlobPaths exists to clean up.
+//
+// Per version: the blob is deleted BEFORE the row. Every blob_path is
+// re-checked against DatasetBlobPrefix immediately before the Delete call —
+// belt and braces, deliberately (see the prefix's doc comment) — and a row
+// whose blob_path lacks the prefix is skipped, not deleted, not counted.
+// A Delete failure leaves that row intact and stops further reaping of that
+// SAME (project, name) — other names keep going — but is remembered and
+// returned as the first non-nil error once every name has been attempted.
+// The returned count is exactly what was actually deleted, so the next sweep
+// retries whatever a failure (or a name it never got to) left behind.
+func (s *Store) ReapDatasetVersions(ctx context.Context, keepPerName int, blobs DatasetBlobDeleter) (int, error) {
+	if keepPerName <= 0 {
+		return 0, nil
+	}
+	if blobs == nil {
+		return 0, fmt.Errorf("agentdb: dataset reaper requires a non-nil blob deleter")
+	}
+	if err := s.requireDatasetPostgres(); err != nil {
+		return 0, err
+	}
+
+	var candidates []datasetReapCandidate
+	err := s.gdb.WithContext(ctx).Raw(`
+		SELECT project, name, version, blob_path FROM (
+			SELECT project, name, version, blob_path,
+			       ROW_NUMBER() OVER (PARTITION BY project, name ORDER BY version DESC) AS rn
+			FROM datasets
+		) ranked
+		WHERE rn > ?
+		ORDER BY project ASC, name ASC, version ASC`, keepPerName,
+	).Scan(&candidates).Error
+	if err != nil {
+		return 0, fmt.Errorf("agentdb: list dataset reap candidates: %w", err)
+	}
+
+	deleted := 0
+	var firstErr error
+	stopped := map[string]bool{}
+	for _, c := range candidates {
+		key := c.Project + "\x00" + c.Name
+		if stopped[key] {
+			continue
+		}
+		if !strings.HasPrefix(c.BlobPath, DatasetBlobPrefix) {
+			// Skipped, never deleted: this row's blob_path is not one of ours
+			// to touch, and the prefix guard exists precisely to make that
+			// unreachable in practice and impossible in principle.
+			continue
+		}
+		if err := blobs.Delete(ctx, c.BlobPath); err != nil {
+			stopped[key] = true
+			if firstErr == nil {
+				firstErr = fmt.Errorf("agentdb: reap dataset blob %q (project %q, name %q, version %d): %w",
+					c.BlobPath, c.Project, c.Name, c.Version, err)
+			}
+			continue
+		}
+		if err := s.gdb.WithContext(ctx).Exec(
+			"DELETE FROM datasets WHERE project = ? AND name = ? AND version = ?",
+			c.Project, c.Name, c.Version,
+		).Error; err != nil {
+			// The blob is already gone but the row is not: a graver, systemic
+			// failure than a single blob delete, so this halts the sweep
+			// entirely rather than being folded into firstErr and continuing.
+			return deleted, fmt.Errorf("agentdb: reap dataset row (project %q, name %q, version %d): %w",
+				c.Project, c.Name, c.Version, err)
+		}
+		deleted++
+	}
+	return deleted, firstErr
+}
+
+// ListOrphanBlobPaths returns blob keys under DatasetBlobPrefix that NO
+// dataset row references, across ALL projects — an orphan is orphaned
+// globally, and filtering by project would propose deleting another
+// project's live bytes out from under it. Every survivor is re-checked
+// against DatasetBlobPrefix before being returned, belt and braces.
+//
+// Returns an empty, non-nil slice — never an error, never the KNOWN set,
+// which is the exact inverse of what this function is named for — when the
+// lister answers nothing.
+//
+// minAge is accepted and does NOT filter. DatasetBlobLister.List returns
+// keys, not timestamps, so blob age is simply not knowable from inside
+// agentdb: the returned paths are candidates, not a final answer. The "a
+// pull in flight has written bytes but not yet its row" guard belongs to
+// O8's sweep, which must see a path unreferenced across two passes at least
+// minAge apart before it treats that path as safe to delete.
+func (s *Store) ListOrphanBlobPaths(ctx context.Context, blobs DatasetBlobLister, minAge time.Duration) ([]string, error) {
+	_ = minAge // deliberately inert — see the doc comment above.
+	if blobs == nil {
+		return nil, fmt.Errorf("agentdb: dataset orphan sweep requires a non-nil blob lister")
+	}
+	if err := s.requireDatasetPostgres(); err != nil {
+		return nil, err
+	}
+
+	keys, err := blobs.List(ctx, DatasetBlobPrefix)
+	if err != nil {
+		return nil, fmt.Errorf("agentdb: list dataset blobs: %w", err)
+	}
+	if len(keys) == 0 {
+		return []string{}, nil
+	}
+
+	var known []string
+	if err := s.gdb.WithContext(ctx).Raw("SELECT DISTINCT blob_path FROM datasets").Scan(&known).Error; err != nil {
+		return nil, fmt.Errorf("agentdb: read known dataset blob paths: %w", err)
+	}
+	knownSet := make(map[string]bool, len(known))
+	for _, k := range known {
+		knownSet[k] = true
+	}
+
+	orphans := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if !strings.HasPrefix(k, DatasetBlobPrefix) {
+			// Re-asserted, belt and braces: never propose deleting something
+			// this lister returned that isn't even ours to have listed.
+			continue
+		}
+		if knownSet[k] {
+			continue
+		}
+		orphans = append(orphans, k)
+	}
+	return orphans, nil
 }
