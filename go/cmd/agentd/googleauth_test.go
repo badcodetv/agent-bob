@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -690,6 +692,61 @@ func TestAuthConfigHandler(t *testing.T) {
 				t.Fatalf("google_client_id = %q", resp.GoogleClientID)
 			}
 		})
+	}
+}
+
+// TestProjectMapExample (O8) parses the worked AGENTKIT_PROJECT_MAP object
+// form out of .env.example rather than trusting it: this ticket both AUTHORS
+// that file and would otherwise be graded on it, and a map that kills agentd
+// at boot ("project map: empty (neither users nor projects)" — see
+// parseProjectSettingsObjectForm) must not ship green.
+//
+// There are two "# AGENTKIT_PROJECT_MAP=" lines in .env.example: the
+// pre-existing flat legacy form (§ Login + projects) and this ticket's
+// object-form worked example (§ Agent Wolf: project credentials), which
+// names the "wolf" project — that substring is what tells the two apart.
+func TestProjectMapExample(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", ".env.example"))
+	if err != nil {
+		t.Fatalf("read .env.example: %v", err)
+	}
+
+	var objectFormLine string
+	var matches int
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "# AGENTKIT_PROJECT_MAP=") {
+			continue
+		}
+		if !strings.Contains(trimmed, `"wolf"`) {
+			continue // the OTHER (legacy flat-form) example line
+		}
+		matches++
+		objectFormLine = strings.TrimPrefix(trimmed, "# AGENTKIT_PROJECT_MAP=")
+	}
+	if matches != 1 {
+		t.Fatalf("expected exactly one commented AGENTKIT_PROJECT_MAP object-form example naming \"wolf\", found %d", matches)
+	}
+	if objectFormLine == "" {
+		t.Fatal("AGENTKIT_PROJECT_MAP object-form example line is empty")
+	}
+
+	settings, err := parseProjectSettings([]byte(objectFormLine))
+	if err != nil {
+		t.Fatalf(".env.example's worked AGENTKIT_PROJECT_MAP fails to parse — it would kill agentd at boot: %v", err)
+	}
+	cfg, ok := settings.projects["wolf"]
+	if !ok {
+		t.Fatalf("worked example does not configure a %q project; got %v", "wolf", settings.projects)
+	}
+	if cfg.APIKeyEnv != "WOLF_API_KEY" {
+		t.Errorf("wolf project api_key_env = %q, want %q", cfg.APIKeyEnv, "WOLF_API_KEY")
+	}
+	if len(cfg.AllowedOrigins) != 1 {
+		t.Fatalf("wolf project allowed_origins = %v, want exactly one origin", cfg.AllowedOrigins)
+	}
+	if err := validateOrigin(cfg.AllowedOrigins[0]); err != nil {
+		t.Errorf("wolf project's allowed origin %q is invalid: %v", cfg.AllowedOrigins[0], err)
 	}
 }
 

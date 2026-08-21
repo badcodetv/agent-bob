@@ -297,6 +297,12 @@ func main() {
 	}
 	log.Printf("[agentd] %s", gc.describeIdleTimeout())
 	log.Printf("[agentd] %s", gc.describeReapInterval(snapshotCatalog != nil))
+	// The dataset version reaper + orphan blob sweep (O8) are product-layer
+	// and Postgres-only, exactly like the snapshot catalogue above — hence the
+	// same agentDB != nil wiredness. The loop itself is started further down,
+	// beside the router/scheduler/attention sweep, once agentDB's non-nilness
+	// is already being branched on for those.
+	log.Printf("[agentd] %s", gc.describeDatasetReap(agentDB != nil))
 
 	runner, err := agentkit.NewRunner(agentkit.Deps{
 		Fleet:          f,
@@ -447,7 +453,14 @@ func main() {
 		attention = newAttentionService(agentDB, permalinks)
 		apiMux.HandleFunc("POST /agent/attention", attentionHandler(attention))
 		go newAttentionSweeper(agentDB).Run(ctx)
-		log.Printf("[agentd] router + scheduler + attention sweep running (zone=%s)", time.Local)
+
+		// The dataset version reaper + orphan blob sweep (O8, datasetreaper.go).
+		// Same blobs value httpapi.Config.DatasetBlobs was handed above (one
+		// process-wide BlobStore), and the same ctx every other product-layer
+		// loop here uses.
+		go newDatasetReaper(agentDB, blobs, gc.datasetKeepVersions, log.Printf).Run(ctx, gc.datasetReapInterval)
+
+		log.Printf("[agentd] router + scheduler + attention sweep + dataset reaper running (zone=%s)", time.Local)
 	} else {
 		log.Printf("[agentd] no DATABASE_URL — event routing, schedules and request_human_attention are unavailable")
 	}
