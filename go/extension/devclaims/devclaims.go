@@ -6,6 +6,7 @@ package devclaims
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/binocarlos/badcode-agent-orange/extension"
@@ -57,6 +58,49 @@ func ParseSessionScope(scope string) (sessionID string, ok bool) {
 		return "", false
 	}
 	return scope[len(sessionScopePrefix):], true
+}
+
+// datasetScopePrefix is the "later kind of scope" the comment above
+// (sessionScopePrefix) anticipated. It namespaces dataset-download tokens so
+// they can never be confused for a session scope.
+const datasetScopePrefix = "dataset:"
+
+// DatasetScope builds the scope value confining a token to one dataset NAME
+// within one project. It deliberately carries no version and no dataset id: a
+// dataset id is a per-version uuid, and pinning it would break the guarantee
+// that a URL minted before a tick still resolves to that name's requested
+// version after it — a token pins (project, name), not any one version.
+func DatasetScope(project, name string) string {
+	return datasetScopePrefix + project + "/" + name
+}
+
+// ParseDatasetScope is DatasetScope's inverse. ok=false for a scope of any
+// other kind (including the empty scope and a "session:…" scope), for
+// "dataset:" with nothing after it, for a value with no "/", and for an empty
+// project or name half.
+//
+// Project and name are split on the FIRST "/". A value containing a second
+// "/" is also ok=false: both halves are label-charset
+// (go/agentdb/labels.go:22-33, which excludes "/"), so a second separator
+// means this scope was not built by DatasetScope and must not be trusted to
+// mean something else.
+func ParseDatasetScope(scope string) (project, name string, ok bool) {
+	if len(scope) <= len(datasetScopePrefix) || scope[:len(datasetScopePrefix)] != datasetScopePrefix {
+		return "", "", false
+	}
+	rest := scope[len(datasetScopePrefix):]
+	i := strings.IndexByte(rest, '/')
+	if i < 0 {
+		return "", "", false
+	}
+	project, name = rest[:i], rest[i+1:]
+	if project == "" || name == "" {
+		return "", "", false
+	}
+	if strings.IndexByte(name, '/') >= 0 {
+		return "", "", false
+	}
+	return project, name, true
 }
 
 // Issue signs an HS256 JWT containing claims: sid, customer, job, email, iat,

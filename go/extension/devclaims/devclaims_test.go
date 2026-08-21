@@ -294,6 +294,76 @@ func TestParseSessionScopeRejectsNonSessionScopes(t *testing.T) {
 	}
 }
 
+// --- dataset scopes (O4) ---
+
+// DatasetScope's output is asserted as a literal string: O5 verifies what O6b
+// mints, and a whitespace or separator drift between them is invisible until
+// an agent's curl 401s inside a container.
+func TestDatasetScopeLiteralString(t *testing.T) {
+	got := DatasetScope("wolf", "1a2b3c4d-drone-suppliers-basket")
+	want := "dataset:wolf/1a2b3c4d-drone-suppliers-basket"
+	if got != want {
+		t.Fatalf("DatasetScope() = %q, want %q", got, want)
+	}
+}
+
+func TestDatasetScopeRoundTrip(t *testing.T) {
+	scope := DatasetScope("wolf", "drone-suppliers")
+	project, name, ok := ParseDatasetScope(scope)
+	if !ok {
+		t.Fatalf("ParseDatasetScope(%q) ok=false", scope)
+	}
+	if project != "wolf" || name != "drone-suppliers" {
+		t.Fatalf("ParseDatasetScope(%q) = %q, %q", scope, project, name)
+	}
+}
+
+// The two scope families can never be confused, asserted both ways.
+func TestDatasetScopeNeverParsesAsSessionScope(t *testing.T) {
+	if project, name, ok := ParseDatasetScope("session:s-hyp-a"); ok {
+		t.Fatalf("ParseDatasetScope(session scope) accepted, returning %q %q", project, name)
+	}
+}
+
+func TestDatasetScopeValueNeverParsesAsSessionScope(t *testing.T) {
+	if sid, ok := ParseSessionScope("dataset:wolf/drone-suppliers"); ok {
+		t.Fatalf("ParseSessionScope(dataset scope) accepted, returning %q", sid)
+	}
+}
+
+func TestDatasetScopeParseRejectsMalformed(t *testing.T) {
+	cases := []string{
+		"",                      // empty scope
+		"dataset:",              // nothing after the prefix
+		"dataset:wolf-no-slash", // no "/"
+		"dataset:/name",         // empty project half
+		"dataset:wolf/",         // empty name half
+		"dataset:wolf/a/b",      // a second "/" — neither half may legally contain one
+		"session:wolf/name",     // wrong family entirely
+		"Dataset:wolf/name",     // wrong case, not the same prefix
+	}
+	for _, s := range cases {
+		if project, name, ok := ParseDatasetScope(s); ok {
+			t.Errorf("ParseDatasetScope(%q) accepted, returning %q %q", s, project, name)
+		}
+	}
+}
+
+// The scope value contains no version and no dataset id: a token minted while
+// a name is at version 3 must verify unchanged against version 7 of the same
+// name, so the scope carries only (project, name), never a version marker.
+func TestDatasetScopeCarriesNoVersion(t *testing.T) {
+	scopeAtV3 := DatasetScope("wolf", "drone-suppliers")
+	scopeAtV7 := DatasetScope("wolf", "drone-suppliers")
+	if scopeAtV3 != scopeAtV7 {
+		t.Fatalf("DatasetScope depends on something other than (project, name): %q != %q", scopeAtV3, scopeAtV7)
+	}
+	project, name, ok := ParseDatasetScope(scopeAtV3)
+	if !ok || project != "wolf" || name != "drone-suppliers" {
+		t.Fatalf("ParseDatasetScope(%q) = %q, %q, %v", scopeAtV3, project, name, ok)
+	}
+}
+
 // TestIssueTokenIsHS256 verifies the signing algorithm header.
 func TestIssueTokenIsHS256(t *testing.T) {
 	iss := New([]byte("alg-secret"))
