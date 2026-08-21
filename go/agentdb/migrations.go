@@ -1048,6 +1048,45 @@ var agentMigrations = []migration{
 			ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS launch_image_digest TEXT NOT NULL DEFAULT '';
 		`,
 	},
+	{
+		// The dataset atom (design/2026-08-20-agent-wolf.md, "The dataset
+		// atom"): a project-scoped, named, versioned, labeled BLOB — the same
+		// grain as memories and the §13 image catalogue, but for numeric time
+		// series that must never cross the model's context window. Every write
+		// is a new immutable row; "current" is the highest version for
+		// (project, name). Compare-and-swap on write (O2) is what the unique
+		// index on (project, name, version) backstops: two concurrent writers
+		// at the same expected version can only ever insert one winner.
+		//
+		// row_count is caller-supplied metadata for the shrink guard (O6b) —
+		// this table does not parse CSV, agentd does.
+		//
+		// created_at is unix MILLISECONDS, matching memories (migration 022),
+		// not the unix-seconds convention the agent_* tables use — see
+		// CLAUDE.md / the plan's "Environment facts" on why the two units
+		// deliberately do not unify.
+		Name: "045_datasets",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS datasets (
+				id                 TEXT PRIMARY KEY,
+				project            TEXT NOT NULL,
+				name               TEXT NOT NULL,
+				version            INTEGER NOT NULL,
+				labels             JSONB NOT NULL DEFAULT '{}',
+				blob_path          TEXT NOT NULL,
+				size_bytes         BIGINT NOT NULL,
+				row_count          INTEGER NOT NULL DEFAULT 0,
+				sha256             TEXT NOT NULL,
+				content_type       TEXT NOT NULL DEFAULT 'text/csv',
+				created_by_worker  TEXT NOT NULL DEFAULT '',
+				created_by_session TEXT NOT NULL DEFAULT '',
+				created_at         BIGINT NOT NULL           -- unix MILLISECONDS, like memories
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS datasets_project_name_version ON datasets (project, name, version);
+			CREATE INDEX IF NOT EXISTS datasets_project_name_current ON datasets (project, name, version DESC);
+			CREATE INDEX IF NOT EXISTS datasets_labels ON datasets USING GIN (labels);
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration
