@@ -10,6 +10,7 @@ import (
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 	"github.com/binocarlos/badcode-agent-orange/artifacts"
 	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/binocarlos/badcode-agent-orange/execenv"
 	"github.com/binocarlos/badcode-agent-orange/imageregistry"
 )
 
@@ -80,6 +81,12 @@ func (s stubRunner) Snapshot(ctx context.Context, ref agentkit.SessionRef) (imag
 }
 func (s stubRunner) WriteWorkspaceFile(_ context.Context, _ agentkit.SessionRef, _ string, _ []byte) error {
 	return nil
+}
+
+// ExecInSession exists because agentkit.Runner grew it (O6b, the dataset MCP
+// tools). No httpapi route execs into a session, so the stub is inert.
+func (s stubRunner) ExecInSession(_ context.Context, _ agentkit.SessionRef, _ []string, _ execenv.ExecOptions) (*execenv.ExecResult, error) {
+	return &execenv.ExecResult{}, nil
 }
 func (s stubRunner) RunningSessions(_ context.Context) (map[string]bool, error) {
 	return nil, nil

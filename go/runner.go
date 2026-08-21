@@ -931,6 +931,28 @@ func (r *runnerImpl) WriteWorkspaceFile(ctx context.Context, ref SessionRef, rel
 	return nil
 }
 
+// ExecInSession runs argv inside the session's running instance and returns the
+// raw ExecResult. Resolved exactly the way WriteWorkspaceFile above resolves:
+// the tracked instance plus the environment of the worker that holds it.
+//
+// It does NOT interpret ExitCode — a non-zero exit is a successful exec whose
+// command failed, and whether that is an error depends entirely on the command.
+// cmd/agentd's dataset pull pipeline is the caller that cares, and it checks.
+func (r *runnerImpl) ExecInSession(ctx context.Context, ref SessionRef, cmd []string, opts execenv.ExecOptions) (*execenv.ExecResult, error) {
+	inst := r.get(ref.SessionID)
+	if inst == nil {
+		return nil, fmt.Errorf("exec-in-session: session %q has no running instance", ref.SessionID)
+	}
+	env, err := r.workerEnvFor(ref.SessionID)
+	if err != nil {
+		// Same sentence as the nil-instance case: an untracked worker means
+		// there is nothing to exec into either, and a caller distinguishing the
+		// two would only be guessing at the runner's bookkeeping.
+		return nil, fmt.Errorf("exec-in-session: session %q has no running instance: %w", ref.SessionID, err)
+	}
+	return env.Exec(ctx, inst.ID, cmd, opts)
+}
+
 func (r *runnerImpl) Status(ctx context.Context, ref SessionRef) (*SessionStatus, error) {
 	var prog *OpProgress
 	if p, ok := r.progress.get(ref.SessionID); ok {
