@@ -14,9 +14,9 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R85. Waves 1 (O1, O7, W1),
-2 (O2, O11, W2, W3, W6) and 3 (O3, O4, W4, W7, plus W1b and W6b) have been executed; their
-tickets carry Notes.
+the report-layer amendment; see the Discovered Issues Log, entries R1–R95. Waves 1 (O1, O7, W1),
+2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
+been executed; their tickets carry Notes.
 
 ⚠️ **Everything through wave 3 is now merged to `main` in both repos** (2026-08-21, the wave-4
 pre-flight). Wave 4 forced it: O5 needs O3+O4, W5 needs W2+W4+O11 and W12 needs W2+W7, and no
@@ -344,7 +344,7 @@ allows:
 | `go/agentdb/datasets_live_test.go` | O2, O3 | Strictly serial |
 | `go/httpapi/httpapi.go` | O5, O7, O11 | Strictly serial; each adds a route constant and a registration line to the same two blocks |
 | `go/httpapi/memories.go` | O7, O11 | Strictly serial |
-| `go/cmd/agentd/main.go` | O6b, O8 | Strictly serial |
+| `go/cmd/agentd/main.go` | **O5**, O6b, O8 | Strictly serial. O5 was missing from this row for three revisions while its own Files line required modifying `main.go` to wire `DatasetBlobs`; the orchestrator caught it at the wave-4 cut and serialised O5 → O8 by hand. O5 and O8 are both landed, so O6b is the only one left — **R86** |
 | `api/src/routes/hypotheses.ts` | W8, W9 | Strictly serial |
 | `api/src/hypothesis/store.ts` | W5, W10, W15, W22 | Strictly serial in that order |
 | `go/cmd/agentd/auth.go`, `auth_test.go` | O5 only | O5 owns the middleware change; no other ticket may touch it |
@@ -366,6 +366,8 @@ the serial rule prevents the collision, not an ownership monopoly. Every duratio
 | `api/src/report/*` | W16–W20 | See the report-layer sub-graph |
 | `web/package.json` | W23, W24 | Strictly serial |
 | `web/src/App.tsx` | W13, W24 | Strictly serial |
+| `prompts/*.md` (agent-wolf) | W12, W25 | **Strictly serial in that order.** W12 authors the four prompts and W25 rewrites the report-authoring half; the row was missing entirely until 2026-08-21 — **R94** |
+| `api/src/config.test.ts` | every ticket on the `config.ts` row | **Same serial order as `config.ts`.** A ticket that adds a variable adds its tests here, so the two files move together; the row was missing and W12 landed 68 lines in it without one — **R94** |
 
 Safe to run fully in parallel: **O1 ‖ O7 ‖ W1**, then **O4 ‖ W3 ‖ W6** once their deps land.
 
@@ -544,11 +546,23 @@ must never hand an embed token to anything it would not trust with the project.
 `MemorySearchResult` includes `created_by_worker` and `created_by_session`
 (`go/agentdb/memories.go:113-121`). So:
 
-1. One request: `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name&limit=100`.
-2. Any row whose provenance is empty is authoritative — render it. **This is the normal case and
-   costs exactly one request.**
-3. Any row whose provenance is NOT empty is an anomaly: something inside a container wrote a
-   `kind=hypothesis` memory. For those ids only, issue
+1. One request:
+   `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name&limit=100&include_retracted=1`.
+
+   ⚠️ **`include_retracted=1` is load-bearing and was missing from this step until 2026-08-21
+   (R90).** Without it Orange's `notRetractedSQL` hides Wolf's newest state row, and `latest_per`
+   hands back the OLDER trusted row beneath it — which passes the trust rule, so the board renders
+   it as authoritative with no tamper flag at all. A prompt-injected researcher that simply
+   **retracts** Wolf's newest `kind=hypothesis` row therefore rolls the board back to the previous
+   status silently: the resurrection attack, succeeding on the exact surface this section exists to
+   protect. W5's independent verifier constructed it and it worked. It is one query parameter, it
+   keeps the clean case at exactly one request, and O11's paired criterion — *"this pair is the
+   contract W5's tamper detection is written against"* — was written for it.
+2. Any row whose provenance is empty **and which carries no retraction** is authoritative — render
+   it. **This is the normal case and costs exactly one request.**
+3. Any row whose provenance is NOT empty, **or which carries a `retracted_by`**, is an anomaly:
+   something inside a container wrote or withdrew a `kind=hypothesis` memory. For those ids only,
+   issue
    `GET /agent/memories?selector=kind%3Dhypothesis,name%3D<id>&limit=50`, take the newest trusted
    row, and render the hypothesis with a **tamper warning** naming the writer.
 
@@ -1150,7 +1164,7 @@ POST /agent/memories
 X-API-Key: $WOLF_API_KEY
 Content-Type: application/json
 
-{ "labels": {"kind":"hypothesis","name":"hyp-1a2b3c4d","status":"live","owner":"kai-at-badcode.dev"},
+{ "labels": {"kind":"hypothesis","name":"1a2b3c4d","status":"live","owner":"kai-at-badcode.dev"},
   "content": "…", "embed": false }
 ```
 
@@ -1746,7 +1760,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   scope in either direction. O4 touches no `httpapi`, no `auth.go` and no store code — those stay
   O5's and O6b's.
 
-### O5: Dataset HTTP read routes   [Status: pending | Model: opus]
+### O5: Dataset HTTP read routes   [Status: done | Model: opus]
 - **Scope:** The four routes in **Interfaces**, the two `httpapi.Config` seams they need, and —
   by owner decision **B1** — the two matching halves of `apiAuthMiddleware`. Follow
   `go/httpapi/artifacts_download.go` for byte serving and `go/httpapi/memories.go` for metadata
@@ -1855,10 +1869,31 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `cd go && go test ./httpapi/... ./cmd/agentd/... -count=1` — both packages whole. This is the
     command that proves the middleware edit moved nothing else, and it is not optional.
 - **Depends on:** O3, O4
-- [ ] done
-- Notes:
-
-### O6a: The workspace pull pipeline   [Status: pending | Model: opus]
+- [x] done — verified 2026-08-21, 16/16 criteria, zero defects, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 16 of 16 criteria PASS, zero
+  defects, zero fix rounds.** Branch `O5-dataset-http-routes`, commit `bd40b86`, merged to `main`.
+  Four routes in `go/httpapi/datasets.go`; `Config` gains two seams with **deliberately different
+  defaulting rules** — `Datasets` auto-fills from `cfg.AgentDB` in `New()` beside `Memories`
+  (nil ⇒ 501 on all four), while `DatasetBlobs` is a new single-method `DatasetBlobReader`
+  (`Read(ctx, key) (io.ReadCloser, error)`, because httpapi must not import `extension`) wired by
+  hand in `main.go` (nil ⇒ 501 on download alone, metadata unaffected). Metadata serialises through
+  a dedicated `datasetResp` so `blob_path` and `project` never leave the process, pinned by a
+  literal whole-body assertion. 404 is one byte-identical sentence for absent, malformed,
+  foreign-project and every unusable `?version=`, gated by a test driving 11 request shapes across
+  all four routes that fails if any body differs. 24 new tests. The `?token=` leg is graded
+  **through the real `apiAuthMiddleware` in front of the real mux**: a header-less request returns
+  the bytes, a cross-name and a cross-project token both return the 404. Contract for later
+  tickets: envelopes are `{"datasets":[…]}`, the bare object, and `{"versions":[…]}` newest first;
+  `Identity.DatasetScope` is `<project>/<name>` and is enforced on the download route **only**.
+  **Two hazards for O10 to document** — the `?token=` leg matches a HARDCODED literal path in
+  `cmd/agentd`, because middleware runs before the mux and cannot see `httpapi.Endpoints`, so a
+  host that remaps `Endpoints.DownloadDataset` keeps the route and silently loses the token leg
+  (the failure looks like a 401 from inside a container); and httpapi does not defend against a
+  host whose `IdentityFunc` sets `DatasetScope` on a *metadata* request, which would hand
+  project-wide metadata to a dataset-scoped credential. Neither is reachable through `agentd`.
+  23 guesses — the wave's highest — in `design/2026-08-21-agent-wolf-wave4-guesses.md`.
+  Found **R86**.
+### O6a: The workspace pull pipeline   [Status: done | Model: sonnet]
 - **Scope:** One internal, testable function that gets a file out of a running session container
   safely: validate the path, probe, cap, pull, hash, count, store the blob. No MCP surface, no CAS
   — O6b orchestrates it. Split from a single O6 because the pull is where every sharp edge lives
@@ -1911,7 +1946,12 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `test -f` is the only defence there is. Say so in a comment so the next reader does not read the
     absence as an oversight.
   - **Every exec is argv, never `sh -c`:** `[]string{"test","-f",abs}`, `[]string{"wc","-c",abs}`,
-    `[]string{"cat",abs}`. A test asserts no command element is `sh`, `bash` or `-c`. Do **not**
+    `[]string{"cat",abs}`. A test asserts **no command's `cmd[0]` is `sh` or `bash`**.
+    ⚠️ An earlier wording said "no command element is `sh`, `bash` or `-c`", which is
+    **unsatisfiable alongside this ticket's own mandated `wc -c` argv** — read literally it fails
+    against the very command shape the ticket pins. O6a implemented the evidently-intended check and
+    reported the contradiction rather than silently dropping half of it; corrected here 2026-08-21
+    (**R87**). Do **not**
     copy `WriteWorkspaceFile`'s `sh -c` form (`go/runner.go:924-928`): with an attacker-supplied
     path that is command injection from inside a container (audit **A8**).
   - **Probes with `test -f` and requires `ExitCode == 0` from every command it runs.**
@@ -1955,9 +1995,22 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `cd go && go build ./... && go vet ./...`
 - **Depends on:** O3 *(`agentdb.DatasetBlobPrefix` and nothing else; O6a needs no HTTP route, so it
   may run in parallel with O4 and O5 rather than behind them as revision 3 had it)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 13/13 criteria, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 13 of 13 criteria PASS, zero
+  blocking defects, zero fix rounds.** Branch `O6a-workspace-pull-pipeline`, commit `640c944`,
+  merged to `main`. Two files, nothing else touched. Every pinned line number in the ticket was
+  re-checked against the post-merge tree and still holds. The injected `sessionExec` seam works as
+  intended: the verifier re-ran the suite with `DOCKER_HOST` pointed at a non-existent socket and
+  it passed, proving the pipeline genuinely needs no Docker. It does **not** repeat
+  `onArtifactRegistered`'s mistake — `res.ExitCode` is checked, not ignored. **Three minor defects
+  were accepted rather than fixed**, all recorded by the verifier: (1) the TOCTOU cap re-check runs
+  *after* `blobs.Write`, so an oversized payload is uploaded in full and then deleted — which is
+  what makes the delete-on-failure path testable, and the ticket only requires the cap be
+  "re-checked against the bytes actually pulled"; (2) the SHA256 test recomputes the digest with
+  the same library rather than pinning a literal, though the verifier hand-computed one
+  independently and it matched; (3) `TestPullWorkspaceFile_ArgvNotShell` is near-redundant because
+  the fake already rejects any unknown `cmd[0]`, so the verifier wrote a real exact-argv assertion
+  itself to prove the criterion. 8 guesses. Found **R87**.
 ### O6b: Dataset MCP tools   [Status: pending | Model: opus]
 - **Scope:** `dataset_list`, `dataset_get`, `dataset_put` on the existing `core` MCP server, built
   on O6a's pull function plus O2's CAS store — **and the one engine change O6a's seam requires**: an
@@ -3005,7 +3058,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `ConditionResult`, `MetricResult`, `EvaluationResult`, `MS_PER_DAY`. Import them; do not
   redeclare — a `{t, v}` shape downstream is a silent `NaN`, not a type error.
 
-### W5: Lifecycle, trusted store and tamper detection   [Status: pending | Model: opus]
+### W5: Lifecycle, trusted store and tamper detection   [Status: done | Model: opus]
 - **Scope:** The six-state machine with per-hypothesis serialisation, and reading/writing
   hypotheses as **trusted** memories per § "The trust model". This ticket owns the trust primitives
   the rest of the product is graded against: `TRUSTED_KINDS`, `isTrusted()`, the session index, the
@@ -3056,8 +3109,9 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - A test appends a forged `status=confirmed` memory carrying a worker name and asserts the
     reported status is unchanged and a `Tamper` with `reason: "forged_row"` is produced.
   - **The board read is the two-step of § "The trust model":** one
-    `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name&limit=100`, and a per-name
-    follow-up **only** for ids whose newest row is untrusted. A test asserts the all-trusted case
+    `GET /agent/memories?selector=kind%3Dhypothesis&latest_per=name&limit=100&include_retracted=1`,
+    and a per-name follow-up **only** for ids whose newest row **cannot settle the hypothesis** —
+    untrusted, retracted by Wolf, or absent. A test asserts the all-trusted case
     issues exactly **one** memory request (the session index is a separate request and is counted
     separately).
   - **The authoritative index of hypotheses is the session list, not memory.** It is read as
@@ -3088,7 +3142,13 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - **`Tamper` is exactly the shape pinned in § "Shared shapes"**:
     `{ reason: "forged_row"|"hostile_retraction"|"cross_hypothesis_write", written_by_worker,
     written_by_session, memory_id }`, where `memory_id` is the **offending** row, not the trusted
-    one, and exactly one of the two provenance fields is non-empty. The field carried on a
+    one, and **at least one** of the two provenance fields is non-empty — **not** exactly one.
+    Orange sets **both** for any session that has a worker (`go/cmd/agentd/mcpserver.go`), which is
+    every researcher tick and every interview session too, since W8 creates those with
+    `worker: "interviewer"`. W5 proved this against two independently captured fixtures and
+    implements the `at least one` form; the plan previously said `exactly one` and was simply wrong
+    about the engine (**R89**). X1's tamper-resistance spec must NOT assert the `exactly one` form.
+    The field carried on a
     hypothesis is `tamper?: Tamper[]` — an array, because a forged row and a hostile retraction can
     be present at once and X1's `tamper-resistance.spec.ts` asserts on the two attacks separately.
     W8's board, W13's banner, W14's detail page and X1 all read this shape and no other.
@@ -3131,9 +3191,28 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   **list** with `worker=`/`offset` and the `include_retracted` read — neither is in W2's route list
   as written, and W2's list is declared exhaustive and closed, so this is a cross-ticket
   requirement, not something W5 may add to the client itself)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 17/17 criteria, one fix round (the resurrection hole)
+- Notes: **Implemented, FAILED independent verification, fixed, re-verified 2026-08-21 — 17 of 17
+  criteria PASS after one fix round.** Branch `W5-lifecycle-trusted-store`, commits `…` ending
+  `6f748fe`, merged to `main`. **The verifier found the resurrection attack succeeding on the
+  board.** The board's fast path read without `include_retracted`, so Orange's `notRetractedSQL`
+  hid Wolf's newest state row and `latest_per` handed back the OLDER trusted row beneath it —
+  which passes `isTrusted()` and was accepted as authoritative with no tamper flag. A
+  prompt-injected researcher that merely **retracted** Wolf's newest `kind=hypothesis` row rolled
+  the board back to the previous status, silently, on the exact surface W8's board and W13's banner
+  render — while the detail read was correct, so the two surfaces disagreed. This was not an
+  implementation slip: the implementation followed the ticket's literal board-URL criterion, and
+  the root cause was a contradiction inside the plan. Fixed by one query parameter; the plan's
+  § "The trust model" and this ticket's criterion are both amended (**R90**). Two minor defects
+  accepted: the board and the detail read can still report different *tamper arrays* for the same
+  hypothesis (a plan consequence of the follow-up rule, not a code error — W8/W13 will under-report
+  relative to W14), and the transition `KeyedMutex` is per store **instance**, so serialisation
+  holds only if wolf-api constructs exactly one `HypothesisStore` per process — W8, W9 and W10 each
+  construct their own dependencies and nothing enforces it. Five fixtures were **captured live**
+  from `agentd` at `af0e0cb` in mock mode, not hand-shaped. 28 guesses. Found **R88**, **R89**,
+  **R90**, and a fail-open in W2's `mapMemorySearchRow` (a row that OMITS both provenance fields
+  maps to empty strings and reads as trusted — unreachable today because agentdb tags both without
+  `omitempty`, suggested owner W15).
 ### W6: Market-data providers and normaliser   [Status: done — FRED closed by W6b; Stooq still deferred, R56 | Model: sonnet]
 - **Scope:** FRED and Stooq connectors — each exposing **both `search(query)` and `fetch(...)`** —
   the normaliser to the canonical dataset CSV, the shared data-row counter, and a TTL cache.
@@ -3784,7 +3863,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   fetched_at }`. That line predates the pinned `Point` type and the pinned unit rule; the shape in
   the criteria above is the authority and the Interfaces line should be corrected to match.
 
-### W12: Wolf image, prompts and project bootstrap   [Status: pending | Model: opus]
+### W12: Wolf image, prompts and project bootstrap   [Status: done | Model: sonnet]
 - **Scope:** The installation image, the script that gets it into DinD, the four prompt files, and
   an idempotent bootstrap that configures the `wolf` project end to end. This ticket is the only
   thing that creates the two project-level workers, so the `interviewer` worker W8 names on every
@@ -3810,7 +3889,13 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     (`go/agentdb/sessions.go:62-95`, `envRefPattern` at `:53-55`) rejects any value containing
     `${` that is not a whole-value reference.
   - The preamble's single substitution token is **`{{LOCKED_SPEC_JSON}}`**, alone on its own line.
-  - The preamble/method boundary is the literal line **`<!-- WOLF:METHOD-BODY -->`**. Everything
+  - The preamble/method boundary is the literal line **`<!-- WOLF:METHOD-BODY -->`**.
+    ⚠️ **W9's splitter must be LINE-ANCHORED** — `split("\n")` then `line.trim() === marker`, never
+    `indexOf` or `split` on the bare substring. `prompts/researcher-preamble.md` contains the marker
+    **twice**: once as prose inside backticks near the top, and once as the real boundary line. A
+    substring split cuts at the prose occurrence and silently makes most of the locked preamble
+    mutable. W12 shipped a test pinning "appears as a whole line exactly once" so a future edit
+    cannot break this unnoticed (**R93**). Everything
     above it is locked; everything below is the mutable method body.
 - **Acceptance criteria:**
   - `installations/wolf/Dockerfile` begins `ARG BASE_IMAGE=agent-orange-core:dev` / `FROM
@@ -3900,9 +3985,22 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **Depends on:** W2, W7 *(W2 owns `api/src/orange/client.ts` and its route list is closed, so the
   project-settings read-merge-write helper, worker create and schedule create must come from W2 —
   do not hand-roll a second HTTP client here; W7 defines the MCP server this config points at)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 16/16 criteria, one fix round (the DinD path was unproven)
+- Notes: **Implemented, FAILED independent verification, fixed, re-verified 2026-08-21 — 16 of 16
+  criteria PASS after one fix round.** Branch `W12-wolf-image-prompts-bootstrap`, commits ending
+  `a9c79e6`, merged to `main`. The round-0 failure was **THE VALIDATION RULE**, not a bug: the
+  loader script's happy path had never been executed against a real DinD daemon, so "builds the
+  image inside DinD" and "prints the import pandas, numpy, duckdb success line" were *unproven*.
+  The fix round ran it for real against a throwaway DinD and the criteria became provable. Every
+  pinned contract string was checked byte for byte by the verifier: MCP server name `wolf`, header
+  `X-Wolf-Mcp-Token` carrying the **bare** `${WOLF_MCP_TOKEN}`, `{{LOCKED_SPEC_JSON}}` alone on its
+  line, `<!-- WOLF:METHOD-BODY -->` exact. The Dockerfile sets none of the five forbidden
+  directives. Four minor defects accepted: `readWorker` issues a raw `fetch` outside
+  `orange/client.ts` because W2's closed route list has no worker **read** and idempotency is
+  impossible without one (**R91**); `python3-pip` is one apt package beyond the criterion's literal
+  four; the core-fallback build hardcodes `BASE_IMAGE=agentkit-sandbox:dev` and ignores an operator
+  override; and 68 lines landed in `api/src/config.test.ts`, which was on no Files line and no
+  ownership row (**R94**). 13 guesses. Found **R91**, **R92**, **R93**, **R94**.
 ### W13: UI — board, new hypothesis, chat frame   [Status: pending | Model: sonnet]
 - **Scope:** `HypothesisList`, `NewHypothesis`, `Archive`, `OrangeChatFrame`, `StatusChip`,
   `TamperWarning`, and the app shell: the router, sign-in, and the two browser-side build
@@ -4772,3 +4870,13 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R83** | **nginx's `/mcp` SSE directives are now dead weight (informational).** W1's `wolf-web` nginx config carries `proxy_buffering off` and `proxy_read_timeout 3600s` on `/mcp` "because Streamable HTTP's server-to-client leg is an SSE stream on `GET /mcp`". W7's server is stateless with `enableJsonResponse` and `GET /mcp` returns 405, so no SSE stream exists there. Harmless, but the comment is wrong — and session containers reach `/mcp` directly at the DinD gateway, never through nginx at all. | W1 (comment), W21 |
 | **R84** | **`go/httpapi` has a cross-test isolation flake that only surfaces under heavy load.** During wave 3's gates, O4's whole-module `go test ./...` failed `TestCreateSessionWithWorkerAttachesIdentityAndPrompt` with `session.worker = ""`, immediately preceded by `httpapi: session s-race was deleted while it was being created; create aborted`. `s-race` belongs to `session_orphan_test.go`, a deliberate concurrent create-vs-delete test; its goroutine outlives the test and mutates the shared memstore the next test is using. **Not caused by any wave-2 or wave-3 ticket** — O4's diff touches only `cmd/agentd/datasettoken*.go` and `extension/devclaims/*`, and the same test passes 3/3 in the full `httpapi` package on the O4 branch, 30/30 on `main`, and cleanly under `-race`. It reproduced only when two whole-module runs were executed in parallel, which the orchestrator was doing. **Consequence for future waves: do not run two `go test ./...` invocations concurrently**, and treat a lone `httpapi` failure naming `s-race` as this flake rather than as a ticket defect. The real fix — making `session_orphan_test.go` wait for its goroutine, or giving it its own store — belongs to whichever ticket next edits that file. | O4 (cleared), any wave running parallel Go gates |
 | **R85** | **The import-boundary checker scanned raw source, so prose in a comment could manufacture an import.** Discovered at the wave-4 pre-flight merge, and only there: W1b's checker and W7's `api/src/config.ts` are each green alone, but merged, `api/`'s boundary suite failed with a bare specifier `" in X1"`. The cause is `IMPORT_SPECIFIER_PATTERNS[0]` matching W7's comment *a shell &#96;export&#96; in X1's &#96;run.sh&#96;* — the `export` keyword, the backtick closing it, `" in X1"`, and the apostrophe in `X1's`. **This is the first defect any wave produced that no single ticket could have caught**, because both halves were correct in isolation; it is an argument for merging at every wave boundary rather than accumulating branches. Fixed on merged `main` (`9846bb4`): `allImportSpecifiers` strips comments first, with two regression cases — prose does not manufacture a specifier, and a real escaping import below a comment is still caught. The first was proven to fail without the fix. | **Resolved** — agent-wolf `main` |
+| **R86** | **`go/cmd/agentd/main.go`'s ownership row omitted O5 for three revisions.** § "Parallelism and file ownership" listed the file as *O6b, O8* while O5's own Files line requires modifying it to wire `DatasetBlobs`. Two tickets would have run concurrently on the same file with nothing in the plan saying not to. The orchestrator caught it while cutting wave 4 and serialised O5 → O8 by hand (O5 first, O8 branched from post-O5 `main`). O5's change is 7 lines in one struct literal and O8 merged on top without conflict. **Row corrected.** Generalise: the ownership table is derived from Files lines and nothing checks the two agree — a mechanical cross-check would have found this in a second. | **Resolved** — O5, O6b, O8 |
+| **R87** | **O6a's argv criterion contradicted its own mandated argv.** The ticket said "a test asserts no command element is `sh`, `bash` or `-c`" while pinning the size probe as `[]string{"wc","-c",abs}` — read literally, the test must fail against the very command the ticket mandates. The executor implemented the evidently-intended check (`cmd[0]` is not `sh`/`bash`) and **reported the contradiction instead of silently dropping half of it**, which is the behaviour the plan wants. The verifier separately noted the shipped assertion is near-redundant (the fake rejects any unknown `cmd[0]` anyway) and wrote a real exact-argv assertion itself. **Criterion corrected.** | **Resolved** — O6a |
+| **R88** | **§ "Interfaces → Memory append route (O7)" printed a doubled prefix in its example body.** The example wrote `"name":"hyp-1a2b3c4d"` while § "Memory kinds" pins the label as the bare id and § "Vocabulary" says the `hyp-` prefix belongs to the session name **and to nothing else**. Any ticket copying the printed example — the most likely thing an executor does — would write rows that match none of W5's selectors, and every hypothesis would read as having no state row. Exactly the `hyp-hyp-` family the Vocabulary warning exists to prevent, sitting in the plan's own worked example. Found by W5. **Example corrected to the bare id.** | **Resolved** — O7, W5, W8, W9 |
+| **R89** | **§ "Shared shapes" was factually wrong about the engine: `Tamper`'s two provenance fields are not mutually exclusive.** The plan pinned "exactly one of the two provenance fields is non-empty". Orange sets **both** for any session that has a worker (`go/cmd/agentd/mcpserver.go`) — which is every researcher tick, and every interview session too, since W8 creates those with `worker: "interviewer"`. W5 proved it against two independently captured live fixtures and implements the `at least one` form. This is a correction of fact, not a preference: the `exactly one` form is unsatisfiable against the running engine. **Shape corrected. X1's tamper-resistance spec must NOT assert the `exactly one` form**, and W8, W13 and W14 read the corrected shape. | **Resolved** — W5, W8, W13, W14, X1 |
+| **R90** | **THE PLAN'S OWN BOARD CRITERION REOPENED THE RESURRECTION ATTACK.** § "The trust model"'s two-step and W5's board criterion both pinned a board URL *without* `include_retracted=1`. Orange's `notRetractedSQL` then hides Wolf's newest `kind=hypothesis` row and `latest_per` hands back the OLDER trusted row beneath it — which passes the trust rule, so it renders as authoritative **with no tamper flag at all**. A prompt-injected researcher that merely **retracts** Wolf's newest state row therefore rolls the board back to the previous status, silently, on the exact surface W8's board and W13's banner render; the detail read was correct, so the two surfaces disagreed without either looking wrong. **W5's independent verifier constructed the attack and it worked.** The implementation was not at fault — it followed the criterion literally — so this is a contradiction *inside* the plan: § "The trust model"'s restated rule already says state is resolved from memories read with retractions visible. Fixed with one query parameter, which keeps the clean case at exactly one request and is what O11's paired criterion (*"this pair is the contract W5's tamper detection is written against"*) was written for. **Both the section and the criterion are corrected.** This is the single most valuable thing the adversarial-verify step has produced across four waves. | **Resolved** — W5, W8, W13, W14, X1 |
+| **R91** | **W2's "exhaustive and closed" route list has no worker READ, but W12's idempotency criterion cannot be met without one.** W2 carries `putWorker`/`deleteWorker` and no `GET /agent/workers/{name}`, while Orange serves one (`go/httpapi/workers.go:77`) and W12 is graded on "a second run creates nothing and mutates nothing" — undecidable without reading current worker state. W12 resolved it with one narrowly-scoped raw `fetch` inside `bootstrap-project.ts`, documented at length at its call site: not a second client, and it does not touch `client.ts`. But it is a second, unretried, unmapped HTTP path in a repo whose plan wanted exactly one. **Owner decision wanted:** add `GET /agent/workers/{name}` to W2's route list when W15 next holds `client.ts`, or bless the raw fetch explicitly. | **Open** — W2, W12, W15 |
+| **R92** | **The bootstrap script needs an Orange base URL and a project API key, and neither is pinned anywhere.** W12's Depends-on is W2 + W7 and its Files line restricts `config.ts`/`.env.example` to `WOLF_BASE_IMAGE` and `WOLF_CRITIC_CRON`, but constructing an `OrangeClient` needs `ORANGE_BASE_URL` and `WOLF_API_KEY`. Both are added by W8/W9 — wave-4 siblings W12 does not depend on. W12 reads them straight from `process.env` in a function that bypasses the typed `WolfConfig`, with a hardcoded `http://localhost:8099` default. This is where **R49**'s "Orange's base-URL variable, pinned nowhere" finally landed. Consequence: an operator running `scripts/bootstrap-project.ts` before W8/W9 land finds no `.env.example` guidance for either variable. Separately, `scripts/bootstrap-project.ts` sits at repo root importing into `api/src/`, and `api/tsconfig.json` does not cover repo-root `scripts/` — so `yarn typecheck` never sees it and nothing proves it even resolves under `tsx`. | **Open** — W8, W9, or a plan revision |
+| **R93** | **`prompts/researcher-preamble.md` contains the method-body marker TWICE as a substring, and W9's splitter must be line-anchored.** The literal `<!-- WOLF:METHOD-BODY -->` appears once as prose inside backticks near the top of the file (usefully — it documents the boundary) and once as the real boundary line. A splitter using `indexOf` or a bare-substring `split` cuts at the prose occurrence and **silently makes most of the locked preamble mutable**, which is the whole thing the locked preamble exists to prevent. W12 shipped a test pinning "appears as a whole line exactly once" so a future edit cannot break the assumption unnoticed. **W9's ticket now states the requirement explicitly**: `split("\n")` then `line.trim() === marker`, never `indexOf`. | **Resolved** — W9, W12 |
+| **R94** | **Two files that tickets actually edit were on no ownership row: `prompts/*.md` and `api/src/config.test.ts`.** W12 authors the four prompts and W25 rewrites the report-authoring half, with nothing serialising them; and W12 landed 68 lines in `api/src/config.test.ts`, a file on no Files line and no ownership row, so a concurrent `config.ts` ticket could collide there unserialised. Both rows added. Same root cause as **R86** and **R81**: the ownership table is maintained by hand and nothing cross-checks it against the Files lines it is supposed to summarise. Three separate waves have now found a missing row. **A mechanical check — every path in any Files line either appears in the table or is created by exactly one ticket — would end this class.** | **Resolved** (rows added) — the mechanical check remains unbuilt |
+| **R95** | **A wave that runs several tickets concurrently leaves throwaway containers behind, because house rule 9 forbids workers removing them.** Wave 4 ended with six `agentkit-testpg-*` instances on ports 5433–5438 plus a verifier's DinD: agents correctly created their own rather than colliding, correctly refused to `docker rm` anything, and correctly reported what they left. The rule is right — an agent removing a sibling's database mid-run is far worse than an idle container — but the sweep has no owner. **The orchestrator should sweep between waves**, and did. | **Informational** — orchestrator housekeeping |
