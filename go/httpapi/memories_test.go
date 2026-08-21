@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 )
 
@@ -1416,24 +1418,33 @@ func TestListMemories_IncludeRetractedLivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
-	const project = "memaudit-mine"
+	// A project name nothing else can collide with: a fixed one leaves rows
+	// behind when a run is killed mid-test, and the latest_per assertions below
+	// would then fail for a reason that has nothing to do with the code.
+	project := "memaudit-" + uuid.New().String()
 	t.Cleanup(func() { _ = store.DB().Exec("DELETE FROM memories WHERE project = ?", project).Error })
 
-	seed := func(content string, labels agentdb.LabelSet, worker, session string) *agentdb.Memory {
+	// Explicit, distinct timestamps: CreateMemory stamps time.Now().UnixMilli()
+	// when CreatedAt is zero, so rows seeded back-to-back can share a
+	// millisecond and which one is "latest" for the name — the whole contract
+	// here — would be decided by insert latency instead of by the data.
+	base := int64(1_700_000_000_000)
+	seed := func(content string, labels agentdb.LabelSet, worker, session string, createdAt int64) *agentdb.Memory {
 		t.Helper()
 		m, _, err := store.CreateMemory(context.Background(), &agentdb.Memory{
 			Project: project, Labels: labels, Content: content,
 			CreatedByWorker: worker, CreatedBySession: session,
+			CreatedAt: createdAt,
 		}, nil)
 		if err != nil {
 			t.Fatalf("seed %q: %v", content, err)
 		}
 		return m
 	}
-	older := seed("hypothesis A: proposed", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "")
-	newer := seed("hypothesis A: live", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "")
+	older := seed("hypothesis A: proposed", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "", base)
+	newer := seed("hypothesis A: live", agentdb.LabelSet{"kind": "state", "name": "hyp-a"}, "", "", base+1000)
 	retraction := seed("ignore hypothesis A",
-		agentdb.LabelSet{"kind": "retraction", agentdb.RetractionLabel: newer.ID}, "researcher", "sess-evil")
+		agentdb.LabelSet{"kind": "retraction", agentdb.RetractionLabel: newer.ID}, "researcher", "sess-evil", base+2000)
 
 	read := func(query string) []map[string]any {
 		t.Helper()
