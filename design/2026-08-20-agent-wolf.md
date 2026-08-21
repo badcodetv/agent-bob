@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R107. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R109. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -2868,7 +2868,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   the ⚠️ block in § "Parallelism and file ownership"; the operative rule — this client reads no
   environment variable and takes `{ baseUrl, apiKey }` — is unchanged and was followed.
 
-### W2b: The twenty-third Orange route — worker read   [Status: pending | Model: sonnet]
+### W2b: The twenty-third Orange route — worker read   [Status: done | Model: sonnet]
 - **Scope:** Add `getWorker(name)` to the Orange client and repoint W12's bootstrap at it, removing
   the one raw `fetch` in the repo. Owner decision 2026-08-21 (**R91**): W2's route list was
   declared "exhaustive and closed" and had no worker **read**, while Orange serves one
@@ -2881,8 +2881,12 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   `api/src/bootstrap/bootstrap-project.ts`, `api/src/bootstrap/bootstrap-project.test.ts`.
 - **Acceptance criteria:**
   - `client.getWorker(name)` calls `GET /agent/workers/{name}` with the project API key, and its
-    result type is the same worker shape `putWorker` accepts — one type, not a second one that
-    happens to have the same fields.
+    result type is `WorkerRecord` — **the type `putWorker` RETURNS**, not the type it accepts. One
+    type, not a second one that happens to have the same fields. *(Corrected 2026-08-21, **R108**:
+    this criterion originally said "the shape `putWorker` accepts", which is `PutWorkerParams` — an
+    all-optional params bag carrying a `rationale` field no read can ever return. Taken literally it
+    is unsatisfiable and would force the wrong type. W2b's verifier caught the wording and graded
+    the sane reading.)*
   - **A 404 maps to `not_found`, not to `unavailable`.** § "Shared error taxonomy" makes this
     load-bearing: `unavailable` is the one **retryable** kind, and the bootstrap's whole use of
     this call is "does this worker exist yet?", so conflating them turns a first run into a retry
@@ -2908,9 +2912,24 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   port-pool override's status/kind mismatch, and `mapMemorySearchRow`'s fail-open on missing
   provenance. Branch this from a `main` that already carries W15, or the two will conflict on the
   same file and the error-mapping criterion above will be graded against the pre-fix taxonomy.)*
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 7/7 criteria, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 7 of 7 criteria PASS, zero fix
+  rounds.** Branch `W2b-orange-worker-read`, commit `56f110c`, merged to `main`. api/ 644 → **648
+  tests**. `getWorker(name)` needed **no** `errorOverride`: the client's default mapping already
+  sends 404 → `not_found` and 5xx → `unavailable`, so the load-bearing criterion is satisfied by
+  going through the shared path rather than around it — which is also the second criterion. The raw
+  `fetch` is gone from `bootstrap-project.ts`, and with it the whole `fetchImpl` plumbing that
+  existed only to inject it. **W12's idempotency assertion still passes byte-identical and
+  unchanged**, which is what proves the rewrite did not quietly relax the thing it was rewriting
+  around. `readWorker` swallows only `not_found` and **rethrows every other kind**, so an Orange
+  outage cannot masquerade as "worker absent" and cause a PUT over a live worker.
+  Three minor defects accepted, all worth carrying forward: (1) **R108** — a wording error in this
+  ticket, written the same day from an owner ruling; the verifier caught it and graded the sane
+  reading rather than forcing the wrong type. (2) The new non-404 error path in `readWorker` has no
+  test; the behaviour is correct on reading, but a future edit widening the catch to
+  `return undefined` on any error — which is exactly the failure the rethrow prevents — would be
+  caught by nothing in the repo. (3) **R109** — a pre-existing W2 hole this ticket inherits: **no
+  test in the shipped suite asserts that any route sends `X-API-Key` at all.** 6 guesses.
 ### W3: Spec and condition schema + validator   [Status: done | Model: opus]
 - **Scope:** The spec type, the condition type, and the validator that is the **sole gate** on
   go-live. The graded rule set is the numbered list **V1–V27** below — that list, not the run-on
@@ -5137,4 +5156,6 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R105** | **Four tickets are instructed to "reuse `present()`" and none of them can: it is module-private.** `api/src/hypothesis/spec.ts`'s `present()` helper is W3's reference implementation of **R62** ("explicit `null` means ABSENT"), and § "Vocabulary" points at it by name — but it is not exported. Every instruction to reuse it is therefore unsatisfiable without editing a file W3 owns, and the executor's only options are to duplicate the logic or to touch a file outside its Files line. **Either export it or stop pointing tickets at it.** The orchestrator's own wave-4 and wave-5 briefings repeated the instruction verbatim, which is the same class as **R102**: a briefing asserting a capability nobody checked. | **Open** — W3's file; wants one export |
 | **R106** | **The board/detail tamper asymmetry W5 recorded will reappear in the report layer, and W22 is where.** W5's Notes record that `readBoard` resolves from one row per name while `readHypothesis` sees up to 50, so the two surfaces can report different `tamper` arrays for the same hypothesis. The report layer reproduces the shape exactly: **W22's board headline comes from a `latest_per` snippet read while `readLatestReport` does a per-name read**, so the same divergence returns for reports. Worth a line in W22's criteria stating the expected behaviour **before** it is found as a bug and "fixed" by widening the board read, which is the change W5's criterion deliberately does not make. | **Open** — W22 |
 | **R107** | **The per-instance `KeyedMutex` hazard is live, has now been flagged by two separate tickets, and is assigned to nobody.** W5 built transition serialisation on a `KeyedMutex` held per `HypothesisStore` **instance**, so it holds only if wolf-api constructs exactly one store for the whole process — and W8, W9 and W10 each construct their own dependencies with nothing enforcing it. W5 flagged it; W15 flagged it again while confirming its own two reads are read-only and do not worsen it. Nothing owns it. The failure mode is two concurrent transitions on one hypothesis interleaving, which is rare, non-deterministic, and writes an append-only memory — so it corrupts the record rather than erroring. **Either make the store a module-level singleton, or hoist the mutex to module scope; whichever, it needs an owner.** | **Open** — unassigned |
+| **R108** | **A third ticket written the same day from an owner ruling carried a wording error its verifier had to catch.** W2b's first criterion said the result type must be "the same worker shape `putWorker` **accepts**". What `putWorker` accepts is `PutWorkerParams` — an all-optional params bag carrying a `rationale` field no read can ever return — so taken literally the criterion is unsatisfiable and would force the wrong type. The executor used `WorkerRecord`, the type `putWorker` returns, and the verifier graded the sane reading and flagged the wording so the plan could be corrected rather than the code. **Corrected.** Together with **R102** (a verifier brief that would have produced a false blocking defect) and **R105** (four tickets told to reuse a module-private helper), this is the third same-day authoring error in one session, all three caught by an executor or a verifier rather than by review. The pattern is clear and worth stating: **text written by the orchestrator between waves gets no adversarial pass, and it is now the plan's most defect-dense surface.** The mitigation that keeps working is the standing instruction to *grade the ticket, not just the code*. | **Resolved** — W2b |
+| **R109** | **No test anywhere asserts that any Orange client route sends `X-API-Key`.** W2's shared `intercept` test helper (`api/src/orange/client.test.ts:42-70`) captures path and body only, and the sole grep hit for the header name is a `describe` **title** whose two cases prove only that the key is absent from errors and logs — the opposite property. So the client's single authentication mechanism, shared by all twenty-three routes, is ungated: a change that dropped the header would keep the entire suite green and fail only against a live agentd, which no unit test reaches. W2b's verifier proved the header is sent by writing a throwaway test, then deleted it as house rules require. **One assertion in the shared helper closes it for every route at once.** Pre-existing from W2; inherited by W2b; owned by nobody. | **Open** — one line in W2's test helper |
 

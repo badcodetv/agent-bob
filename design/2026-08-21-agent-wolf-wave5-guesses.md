@@ -4,9 +4,9 @@ Every place a wave-5 implementer had to decide something `design/2026-08-20-agen
 did not decide for it. Collected from the implementers' own structured returns. Recorded 2026-08-21.
 
 Wave 5 = O6b and W8 (phase A), W15 (phase B), plus W8b and W2b — the two tickets two owner
-rulings on 2026-08-21 added to the plan (R100 and R91).
+rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passes, zero fix rounds.
 
-**Total so far: 108 guesses** — O6b 25, W8 48, W15 26, W8b 9. W2b appends when it lands.
+**Total: 114 guesses** — O6b 25, W8 48, W15 26, W8b 9, W2b 6. By reversibility: 94 trivial, 20 moderate, 0 hard.
 
 ## O6b — 25 guesses
 
@@ -662,5 +662,43 @@ rulings on 2026-08-21 added to the plan (R100 and R91).
 
 - **Plan said:** 404 or 405, never 204 — either is acceptable per the criterion's own wording
 - **Assumed:** Left it as Express's default 404 (no route matches GET on that path) rather than adding a router.all() catch to force 405, since the criterion explicitly permits either
+- **Reversibility:** trivial
+
+## W2b — 6 guesses
+
+### W2b.1 What return type getWorker should carry and how to interpret the 'one type, not a second one' criterion
+
+- **Plan said:** its result type is the same worker shape putWorker accepts — one type, not a second one that happens to have the same fields
+- **Assumed:** Interpreted 'the same worker shape putWorker accepts' as 'reuses WorkerRecord, the same type putWorker's Promise resolves to' (via the shared mapWorkerRecord mapper) rather than literally PutWorkerParams (putWorker's request-body type), since a GET response naturally maps to the response type, not the request type, and WorkerRecord is what the existing mapper already produces.
+- **Reversibility:** trivial
+
+### W2b.2 Whether to keep BootstrapProjectOptions.fetchImpl and the fetchImpl parameter threading now that no raw fetch remains in the module
+
+- **Plan said:** nothing — the ticket only says 'the raw fetch is gone'
+- **Assumed:** Removed the now-dead fetchImpl option/parameter entirely (BootstrapProjectOptions.fetchImpl, and the baseUrl/apiKey/fetchImpl args threaded through ensureWorker) rather than leaving it as unused vestigial plumbing, since nothing in the ticket's scope needed it kept and no other file references BootstrapProjectOptions.fetchImpl.
+- **Reversibility:** trivial
+
+### W2b.3 How readWorker(client, name) should distinguish 'worker absent' from a genuine upstream failure
+
+- **Plan said:** nothing explicit — only that a 404 maps to not_found and W12's idempotency criterion must keep passing
+- **Assumed:** readWorker catches a WolfError with kind==='not_found' and returns undefined (worker absent); any other WolfError kind (e.g. unavailable, internal) is rethrown rather than silently treated as absent, since only not_found is the documented 'does not exist yet' signal and swallowing other kinds would hide real outages from the bootstrap caller.
+- **Reversibility:** trivial
+
+### W2b.4 Where to add the new getWorker tests in client.test.ts and how many to write
+
+- **Plan said:** A test drives the 404 and asserts the kind. ... A test asserts a 503 from this route produces unavailable exactly as it does for an existing route
+- **Assumed:** Added three tests inside the existing 'workers' describe block (success/mapping, 404->not_found, 503->unavailable) rather than a new top-level describe block, following the file's existing per-route test grouping convention, and additionally wrote a success-path mapping test even though the ticket only explicitly asked for the 404 and 503 cases, since W2's own convention gives every route at least one happy-path test.
+- **Reversibility:** trivial
+
+### W2b.5 Exact wording/placement of the 'contains no fetch(' test in bootstrap-project.test.ts
+
+- **Plan said:** A test asserts the bootstrap module's source contains no fetch( call
+- **Assumed:** Wrote it as a source-inspection test (readFileSync + string search for the literal 'fetch(') mirroring client.test.ts's existing 'reads no environment variable' pattern, placed near the top of the file before the fixture constants, checking only bootstrap-project.ts's own source (not bootstrap-project.test.ts's own source, which legitimately still says 'fetch' in prose/imports).
+- **Reversibility:** trivial
+
+### W2b.6 Whether to update the historical '22 routes' reference inside bootstrap-project.ts's own header comment (describing what W2 originally shipped)
+
+- **Plan said:** nothing — the criterion is about client.ts's route-list comment specifically
+- **Assumed:** Left one mention of '22 routes' in bootstrap-project.ts's header comment because it is describing PAST state (what W2 originally shipped, before W2b) rather than claiming the current route count — rewrote the surrounding prose to make clear this is history ('W2's route list WAS exhaustive and closed at 22 routes ... W2b added getWorker'), not a live claim.
 - **Reversibility:** trivial
 
