@@ -13,8 +13,9 @@
 > context, that is a defect in this plan — log it.
 
 Status: approved
-Revision: 3 (2026-08-20) — incorporates two adversarial reviews and one executability
-audit; see the Discovered Issues Log, entries R1–R32.
+Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
+the report-layer amendment; see the Discovered Issues Log, entries R1–R70. Wave 1 (O1, O7, W1)
+and wave 2 (O2, O11, W2, W3, W6) have been executed; their tickets carry Notes.
 Relates: `docs/19-embedding.md` (the integration guide written FOR this product),
 `design/2026-08-06-embeddable-agent-orange.md`, `docs/18-workers-memory-events.md`,
 `docs/06-artifacts.md`, `docs/product/17-product-spec.md`
@@ -357,6 +358,16 @@ to `main` directly.
 | **Tick** | One firing of a hypothesis's daily schedule. |
 | **Hypothesis id** | The **bare** 8-hex id, e.g. `1a2b3c4d`. It is *not* prefixed. |
 | **Session name** | `hyp-<id>`, e.g. `hyp-1a2b3c4d`. The prefix is added exactly once, here. |
+
+⚠️ **Explicit `null` means ABSENT, everywhere in a spec.** Every optional field of a `Spec`,
+`Metric`, `Method` or `Condition` may be written as `null` or omitted, and the two are identical:
+the validator accepts both and the parsed `Spec` it returns carries **neither** — the key is simply
+gone. This matters because § "The condition object" prints its optional fields as explicit nulls
+while V22, V23 and V24 are worded "present iff", so on the literal reading the plan's own worked
+example fails three of the rules it exists to demonstrate. Whatever writes a spec (W9, W12, an
+interviewer model copying the printed shape) will emit nulls; whatever reads one (W4, W10, W14)
+must never distinguish `null` from missing. W3 implements this and is the reference
+(`api/src/hypothesis/spec.ts`, the `present()` helper). R62.
 
 ⚠️ **Do not double the prefix.** An earlier draft had W5 generating ids *as* `hyp-<8 hex>` while W8
 created sessions named `hyp-<id>` — producing `hyp-hyp-1a2b3c4d`, under which the trust rule's
@@ -1255,11 +1266,15 @@ interface EvaluationResult {
   conditions: ConditionResult[];
   metrics: {
     slug: string;
-    direction: "up" | "down";            // expected, from the spec
+    direction: "up" | "down" | "flat";   // expected, from the spec. "flat" is legal — a
+                                          // hypothesis may predict no change, and § "The support
+                                          // score" already scores it. Owner decision 2026-08-21,
+                                          // R65.
     realised_change_pct: number | null;   // null when indeterminate
     last_observation_ms: UnixMs | null;
     stale: boolean;
-    stale_reason: string | null;
+    stale_reason: Reason | null;         // the closed vocabulary W4 exports, never a free
+                                          // string; the stale value is `stale_data`. R67.
   }[];
 }
 
@@ -1378,7 +1393,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   Interfaces rather than the older tables' `VARCHAR(36)`; no gorm `default:` tags, per migration
   042's stated convention.
 
-### O2: Dataset store — versioned writes under compare-and-swap   [Status: pending | Model: opus]
+### O2: Dataset store — versioned writes under compare-and-swap   [Status: done | Model: opus]
 - **Scope:** `CreateDatasetVersion`, `CurrentDataset`, `GetDatasetVersion`. The whole difficulty
   is that the next version number and the CAS check must be decided inside **one transaction**,
   or two concurrent writers both produce version N+1.
@@ -1460,8 +1475,35 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `cd go && go test ./agentdb/... -run 'TestMutationsAreLogged' -count=1 -v | grep -E '^--- (PASS|FAIL)'`
     — one `--- PASS`. It lives in `go/agentdb/config_events_test.go`, not in `cmd/agentd`.
 - **Depends on:** O1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `O2-dataset-store-cas`, commit `ae6a85e`, based on
+  `O1-dataset-table-migration` (O1 is not merged to `main`).** Orchestrator re-ran all five
+  Validation commands on 2026-08-21: build+vet clean, `TestDataset` green, the live filter prints
+  **8 `--- PASS` and zero `--- SKIP`**, `TestMutationsAreLogged` passes, whole `agentdb` package
+  green (92s).
+  Two implementation facts later tickets depend on. **(1)** The unique-violation re-read happens
+  *outside* the failed transaction — Postgres aborts a transaction on a constraint violation
+  (25P02), so an executor who re-reads the current version inside it gets an opaque
+  "current transaction is aborted" instead of a conflict. An unexported `errDatasetVersionTaken`
+  unwinds the tx, then `currentDatasetVersion` re-reads on a fresh connection and the exported
+  `ErrDatasetVersionConflict{Current: n}` is built outside. **(2)** The store fills its three
+  defaults on a **copy**, never on the caller's struct — O6a must use the *returned* value, not
+  its own input, or it reads zeros for `ID` and `CreatedAt`.
+  Also pinned here for O3/O5/O6b: the dialect guard is `(*Store).requireDatasetPostgres`; argument
+  errors are worded `agentdb: dataset …` and use the **snake_case wire spelling** `if_version`;
+  `GetDatasetVersion` treats `version < 1` as an argument error (400), not `ErrDatasetNotFound`;
+  and both read methods validate the name before the dialect guard, so an illegal name is a 400
+  rather than a 404. A package-level `datasetColumns` const holds the projection — O3 should reuse
+  it rather than re-listing columns. Test helpers O3 will meet: `validDataset()` and
+  `newTestStore` (sqlite) in `datasets_test.go`; `newLiveDatasetProject(t,s)` and
+  `liveDataset(project,name)` in `datasets_live_test.go`. **`datasets` rows hang off no FK, so
+  nothing cascades — O3 must keep the explicit DELETE-by-project cleanup** or the throwaway
+  instance accumulates rows that break `ListDatasets` assertions.
+  Surprises logged: **R57** (the goroutine race alone almost never reaches the unique-index
+  backstop, so the ticket's own Validation cannot tell a correct CAS from a lucky one — the
+  deterministic provocation is described there), **R58** (`grep '^--- '` matches only top-level
+  tests, so a ticket graded on a PASS count silently forbids subtests) and **R61** (a pre-existing
+  file is not gofmt-clean).
 
 ### O3: Listing, version history, reaper and orphan sweep   [Status: pending | Model: sonnet]
 - **Scope:** `ListDatasets`, `ListDatasetVersions`, `ReapDatasetVersions`, `ListOrphanBlobPaths`,
@@ -2260,7 +2302,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - [ ] done
 - Notes:
 
-### O11: Make retraction visible to a trusted reader   [Status: pending | Model: opus]
+### O11: Make retraction visible to a trusted reader   [Status: done | Model: opus]
 - **Scope:** Add `include_retracted=1` to `GET /agent/memories`, and return **every** retraction of
   a retracted row alongside it — each with its own provenance — so a caller holding project
   authority can tell "this was withdrawn, by a worker" apart from "this does not exist". Without
@@ -2357,8 +2399,28 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     existing `TestListMemories_*` cases are not matched by `TestMemor`
 - **Depends on:** O7 *(shares `go/httpapi/memories.go` and `go/httpapi/httpapi.go`; strictly
   serial, and O7's `MemoryStore` seam and 201 append are already in place)*
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `O11-include-retracted`, commit `0a3fd9d`, based on
+  `O7-memory-append-route` (which already carries O1; neither is merged to `main`). One fix round.**
+  Orchestrator re-ran the Validation on 2026-08-21: build+vet clean, the `agentdb` live run and the
+  `httpapi` live run each show **zero `--- SKIP`**, and every `TestListMemories_IncludeRetracted*`
+  and `TestRetractionLivePG_*` case passes.
+  **The fix round was entirely in the tests, not the implementation.** Three live cases decided
+  their assertions by the order two back-to-back inserts happened to land in: `CreateMemory` stamps
+  `time.Now().UnixMilli()` when `CreatedAt` is zero, so both rows shared a millisecond and
+  `ORDER BY created_at DESC, id DESC` fell through to a random UUID — the "newest first" half of B5
+  failed roughly one run in four. All three now seed explicit `base` / `base+1000` / `base+2000`
+  timestamps (the pattern `agentdb/memories_live_test.go:161` already uses) and the httpapi case
+  uses a uuid-suffixed project so a run killed mid-test cannot poison the next one. See **R60** —
+  the same latent flake exists elsewhere in the package and was not swept.
+  Contract notes for W5, which is written against this: in the B5 two-retraction test the
+  **application's** empty-provenance retraction is the *older* one and the attacker's
+  session-provenanced retraction is the *newer*, so `RetractedBy[0]` is the attacker's — that is the
+  ordering that models the resurrection attack the criterion exists to defeat.
+  Surprises logged: **R59** (the ticket's own Validation list never reaches its 401 criterion,
+  because `-run 'TestMemoryTools'` is an unanchored substring that misses
+  `TestSessionTokenIsRejected*`; the orchestrator ran the corrected filter — exit 0 — and the fixed
+  command is recorded in R59), **R60** and **R61**.
 
 ---
 
@@ -2492,7 +2554,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   additional tsconfigs are equivalent escapes. R41's first half is also still open — nothing ties
   `.env.example` to `config.ts`, and eight later tickets add config.
 
-### W2: Orange client   [Status: pending | Model: sonnet]
+### W2: Orange client   [Status: done | Model: sonnet]
 - **Scope:** A typed client for every Orange route Wolf touches. **The list is exhaustive and
   closed** — no later ticket may edit `api/src/orange/client.ts` except W15, which is strictly
   serial after this one. Twenty-two routes:
@@ -2586,10 +2648,30 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     has collapsed to `number` cannot be detected any other way
 - **Depends on:** W1 *(and O7 for the append route's 201, O11 for `include_retracted` — the unit
   tests mock the HTTP layer with `MockAgent`, so neither Orange ticket blocks this one)*
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `W2-orange-client`, commit `c71d97d`, based on
+  `W1-wolf-repo-scaffold` (not merged to `main`). One fix round.** Orchestrator re-ran the
+  Validation on 2026-08-21: `yarn typecheck` clean, `yarn test src/orange` green (**52 tests**,
+  49 `it(` blocks against a floor of 22), neither `client.ts` nor `types.ts` contains `process.env`,
+  and the destructive brand proof behaves exactly as specified — deleting the `__unit: "ms"` suffix
+  makes `tsc` fail with `error TS2578: Unused '@ts-expect-error' directive`, and restoring it
+  passes.
+  **R46 is CLOSED and was already closed before this ticket ran** — the twenty-two-route list in
+  Scope above already contains all four routes R46 said were missing (`GET /agent/sessions` with
+  `worker=`, `include_retracted=1`, `attention-requests`, and `project-settings` GET+PUT). Revision 4
+  fixed the ticket body; only the log entry was stale.
+  One residual coverage gap, deliberately left rather than silently widened: `mapDatasetMetadata`'s
+  provenance mapping is proved only indirectly. The dataset fixture carries
+  `created_by_worker: ""`, so a rename confined to `mapDatasetMetadata` alone would not be caught,
+  where a global rename is (it also hits the three memory mappers). **W15, the only other ticket
+  permitted to touch `client.ts`, should close this** by giving the dataset fixture non-empty
+  provenance.
+  Note for W8: one acceptance criterion above still carries a stale parenthetical claiming
+  `config.ts` and `.env.example` are owned by "W1/W16/W21". That ownership claim was superseded by
+  the ⚠️ block in § "Parallelism and file ownership"; the operative rule — this client reads no
+  environment variable and takes `{ baseUrl, apiKey }` — is unchanged and was followed.
 
-### W3: Spec and condition schema + validator   [Status: pending | Model: opus]
+### W3: Spec and condition schema + validator   [Status: done | Model: opus]
 - **Scope:** The spec type, the condition type, and the validator that is the **sole gate** on
   go-live. The graded rule set is the numbered list **V1–V27** below — that list, not the run-on
   paragraph in **Interfaces**, is what a verifier counts, because "every rule" over an unnumbered
@@ -2671,8 +2753,34 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     — exits 0, proving the fixture is JSON rather than jsonc
   - `cd api && yarn typecheck`
 - **Depends on:** W1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Delivered on branch `W3-spec-validator`, commit `788a216`, based on
+  `W1-wolf-repo-scaffold` (not merged to `main`). No fix round.** Orchestrator re-ran the Validation
+  on 2026-08-21: `yarn typecheck` clean; `yarn test src/hypothesis/spec` green (**62 tests**); the
+  case counter prints exactly **54**; the rule sweep prints `V1 … V27` with no gaps; the fixture
+  parses as real JSON.
+  **Four conventions this ticket had to invent, which every later spec-touching ticket now inherits
+  — see R62–R67 for the full record.** (1) **Explicit `null` counts as ABSENT** for every
+  "present iff" rule and every optional field; the returned `Spec` drops the key rather than
+  carrying a null. Without this the plan's own printed condition object fails V21–V24. (2) **zod
+  4.4.3** is the resolved major, so the idiom is `z.strictObject({…})`, `z.enum(TUPLE as const)`
+  and `z.core.$ZodIssue` — a zod-3 `.strict()` chain or a `z.ZodIssue` import will not compile.
+  W8–W11 and W21 must match. (3) **Cross-field rules run OUTSIDE zod**, as a separate
+  `semanticErrors(input)` pass over the raw input, because zod 4.4.3 does not run a `superRefine`
+  when the base parse already produced an issue — with a superRefine, one bad `weight` type would
+  hide all six cross-field problems and break the all-errors-at-once criterion. **A later ticket
+  adding a rule must add it to the right pass or it silently never fires.** (4) Paths are dotted
+  with `[n]` indices and the root is the empty string `""`; V13 files at `metrics`, V27 at
+  `metrics[<i>]`.
+  Exports later tickets should use rather than redeclare: `Spec` (plus the alias
+  `HypothesisSpec = Spec` that W4's signature needs — see R64), `Metric`, `Method`, `Condition`,
+  the unions `MetricSource`/`Direction`/`Stat`/`Op`/`Reference`, the const tuples behind them, the
+  charset and bound constants, `SpecError`, `formatSpecPath` and `specValidationError(errors)` —
+  the canonical `WolfError` wrapper W9's 422 and W8's `spec_validation` should both use so the
+  `details` shape does not diverge.
+  Two deliberate non-rules: a non-`derived` metric carrying a `method` is **not** rejected, and a
+  `ratio_to` condition may name itself in `ratio_metric`. Both would have been ungraded 28th rules;
+  if either matters, the guard belongs in W4.
 
 ### W4: The condition evaluator   [Status: pending | Model: opus]
 - **Scope:** Implement § "Condition semantics" exactly: the **five** statistics (`level`,
@@ -2912,7 +3020,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - [ ] done
 - Notes:
 
-### W6: Market-data providers and normaliser   [Status: pending | Model: sonnet]
+### W6: Market-data providers and normaliser   [Status: done — two criteria deferred, see R55/R56 | Model: sonnet]
 - **Scope:** FRED and Stooq connectors — each exposing **both `search(query)` and `fetch(...)`** —
   the normaliser to the canonical dataset CSV, the shared data-row counter, and a TTL cache.
   `search` is in scope here and not in W7: W7 only exposes over MCP what this module implements,
@@ -2995,8 +3103,51 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `git diff --name-only main -- api/src/config.ts api/src/app.ts .env.example` prints nothing —
     this ticket must not edit files it does not own.
 - **Depends on:** W1
-- [ ] done
-- Notes:
+- [x] done — everything the environment allows; two criteria deferred, see R55/R56
+- Notes: **Delivered on branch `W6-market-data-providers`, commit `37b27d2`, based on
+  `W1-wolf-repo-scaffold` (not merged to `main`). One fix round.** Orchestrator re-ran the
+  Validation on 2026-08-21: `yarn typecheck` clean, `yarn test src/marketdata` green (**53 tests**,
+  0 skipped), the ownership diff prints nothing against the corrected base, and no file under
+  `src/marketdata/` reads `process.env` (the six matches are comments asserting that it does not).
+  **Two acceptance criteria are UNPROVEN and deferred, not met: the `"."` missing-value-sentinel
+  omission and FRED's `search()` field mapping, both of which the ticket requires be pinned against
+  a recorded real response.** Neither fixture could be recorded — see R55 (no `FRED_API_KEY`) and
+  R56 (stooq.com now serves a JS proof-of-work challenge, not CSV). The executor correctly refused
+  to hand-write substitutes, including when an orchestrator instruction wrongly asserted Stooq was
+  recordable on the strength of a 200 status code. The connectors are implemented against each
+  provider's published shape and every branch reachable without a fixture is tested.
+  Two more things later tickets inherit. **The default Stooq ticker table is
+  `api/src/marketdata/stooq-tickers.ts`, a compiled TS module — NOT a JSON file under
+  `__fixtures__/`.** `api/`'s build is plain `tsc` (`rootDir src` → `outDir dist`), which never
+  emits non-`.ts` files, and the Dockerfile copies only `dist/`, so the original JSON-file version
+  `ENOENT`-ed from the built image the first time `createStooqClient()` ran without injected
+  tickers — which is exactly what W7 does. See **R69**. **The HTTP timeout default is 10s**,
+  exposed as a `timeoutMs` constructor option on both clients; no env var owns it (**R68**).
+  **Config-wiring request to the orchestrator (owner of `api/src/config.ts`,
+  `.env.example`, `api/src/app.ts` — W1/W16/W21):** wire two variables into `WolfConfig` —
+  `FRED_API_KEY` (string, required for a live FRED client; `createFredClient` already throws
+  `WolfError.misconfigured` naming it if empty, so the config layer only needs to pass the value
+  through) and **`WOLF_MARKETDATA_CACHE_TTL_SECONDS`** (integer seconds, default `3600`) — note
+  the `_SECONDS` suffix: the ticket text names `WOLF_MARKETDATA_CACHE_TTL`, but the house rule in
+  § "Parallelism and file ownership" requires every duration variable to end in `_SECONDS` and
+  hold a plain integer count of seconds (R49 already lists `WOLF_MARKETDATA_CACHE_TTL_SECONDS`,
+  with the suffix, as a name pinned nowhere — this ticket's code and this Note are that pin).
+  `createCache({ ttlMs, now })` takes milliseconds, so the wiring ticket's one line is
+  `ttlMs: config.marketDataCacheTtlSeconds * 1000`, done once where the cache is constructed
+  (W7), not inside `cache.ts` — `cache.ts` never reads `process.env` or performs unit conversion
+  itself, by design (see its header comment).
+
+  **Both fixture recordings are BLOCKED — see Discovered Issues Log entries R55 (FRED) and R56
+  (Stooq)**, added by this ticket. In short: no `FRED_API_KEY` was available to this executor
+  (owner decision **B2** assumed one would be — it was not, in this environment), and
+  stooq.com's daily-download endpoint now answers every plain request with a client-side
+  JS proof-of-work challenge page (HTTP 200, HTML) instead of CSV, which was discovered only by
+  inspecting the response body — the pre-ticket reachability check looked at the status code
+  only. Everything not dependent on those two recordings (the Stooq connector including its
+  `search()` against the committed `stooq-tickers.ts` table, `normalise()`, `countDataRows()`,
+  the TTL cache, and the full error taxonomy for both connectors including a bounded
+  `timeoutMs`) is implemented and tested in full — see `__fixtures__/README.md` for the exact
+  commands that would record each fixture once unblocked.
 
 ### W7: Market-data MCP server and the series download route   [Status: pending | Model: opus]
 - **Scope:** An HTTP MCP server named **`wolf`** exposing `series_search` and `series_fetch`,
@@ -4426,7 +4577,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | # | Open item | Who is blocked |
 | --- | --- | --- |
 | **R45** | **W9's go-live cannot require a `report-template` without a cycle.** The report-layer amendment says go-live refuses a hypothesis with no template, but W21 is the only writer of one and W21 depends transitively on W9. Either go-live warns instead of refusing until W21 lands, or the amendment moves to W22. **Needs an owner decision.** | W9, W21, X1 |
-| **R46** | **W2's route list is declared "exhaustive and closed" and is not.** W5 needs `GET /agent/sessions` (list, with `worker=`) and `include_retracted=1`; W8 needs `GET /agent/attention-requests`; W12 needs `GET`/`PUT /agent/project-settings`. § "Parallelism" gives `client.ts` to W2 and W15 only, so W2 must gain them before wave 3. | W5, W8, W12 |
+| **R46** | **CLOSED before wave 2 ran — revision 4 had already added all four routes to W2's Scope, and W2 shipped all twenty-two.** Original finding: **W2's route list is declared "exhaustive and closed" and is not.** W5 needs `GET /agent/sessions` (list, with `worker=`) and `include_retracted=1`; W8 needs `GET /agent/attention-requests`; W12 needs `GET`/`PUT /agent/project-settings`. § "Parallelism" gives `client.ts` to W2 and W15 only, so W2 must gain them before wave 3. | W5, W8, W12 |
 | **R47** | **`O3`'s `minAge` guard cannot be honoured as specified.** `DatasetBlobLister.List(ctx, prefix)` returns keys with no timestamps and no `extension.BlobStore` implementation exposes an age. Either the seam gains an age, or the guard is dropped and the sweep relies on the prefix re-assertion alone. | O3, O8 |
 | **R48** | **`TRUSTED_KINDS` has two claimed owners** — W5 (the trusted store) and W15 (`api/src/report/kinds.ts`). One must define and the other re-export; the plan currently reads as though both define it. | W5, W15 |
 | **R49** | **Several variable names are used but pinned nowhere:** `WOLF_MCP_TOKEN`'s length and charset, `WOLF_SCHEDULE_CRON`'s exact default expression, `WOLF_SERIES_TOKEN_SECRET`, `WOLF_SERIES_URL_TTL_SECONDS`, `WOLF_MARKETDATA_CACHE_TTL_SECONDS`, Orange's base-URL variable, and the browser-side `VITE_ORANGE_PUBLIC_URL` / `VITE_GOOGLE_CLIENT_ID` build args. Each is named in the ticket that needs it; none is in a shared table, so two tickets could still diverge. | W6, W7, W9, W10, W11, W12, W13 |
@@ -4435,3 +4586,19 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R52** | **The prompt-injection literals `{{LOCKED_SPEC_JSON}}` and `<!-- WOLF:METHOD-BODY -->` are used by both W9 and W12** and pinned in neither § Interfaces nor § "Pinned technology choices". They agree today by coincidence. | W9, W12 |
 | **R53** | **`RetractedBy` is unbounded.** A container can append arbitrarily many `retracts=<id>` memories and inflate every search response carrying that row. A cap plus a truncation flag needs a number the plan does not pin. | O11 |
 | **R54** | **No HTTP-assertion library is pinned for `api/` route tests.** W1's shipped `app.test.ts` uses `app.listen(0)` + `fetch`; W8 onward assume that house pattern rather than `supertest`, but the pinned table is silent. | W8–W11, W21 |
+| **R55** | **Owner decision B2 ("a FRED API key exists") does not hold in every execution environment.** W6's executor verified `FRED_API_KEY` is absent and that an unkeyed request to `api.stlouisfed.org` returns HTTP 400. Per W6's own acceptance criterion this makes recording a FRED fixture a blocked step, not a defect to paper over: `fred.ts` implements the full connector (endpoint, error taxonomy, misconfigured-at-construction, a bounded `timeoutMs`) and every branch reachable without a fixture is tested, including the default `api.stlouisfed.org` host/path with `api_key`/`file_type=json` pinned via `undici` `MockAgent`. **Not** tested against a recorded response: `series_search`'s field mapping and the `"."` missing-value-sentinel omission — both implemented per FRED's publicly documented JSON shape only. | W6 (recording deferred); whoever next has a real `FRED_API_KEY` should record the two fixtures named in `api/src/marketdata/__fixtures__/README.md` and add the tests the README says are missing |
+| **R56** | **Stooq's daily-download endpoint (`stooq.com/q/d/l/`) no longer answers CSV to a plain HTTP request.** Verified directly and repeatedly by W6's executor on 2026-08-21 (`curl`, `curl` with a browser User-Agent, a persisted cookie jar across two requests, and `wget`): every attempt returns HTTP 200 with an HTML page running a client-side JavaScript proof-of-work challenge, not the documented `Date,Open,High,Low,Close,Volume` CSV. **This invalidates a check this same fix round relied on** — "stooq.com IS reachable and needs no key (verified: HTTP 200 for …)" only inspected the status code, not the body. Solving the challenge programmatically to scrape the site was judged out of scope regardless of instruction (circumventing anti-automation protection, not "recording a fixture"). `stooq.ts`'s `parseStooqCsv` is implemented and unit-tested against Stooq's publicly documented CSV shape only, not a recorded response; `search()` (against the committed `stooq-tickers.ts` table) and the error-mapping branches need no live fixture and are fully tested. | W6 (recording deferred); anything downstream that assumes `series_fetch` returns real Stooq rows today (W7, W10) is, in this environment, receiving whatever `parseStooqCsv` does with the challenge page's HTML rather than a clean error — worth a defensive check in whichever ticket first runs it against the live host |
+| **R57** | **O2's Validation cannot distinguish a correct CAS implementation from a lucky one.** A plain goroutine race against Postgres almost never reaches the unique-index backstop: the transactions are sub-millisecond and goroutine start-up staggers them, so the in-transaction `MAX(version)` pre-check catches every loser. Measured by O2's executor: with 8 and with 32 writers the branch fired **zero** times; with 16 it fires roughly once per run. An implementation whose unique-violation handling is wrong — most plausibly one that re-reads the current version *inside* the aborted transaction, which Postgres rejects with 25P02 — therefore passes on most runs. The fix, used in `TestDatasetLivePG_UniqueIndexIsTheBackstop` and which any re-implementation or review should repeat: open a manual transaction, insert a row at version 1 **without committing** (invisible to `MAX(version)`), call `CreateDatasetVersion` in a goroutine so it passes its own CAS check and blocks on the index, then commit the seed and assert the writer returns `ErrDatasetVersionConflict{Current: 1}` only after that commit. | O2 (resolved), O3, O5, O6a, W2 |
+| **R58** | **The "at least five `--- PASS`" rule silently forbids subtests.** `grep -E '^--- (PASS|SKIP|FAIL)'` is anchored at column 0, and `go test -v` indents subtest results as `    --- PASS:`. A perfectly good implementation that grouped its live coverage as subtests under two or three parents prints two or three matching lines and appears to fail its own gate. § "Executor orientation" documents the `-run` substring trap but not this one; it should. | O2, O3, O7, O11 — every ticket whose Validation counts `--- PASS` lines |
+| **R59** | **O11's Validation list never reaches its own 401 criterion.** The criterion "assert 401 at the real middleware … exactly as O7 does in `go/cmd/agentd/sessionsecret_test.go`" is implemented and passing, but the only `cmd/agentd` command in the list is `-run 'TestMemoryTools'`, and `go test -run` is an unanchored substring that does not match `TestSessionTokenIsRejected*`. This is precisely the trap § "The Validation rule" warns about, inside a ticket written to avoid it. **Fixed command, run by the orchestrator on 2026-08-21 (exit 0):** `cd go && go test ./cmd/agentd/... -run 'TestMemoryTools|TestSessionTokenIsRejected' -count=1`. The ticket's Validation block should adopt it. | O11 |
+| **R60** | **Live memory tests package-wide are exposed to millisecond-tie nondeterminism.** `CreateMemory` stamps `time.Now().UnixMilli()` when `CreatedAt` is zero (`go/agentdb/memories.go:230`) and every ordering path breaks ties on `id DESC` over a **random UUID** (e.g. `attachRetractions`). Any live test that seeds two rows back-to-back without an explicit `CreatedAt` and then asserts their relative order is a coin flip — this failed roughly one run in four in O11 before it was fixed. Some existing tests already seed explicit timestamps (`agentdb/memories_live_test.go:161`); others do not and are latent flakes on faster hardware. O11 fixed its own three cases; **the package was not swept.** Consider a sweep, or a test helper that refuses a zero `CreatedAt`. | O11 (its own cases resolved), W5, and any later ticket adding live memory-ordering tests |
+| **R61** | **Two pre-existing files are not `gofmt`-clean on the wave-1 branches** — `go/agentdb/memories_retraction_live_test.go` and `go/httpapi/sessions_worker_filter_test.go`. Neither was touched by O2 or O11, and nothing currently fails (`go build`, `go vet` and `go test` are all green, and CI has no formatting gate). Flagged because adding a `gofmt -l` gate later would fail on a file unrelated to whichever ticket lands. | any ticket that adds a formatting gate |
+| **R62** | **RESOLVED — the convention is now stated in § Vocabulary.** Original finding: **The plan's own printed condition object cannot satisfy its own "present iff" rules without an unstated null-is-absence convention.** § "Condition semantics" → "The condition object" prints `"ratio_metric": null`, `"ratio_lookback_days": null` and `"reference_days": null` on a `drawdown_pct` condition, and W3 must transcribe that object verbatim into `worked-spec.json` and have it validate with zero errors — but V22, V23 and V24 are written as "present iff", and on the literal reading those three explicit nulls **are** present. W3 resolved it by treating explicit `null` as absence everywhere (all optionals `.nullish()`; the returned `Spec` drops the key). **The convention must be stated once in § Interfaces or § Vocabulary**, because it is not local to W3: whatever writes a spec (W9, W12, an interviewer model copying the printed shape) will emit nulls, and whatever reads one (W4, W10, W14) must not distinguish `null` from missing. | W3 (resolved), W4, W9, W10, W12, W13, W14 |
+| **R63** | **The Spec JSON worked example carries two `method` keys that appear in no validation rule, and V7 makes `method` strict.** § Interfaces "Spec JSON (W3)" prints `"method": { description, formula, constituents, source_series }`; V15 mentions only `description` and `formula`. A validator built strictly from the numbered rule list rejects the plan's own worked example with two `unrecognized key` errors. W3 allowed both as optional `string[]`, unvalidated. The rule list should name them and say whether a derived metric requires them. | W3 (resolved), W9, W12 |
+| **R64** | **W3 exports `Spec`; W4's signature says `HypothesisSpec`.** W3's Scope says the later tickets import `Spec`, `Metric`, `Method` and `Condition` rather than redeclaring; W4's first acceptance criterion writes `evaluate(spec: HypothesisSpec, …)`. The two names are never reconciled. W3 shipped `export type HypothesisSpec = Spec` so either compiles; **the plan should pick one name** before W4 runs, or a later executor defines its own and two structurally-similar types diverge the moment a spec field is added. | W3 (mitigated), W4, W8, W9, W10, W11, W13, W14 |
+| **R65** | **RESOLVED — owner decision 2026-08-21: `flat` is a legal direction everywhere.** V10 admitted `direction` ∈ `{up, down, flat}` while § "Shared shapes" typed `EvaluationResult.metrics[].direction` as `"up" \| "down"` only, so a flat metric — which W3 must accept — had no representable `MetricResult`. Kai's decision: *"Direction can mean no change, as well as up or down."* § "Shared shapes" is widened to `"up" \| "down" \| "flat"`, which now agrees with V10, with W4's own `MetricResult` criterion (which already said `"up"\|"down"\|"flat"`) and with § "The support score", whose `expected flat` rule (`s = +1 if \|c\| <= flat_band else -1`) was always there and had no legal input. **W14 must render a flat metric's expected direction as "no change", not as an arrow.** | W4, W14, W3 — resolved |
+| **R66** | **Two of the twenty-seven rules have no possible field path.** V13 (weights sum) and V27 (heavy metric unnamed) are not about a single field, yet every error must carry a JSON path and the ticket's only guidance is two per-field examples. W3 chose `metrics` for V13 and `metrics[<i>]` for V27. W13 renders these paths as blocking reasons beside the Go Live button, so the choice is visible in the UI and should be pinned rather than inherited. | W3 (resolved), W9, W13 |
+| **R67** | **RESOLVED — orchestrator decision 2026-08-21, applied below.** The narrower, enumerated form wins in both halves, on the same principle § "The graded rule set" uses: an enumerated list beats a prose type. **`stale_reason` is `Reason | null`**, over the closed vocabulary `condition_tripped | insufficient_coverage | non_positive_reference | stale_data | no_ratio_pair`, and the stale reason is spelled **`stale_data`**, not `stale_series`. W4 exports `Reason`; W14 imports it rather than matching on strings. Original finding: **§ "Shared shapes" and W4's criteria disagree on `MetricResult.stale_reason`, and the reason vocabulary contradicts itself.** § "Shared shapes" declares `stale_reason: string \| null`; W4's criteria declare `stale_reason: Reason \| null` over the closed vocabulary `condition_tripped \| insufficient_coverage \| non_positive_reference \| stale_data \| no_ratio_pair`. Separately, § Evaluation step 3 names the stale reason **`stale_series`** while the closed vocabulary at the end of the same section names it **`stale_data`**. | W4, W14 |
+| **R68** | **A ticket whose Validation diffs against `main` is wrong whenever its base is unmerged.** W6's ownership check reads `git diff --name-only main -- api/src/config.ts api/src/app.ts .env.example`; `W1-wolf-repo-scaffold` created all three files and is not merged, so against `main` the command prints all three and falsely fails the ticket. The orchestrator substituted `git diff --name-only W1-wolf-repo-scaffold -- …`, which correctly prints nothing. **Generalise: every Validation command that names `main` must instead name the ticket's declared base** for as long as the wave-1 and wave-2 branches remain unmerged. Related: no env var owns the market-data HTTP timeout, so W6 pinned a 10s `timeoutMs` constructor option; if W10 needs a different bound it overrides per instance. | W6 (resolved), any ticket branched from an unmerged base |
+| **R69** | **A data table shipped as JSON under `__fixtures__/` does not survive the production build.** `api/`'s build is plain `tsc` (`rootDir src` → `outDir dist`), which never emits non-`.ts` files, and `api/Dockerfile` copies only `dist/`, `package.json` and `node_modules` — so `stooq.ts` loading its default ticker table with `readFileSync` against a JSON path `ENOENT`-ed from the built image. Reproduced by the adversarial verifier and again by the executor before fixing. Fixed by moving the table to `api/src/marketdata/stooq-tickers.ts`, a compiled module, verified by running `yarn build` and executing `dist/marketdata/stooq.js` directly. **Any later ticket that wants a committed data table must ship it as a `.ts` module**, or add `resolveJsonModule` plus an explicit copy step to both the build script and the Dockerfile. | W6 (resolved), W7, and any ticket shipping a static data table |
+| **R70** | **Nothing physically prevents a worker from editing this plan document.** The EXECUTION RULES forbid it, and wave 2's workers were told again explicitly, but the plan lives in `agent-orange` while three of the five worktrees are in `agent-wolf` — so "stay inside your worktree" does not cover it. W6's executor appended R55, R56 and its own Notes entry directly. **The content was accurate and the orchestrator kept it**, but the rule was still broken and a less careful worker could have destroyed the log — which has already happened twice on this plan. Future waves should either give workers a read-only copy of the plan or accept the edits as expected and drop the rule. | process; all future waves |
