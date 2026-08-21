@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R103. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R107. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -4359,7 +4359,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - [ ] done
 - Notes:
 
-### W15: Report vocabulary, trusted-kind set, and the store reads   [Status: pending | Model: opus]
+### W15: Report vocabulary, trusted-kind set, and the store reads   [Status: done | Model: opus]
 - **Scope:** The four memory kinds as types and label builders, the corrected trusted-kind rule,
   the full-content Orange reads the frame route needs, and the store functions that read templates
   and reports. No routes, no rendering, no sanitising.
@@ -4414,9 +4414,32 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/report/kinds src/hypothesis/store src/orange/client && yarn typecheck`
 - **Depends on:** W5, O11
-- [ ] done
-- Notes:
-
+- [x] done — verified 2026-08-21, 16/16 criteria, zero defects, zero fix rounds
+- Notes: **Implemented and independently verified 2026-08-21 — 16 of 16 criteria PASS, zero
+  defects, zero fix rounds.** Branch `W15-report-vocabulary-store-reads`, commit `9fa06d8`, merged
+  to `main`. api/ 586 → **644 tests**. `kinds.ts` **re-exports** W5's trust primitives rather than
+  redeclaring them (R48), pinned by **object identity** — `isTrusted === store.isTrusted` and five
+  more — plus a source scan proving no second enumeration of the kind strings exists in the file.
+  `TRUSTED_KINDS` is asserted by membership for all five and non-membership for all five named
+  non-members, with **no `.size` assertion anywhere**, so the test cannot pass against the wrong
+  five. `readTemplate` and `readLatestReport` both read with `include_retracted=1`, honour a
+  retraction only when its **own** provenance is empty, and surface a hostile retraction as
+  `Tamper{hostile_retraction}` **while still serving the row** — so a template hidden by an attack
+  never reads as absence, which is the failure shape W5's verifier already caught once on the board
+  path. Both return `{ template|report, tamper }` so "absent" and "attacked" stay distinguishable.
+  **The three standing `client.ts` defects are closed**: 401 now classifies as `forbidden` (status
+  preserved, so W8's `err.status === 401` branch is untouched); the port-pool override builds
+  `unavailable` at status **503** with Orange's message verbatim and the upstream 403 kept in
+  `details`; and all three memory mappers now require provenance to be **present**, closing the
+  fail-open that let a row omitting both fields read as trusted. `getMemory` survives as a
+  deprecated alias so `routes/hypotheses.ts`, which this ticket does not own, keeps compiling.
+  **A notable piece of honesty:** the `report_kinds_import_cycle` test does **not** gate the TDZ
+  hazard it describes — vitest's SSR transform rewrites ESM imports into lazy accessors, so a
+  top-level cross-cycle read still passes. The executor confirmed this by injecting one and
+  watching the suite stay green, verified the real behaviour out of tree with `tsc --outDir` and
+  node, and rewrote the test's comment to state the limit rather than overclaiming. That is the
+  Validation rule applied to a test the executor wrote itself. 26 guesses.
+  Found **R104**, **R105**, **R106**, **R107**.
 ### W16: Template parser, structure hash, and the report config   [Status: pending | Model: opus]
 - **Scope:** `parseTemplate` — slot extraction, fragment-shape validation, https-only enforcement,
   size limit, structure hashing. Plus the two config variables this feature introduces.
@@ -5110,4 +5133,8 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R101** | **Two owner rulings on 2026-08-21 added the plan's first two new tickets since revision 4** — W8b (`/api/auth/me` + logout, closing R100) and W2b (the twenty-third Orange route, closing R91). Ticket count 39 → 41. Both are small and both close a debt an earlier ticket found and correctly refused to fix because the file was not its. Recorded as an entry in its own right because the plan's ticket list is otherwise fixed, and a reader comparing the count against revision 4's header should find the reason rather than a discrepancy. W8b runs immediately (it shares no file with anything in flight); W2b waits for W15 to land, since W15 holds `client.ts` first. | **Informational** |
 | **R102** | **A verifier brief written by the orchestrator contained an error that would have produced a FALSE blocking defect.** W8b's verifier was told to "confirm neither `/mcp` nor `/series/download` is 401". `/mcp` **is** 401 without credentials — legitimately, from its own MCP-token guard — and W8's `api/src/app.test.ts:80-87` asserts exactly that. The real invariant is that the 401 must not come from the **cookie guard**, which the verifier proved by response **body shape** rather than by status code, and then said so plainly instead of failing the ticket. A verifier following the brief literally would have raised a blocking defect against correct code and burned a fix round. **Two lessons.** (1) The briefs are as much a source of defects as the plan is, and nothing reviews them — they are written fresh each wave by the orchestrator and go straight to an agent. (2) The instruction to verifiers to **grade the ticket, not just the code** is load-bearing and should stay in every brief; it is what turned an orchestrator error into a report instead of a false failure. Also **R103**'s sibling finding: the same ticket's criterion said "normalised the same way W8 normalises it" — W8 lower-cases but does **not** trim. | **Informational** — orchestrator practice |
 | **R103** | **`setSessionCookie` lower-cases the email but does not trim it, so an untrimmed address is what lands in the signed cookie.** `api/src/auth/session.ts:115`. W8b handles it at its own read site, so `GET /api/auth/me` is correct — but **W9, W10 and W11 mount `requireSignedIn` and read `req.wolfUser.email` directly**, and will each inherit an address with surrounding whitespace. Every downstream comparison (allowlist checks, `owner` labels on memories, the K8s label charset, which forbids spaces) is then a whitespace bug waiting to happen, and it will present as "this user's hypotheses do not appear" rather than as anything auth-shaped. **The durable fix is one call at the mint site**, in W8's file, not at three read sites. **Recommendation: add `api/src/auth/session.ts` to W9's Files line and a criterion that the mint site trims**, since W9 is the next ticket to mount the guard. Found by W8b's verifier. Separately and needing no action: `requireSignedIn` deliberately does not clear an expired cookie because the bare middleware has no config to build matching flags from — now that `POST /api/auth/logout` exists the UI has a real remedy, so that comment's premise has changed. | **Open** — W9 |
+| **R104** | **`GET /agent/memories/current?name=` cannot do what four tickets assume it does, and for Wolf it is close to useless.** Orange builds the selector as literally `"name=" + name` (`go/httpapi/memories.go:391`) and accepts no other query parameter — no `kind=`, no `selector=`, no `include_retracted=1`. **In Wolf's vocabulary EVERY kind shares `name=<hypothesis id>`** — `hypothesis`, `hypothesis-spec`, `verdict`, `evaluation`, `report-template`, `research-note`, `report` — so the route answers with whatever the researcher happened to write most recently, whatever kind that was. It is also blind to retractions, which makes it unusable for anything the trust model touches. W15 implemented its `kind` argument as a **client-side assertion** (mismatch → `not_found`) and used `listMemories` with a `kind=,name=` selector everywhere it actually mattered, which is correct but means the route is doing almost none of the work its callers expect. **Owner decision wanted: either add a `kind=` (or `selector=`) parameter to that Orange route, or strike it from the tickets that assume it** — leaving it as-is invites a later ticket to call it and silently read the wrong row. Note this route is one of the embeddable-Orange features `docs/19-embedding.md` advertises, so the fix is not Wolf-local. | **Open** — an Orange-side ticket, or the tickets that call it |
+| **R105** | **Four tickets are instructed to "reuse `present()`" and none of them can: it is module-private.** `api/src/hypothesis/spec.ts`'s `present()` helper is W3's reference implementation of **R62** ("explicit `null` means ABSENT"), and § "Vocabulary" points at it by name — but it is not exported. Every instruction to reuse it is therefore unsatisfiable without editing a file W3 owns, and the executor's only options are to duplicate the logic or to touch a file outside its Files line. **Either export it or stop pointing tickets at it.** The orchestrator's own wave-4 and wave-5 briefings repeated the instruction verbatim, which is the same class as **R102**: a briefing asserting a capability nobody checked. | **Open** — W3's file; wants one export |
+| **R106** | **The board/detail tamper asymmetry W5 recorded will reappear in the report layer, and W22 is where.** W5's Notes record that `readBoard` resolves from one row per name while `readHypothesis` sees up to 50, so the two surfaces can report different `tamper` arrays for the same hypothesis. The report layer reproduces the shape exactly: **W22's board headline comes from a `latest_per` snippet read while `readLatestReport` does a per-name read**, so the same divergence returns for reports. Worth a line in W22's criteria stating the expected behaviour **before** it is found as a bug and "fixed" by widening the board read, which is the change W5's criterion deliberately does not make. | **Open** — W22 |
+| **R107** | **The per-instance `KeyedMutex` hazard is live, has now been flagged by two separate tickets, and is assigned to nobody.** W5 built transition serialisation on a `KeyedMutex` held per `HypothesisStore` **instance**, so it holds only if wolf-api constructs exactly one store for the whole process — and W8, W9 and W10 each construct their own dependencies with nothing enforcing it. W5 flagged it; W15 flagged it again while confirming its own two reads are read-only and do not worsen it. Nothing owns it. The failure mode is two concurrent transitions on one hypothesis interleaving, which is rare, non-deterministic, and writes an append-only memory — so it corrupts the record rather than erroring. **Either make the store a module-level singleton, or hoist the mutex to module scope; whichever, it needs an owner.** | **Open** — unassigned |
 

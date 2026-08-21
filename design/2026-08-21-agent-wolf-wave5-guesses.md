@@ -3,9 +3,10 @@
 Every place a wave-5 implementer had to decide something `design/2026-08-20-agent-wolf.md`
 did not decide for it. Collected from the implementers' own structured returns. Recorded 2026-08-21.
 
-Wave 5 = O6b and W8 (phase A) and W15 (phase B, serialised behind W8 on `api/src/hypothesis/store.ts`).
+Wave 5 = O6b and W8 (phase A), W15 (phase B), plus W8b and W2b — the two tickets two owner
+rulings on 2026-08-21 added to the plan (R100 and R91).
 
-**Phase A total: 73 guesses** — O6b 25, W8 48. W15 appends below when it lands.
+**Total so far: 108 guesses** — O6b 25, W8 48, W15 26, W8b 9. W2b appends when it lands.
 
 ## O6b — 25 guesses
 
@@ -447,5 +448,219 @@ Wave 5 = O6b and W8 (phase A) and W15 (phase B, serialised behind W8 on `api/src
 
 - **Plan said:** nothing
 - **Assumed:** Left W5's ordering untouched (newest updated_at_ms first, a hypothesis with no resolvable state row sorting last rather than vanishing).
+- **Reversibility:** trivial
+
+## W15 — 26 guesses
+
+### W15.1 Whether the two new store reads return a bare nullable record or a `{ record, tamper }` envelope.
+
+- **Plan said:** `store.readTemplate(id)` and `store.readLatestReport(id)` exist … a template hidden by a hostile retraction must surface as `tamper`, never as absence. No return shape was pinned.
+- **Assumed:** `{ template: ReportTemplateRecord | null; tamper: Tamper[] }` and `{ report: ReportRecord | null; tamper: Tamper[] }`, so a forged template can be null WITH tamper and a hostile-retracted one non-null WITH tamper. A bare `T | null` cannot express either. W21's '404 when no template exists' reads `template === null`; W22's 'still served, and carries tamper' reads both fields.
+- **Reversibility:** moderate
+
+### W15.2 Whether `kind=report` rows should be trust-checked at all inside `readLatestReport`.
+
+- **Plan said:** Both reads 'ignore any retraction whose own provenance is non-empty, exactly as W5 does'. Nothing about applying `isTrusted` to a report row; W22 separately owns the cross-hypothesis provenance check.
+- **Assumed:** `readLatestReport` makes NO trust judgement about the writer — `report` is untrusted by construction, a researcher in a container writes one every tick, so flagging each `forged_row` would fill the board with warnings for the system working as designed. It carries `createdByWorker`/`createdBySession` through unmodified for W22. Implemented as a `trust: ((row) => boolean) | null` parameter on the shared row picker, null for report.
+- **Reversibility:** trivial
+
+### W15.3 Whether an id absent from the session index makes the two report reads throw or return empty.
+
+- **Plan said:** nothing
+- **Assumed:** Throw `not_found`, matching `readHypothesis`'s existing behaviour and § 'The trust model''s rule that the session list is the authoritative index. W21 gets a 404 either way.
+- **Reversibility:** trivial
+
+### W15.4 Whether `parseReportContent`'s `invalid` error propagates out of `readLatestReport` or is swallowed into `report: null`.
+
+- **Plan said:** 'a body that is not a flat Record<string,string> is a typed `invalid` error naming the offending key' — but not what the store does with it.
+- **Assumed:** It propagates. A model wrote the body, so a malformed one is an operational fact that must be legible; collapsing it into 'no report yet' hides it. W21/W22 can catch it if they want a softer surface.
+- **Reversibility:** trivial
+
+### W15.5 The name of the full-content-by-id client method. The criterion says `client.getMemoryById(id)`; W2's existing method is `client.getMemory(id)`.
+
+- **Plan said:** `client.getMemoryById(id)` … returns full content
+- **Assumed:** ADD `getMemoryById` and keep `getMemory` as a deprecated alias rather than rename. A rename would have forced edits to `api/src/routes/hypotheses.ts` (three call sites), which W15 does not own — that file's row is W8, W9, W22. I did switch store.ts's own internal call to the new name.
+- **Reversibility:** trivial
+
+### W15.6 What the `kind` argument of `getCurrentMemory(name, kind)` can possibly mean, given Orange's route has no kind filter.
+
+- **Plan said:** `client.getCurrentMemory(name, kind)` returns full content
+- **Assumed:** A CLIENT-SIDE assertion, not a server filter: a mismatch is `not_found` with `details: {name, kind, found}`. See discoveredIssues — the route selects on `name` alone (go/httpapi/memories.go:391) and every Wolf memory kind shares `name=<hypothesis id>`. My own store reads deliberately do NOT use it; they use `listMemories` with a `kind=,name=` selector, which is also the only way to pass `include_retracted=1`.
+- **Reversibility:** moderate
+
+### W15.7 Which error kind a 401 maps to in `classifyStatus`.
+
+- **Plan said:** 'W8 needed verify-google's 401 to read as `forbidden`' — strongly implied, never stated as the mapping.
+- **Assumed:** `forbidden`, with the HTTP status left at 401 so W8's existing `err.status === 401` branch in routes/auth.ts keeps working unchanged (pinned by its own test).
+- **Reversibility:** trivial
+
+### W15.8 Where the upstream 403 goes once the port-pool error is restated at 503.
+
+- **Plan said:** only that the 403 contradicts the taxonomy's `unavailable → 503`
+- **Assumed:** Preserve it as `details: { upstreamStatus: 403 }` rather than discard it; `message` and `upstreamBody` stay Orange's verbatim text.
+- **Reversibility:** trivial
+
+### W15.9 Whether the fail-open provenance fix applies only to `mapMemorySearchRow` or to all three memory mappers.
+
+- **Plan said:** named `mapMemorySearchRow` only
+- **Assumed:** All three — search row, memory record, and retraction. `mapMemoryRetraction` matters nearly as much: the rule is 'a row counts as retracted iff at least one retraction of it has EMPTY provenance', so a retraction with an ABSENT field would read as Wolf withdrawing its own state, the exact erasure `include_retracted=1` exists to expose. I judged this the same defect rather than new scope, but it is a judgement call.
+- **Reversibility:** trivial
+
+### W15.10 Whether a `null` slot value in a report body means 'absent' (R62) or is an error.
+
+- **Plan said:** R62 says explicit null means ABSENT 'everywhere in a spec', scoped to Spec/Metric/Method/Condition. W15's own criterion says a body that is not a flat Record<string,string> is an error naming the key.
+- **Assumed:** `null` is an error like any other non-string. R62 does not reach a report body; an unfilled slot is OMITTED and W20's drift detection reports it. Documented in parseReportContent's doc comment and pinned by a test.
+- **Reversibility:** trivial
+
+### W15.11 Whether W3's `present()` helper had to be reused, as my brief instructed.
+
+- **Plan said:** the dispatch brief said to reuse `present()` from api/src/hypothesis/spec.ts
+- **Assumed:** It is not needed here and I did not use it — nothing in W15 reads an optional Spec/Metric/Method/Condition field. It is also module-PRIVATE in spec.ts (not exported), and spec.ts is not in W15's Files list, so reusing it would have meant editing a file I do not own. Flagging it rather than quietly working around it, per the brief's instruction about W5's forgery helper.
+- **Reversibility:** trivial
+
+### W15.12 How to make 'reuse W5's helper rather than reimplement' checkable by a reviewer.
+
+- **Plan said:** 'reusing W5's helper rather than reimplementing the check'
+- **Assumed:** Object IDENTITY assertions for six primitives (`expect(isTrusted).toBe(store.isTrusted)` etc.) plus a source scan of kinds.ts asserting the strings "hypothesis-spec", "verdict" and "evaluation" appear nowhere in it — a re-export cannot contain them, a redeclaration must.
+- **Reversibility:** trivial
+
+### W15.13 The exported names and granularity of the new vocabulary module.
+
+- **Plan said:** 'The four memory kinds as types and label builders' — no names given.
+- **Assumed:** KIND_REPORT_TEMPLATE / KIND_REPORT_CANDIDATE / KIND_REPORT / KIND_REPORT_AMENDMENT, REPORT_KIND_LIST (frozen, enumerated), ReportMemoryKind, isReportMemoryKind, reportTemplateLabels / reportCandidateLabels / reportLabels / reportAmendmentLabels, reportSelector(kind, id), splitFirstLine, truncateHeadline, HEADLINE_MAX_CHARS, buildReportTemplateContent / buildReportCandidateContent / buildReportAmendmentContent / parseTemplateContent, buildReportContent / parseReportContent. W16-W21 may want different names.
+- **Reversibility:** moderate
+
+### W15.14 Whether `reportSelector` should pin `status=locked` for a template.
+
+- **Plan said:** The memory-kinds table gives `report-template` the labels `kind, name=<id>, status=locked`.
+- **Assumed:** The label BUILDER writes `status=locked` but the SELECTOR does not filter on it — a selector pinning status could not see a row whose status label was written differently, making 'there is no template' indistinguishable from 'the template is labelled oddly'. Asserted by test.
+- **Reversibility:** trivial
+
+### W15.15 Whether the label builders should validate the hypothesis id.
+
+- **Plan said:** nothing beyond the general § Vocabulary rule that ids are bare 8-hex
+- **Assumed:** Every builder and the selector throw `invalid` on a `hyp-`-prefixed, uppercase, empty or non-8-hex id, reusing W5's `isHypothesisId`. The doubled-prefix failure is the one § Vocabulary calls out by name.
+- **Reversibility:** trivial
+
+### W15.16 Whether `truncateHeadline` should report that it truncated.
+
+- **Plan said:** only 'truncated on read at a character boundary'
+- **Assumed:** Yes — `{ text, truncated }`, surfaced as `headlineTruncated` on the parsed report, mirroring W5's `ParsedTitle.truncated`, so the UI cannot present a cut headline as complete.
+- **Reversibility:** trivial
+
+### W15.17 What 'a character boundary' means in JavaScript.
+
+- **Plan said:** The brief rules out a mid-multibyte SERVER split as unconstructible, but says nothing about the client side.
+- **Assumed:** Code points, via `Array.from`. JS strings are UTF-16 so `slice(0,400)` can emit a lone surrogate; code points are also the unit Postgres counts in, so client and server measure the same thing. The test states explicitly that it does NOT claim to construct a server-side mid-multibyte split.
+- **Reversibility:** trivial
+
+### W15.18 Whether an empty template body or an empty slot map is an error.
+
+- **Plan said:** nothing
+- **Assumed:** `parseTemplateContent` never throws on an empty body (a template row whose HTML is missing must not read as 'no template'); `parseReportContent` accepts `{}` as a legal empty slot map but rejects a MISSING body (line 1 alone is not a report).
+- **Reversibility:** trivial
+
+### W15.19 Whether to separate line 1 from the body with `\n` or with a blank line, as W5's hypothesis content does.
+
+- **Plan said:** 'Line 1 is X; then Y'
+- **Assumed:** A single `\n`, so `splitFirstLine` is an exact inverse and a structure hash is not sensitive to a blank line. `splitFirstLine` also strips a trailing `\r`, so a CRLF-authored template still hashes and compares equal.
+- **Reversibility:** trivial
+
+### W15.20 How the report reads obtain the session index (trust clause 3) without a redundant HTTP walk.
+
+- **Plan said:** nothing
+- **Assumed:** A new `ReportReadOptions extends ReadOptions` with optional `sessions?: SessionLookup`; omit it and the read pays for its own session walk, supply it (as W22's board will) and it is skipped. Pinned by a test asserting zero session requests when supplied.
+- **Reversibility:** trivial
+
+### W15.21 The row limit on the two new selector reads.
+
+- **Plan said:** nothing
+- **Assumed:** Reused W5's existing `DETAIL_LIMIT` (50), the same number the hypothesis detail read uses.
+- **Reversibility:** trivial
+
+### W15.22 Accepting an import cycle between api/src/report/kinds.ts and api/src/hypothesis/store.ts.
+
+- **Plan said:** R48 and W5's Notes require kinds.ts to re-export the trust primitives from store.ts, and W15's criteria put readTemplate/readLatestReport in store.ts, which needs kinds.ts's parsers. The plan never mentions the resulting cycle.
+- **Assumed:** Accept it and keep it evaluation-safe: nothing in store.ts reads a value from kinds.ts at module top level (function bodies only). Verified out of tree under real node ESM in both load orders, and verified that adding a top-level read DOES throw there. Documented at both import sites. The alternative — a third module for the pure parsers — would have added a file outside my Files list.
+- **Reversibility:** moderate
+
+### W15.23 How much test infrastructure to add to the shared store.test.ts stub.
+
+- **Plan said:** nothing
+- **Assumed:** Two new StubConfig buckets (`templates`, `reports`) and dispatch on the selector's own `kind=` term rather than a `startsWith` prefix test — `kind=report` is a prefix of `kind=report-template`, and answering one query with the other's body is how a wrong selector passes unnoticed. W10 and W22 inherit this stub.
+- **Reversibility:** trivial
+
+### W15.24 Whether the new store/report test bodies had to be captured from a running Orange.
+
+- **Plan said:** W15 states no fixture-capture requirement (W5's ticket did, and W5's recorded bodies are committed under __fixtures__).
+- **Assumed:** Constructed in-test, in the SAME MemorySearchResult / memory-record shapes W5 recorded, and labelled in a comment as constructed rather than captured. No file is presented as a recording and nothing new was added under __fixtures__.
+- **Reversibility:** trivial
+
+### W15.25 Test-name prefixes for the new file.
+
+- **Plan said:** nothing for W15 (W5 pinned `store_`/`lifecycle_`, W6 pinned `marketdata_`)
+- **Assumed:** `report_kinds_` in kinds.test.ts, and `store_read_template` / `store_read_latest_report` describes in store.test.ts, matching the existing convention. If a later ticket filters by name, those are the strings.
+- **Reversibility:** trivial
+
+### W15.26 Whether to write the implementation before the tests, given 'TDD: yes'.
+
+- **Plan said:** TDD: yes
+- **Assumed:** For the three client defects I honoured it by PROVING the tests red against the unmodified file (git stash → 9 failures → restore). For the new kinds.ts and the two store reads I wrote implementation first and tests immediately after, because the criteria left the return shapes undetermined and I would otherwise have been writing tests against a shape I had not yet chosen. Reporting this plainly rather than claiming a red-green cycle I did not run for those.
+- **Reversibility:** trivial
+
+## W8b — 9 guesses
+
+### W8b.1 How to mount requireSignedIn on GET /api/auth/me without going through app.ts or a router.use() prefix
+
+- **Plan said:** requireSignedIn is exported and mounted PER ROUTER, never globally (R79) — W8's precedent is router.use(path, requireSignedIn) in hypotheses.ts
+- **Assumed:** Mounted requireSignedIn as inline route-specific middleware — router.get('/api/auth/me', requireSignedIn, handler) — rather than router.use('/api/auth/me', requireSignedIn) before a separate handler registration. Functionally identical and still per-route (narrower than per-router), just a different Express idiom.
+- **Reversibility:** trivial
+
+### W8b.2 How the fifth 401 case (allowlist-removed email) should be implemented, given requireSignedIn itself has no access to WolfConfig's allowlist and so cannot supply this refusal 'for free'
+
+- **Plan said:** "if the route is simply mounted behind requireSignedIn, the 401 comes for free and that is the preferred implementation" — worded as if all cases come free, but this one structurally cannot
+- **Assumed:** Added an explicit isAllowed(email, config) check inside the /me handler (after requireSignedIn has already run) and reused the exported notSignedInError() helper for the throw, so the response is byte-for-byte the same shape as the guard's own refusals even though the check itself lives in the route, not the guard.
+- **Reversibility:** trivial
+
+### W8b.3 Where to apply .trim() normalisation to the email, since setSessionCookie (session.ts, not on my Files line) only lower-cases and does not trim
+
+- **Plan said:** the email... normalised the same way W8 normalises it (trimmed, lower-cased)
+- **Assumed:** Applied .trim().toLowerCase() in the /me route handler itself rather than modifying setSessionCookie in session.ts, to stay within the ticket's Files line (auth.ts + auth.test.ts only)
+- **Reversibility:** trivial
+
+### W8b.4 Test technique for proving cookie expiry without manipulating the real clock
+
+- **Plan said:** nothing — no test-shape guidance given
+- **Assumed:** Used createAuthRouter's existing injectable `now` option to back-date the cookie's embedded issuedAtMs at MINT time only; requireSignedIn's own expiry check always reads real Date.now(), so this proves genuine expiry rather than faking the request-time clock
+- **Reversibility:** trivial
+
+### W8b.5 Test technique for proving a wrong-secret cookie is rejected
+
+- **Plan said:** nothing
+- **Assumed:** Built a second harness() instance configured with a different WOLF_SESSION_SECRET, signed in through it, and replayed its Set-Cookie value against the primary (correct-secret) harness
+- **Reversibility:** trivial
+
+### W8b.6 Whether 'attribute for attribute' includes Expires/Max-Age
+
+- **Plan said:** clears wolf_session by setting it with an immediate expiry, using the SAME cookie name, path, SameSite and Secure attributes W8 minted it with... attribute for attribute
+- **Assumed:** Read the enumerated list (name, path, SameSite, Secure) as the actual comparison set and deliberately excluded Expires/Max-Age from the equality check, since a byte-identical Expires would defeat the entire purpose of a clearing cookie (it MUST expire immediately, not in 12h) — asserted instead that the cleared cookie carries NO Max-Age at all and an Expires in the deep past, plus checked HttpOnly matches too as a bonus
+- **Reversibility:** moderate
+
+### W8b.7 Refactored the test file's single-server `close` variable into an array `closers`
+
+- **Plan said:** nothing — Files line permits modifying auth.test.ts
+- **Assumed:** Needed to keep multiple ephemeral Express servers alive within a single test (e.g. two different secrets, or a separate mint-only app plus the main harness), so generalised the existing afterEach cleanup from one closer to an array. Backward-compatible with every pre-existing test.
+- **Reversibility:** trivial
+
+### W8b.8 Added generic `request()` + `cookiePair()` + `cookieAttributes()` test helpers alongside the existing `post()` helper
+
+- **Plan said:** nothing
+- **Assumed:** The existing `post()` helper always sends a JSON body and never sends a raw Cookie header, so it can't drive GET requests or replay a captured cookie string; added a minimal generic helper rather than overloading `post()`
+- **Reversibility:** trivial
+
+### W8b.9 Whether GET /api/auth/logout should be forced to 405 via an explicit method-not-allowed handler, or left to Express's default 404
+
+- **Plan said:** 404 or 405, never 204 — either is acceptable per the criterion's own wording
+- **Assumed:** Left it as Express's default 404 (no route matches GET on that path) rather than adding a router.all() catch to force 405, since the criterion explicitly permits either
 - **Reversibility:** trivial
 
