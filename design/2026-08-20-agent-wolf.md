@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R100. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R101. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -346,10 +346,11 @@ allows:
 | `go/httpapi/memories.go` | O7, O11 | Strictly serial |
 | `go/cmd/agentd/main.go` | **O5**, O6b, O8 | Strictly serial. O5 was missing from this row for three revisions while its own Files line required modifying `main.go` to wire `DatasetBlobs`; the orchestrator caught it at the wave-4 cut and serialised O5 → O8 by hand. O5 and O8 are both landed, so O6b is the only one left — **R86** |
 | `api/src/routes/hypotheses.ts` | W8, W9 | Strictly serial |
+| `api/src/routes/auth.ts`, `auth.test.ts` | W8, **W8b** | Strictly serial. W8 creates them; W8b adds `/api/auth/me` and `/api/auth/logout` |
 | `api/src/hypothesis/store.ts`, `store.test.ts` | W5, **W8**, **W15**, W10, W22 | **Strictly serial in that order — corrected 2026-08-21, R98.** W8 was missing from this row entirely while its own Files line modifies both files, and the printed order put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9. Honouring the old order would have serialised the whole report layer behind the UI chain for no dependency reason. W8 and W15 are the two chain heads and must not run concurrently; W8 goes first because its chain (W9 → W10 → W11 → W13 → W14) is the longer one |
 | `go/cmd/agentd/auth.go`, `auth_test.go` | O5 only | O5 owns the middleware change; no other ticket may touch it |
 | `go/agentdb/memories.go` | O7, O11 | Strictly serial |
-| `api/src/orange/client.ts` | W2, W15 | Strictly serial; W2's route list is exhaustive and closed |
+| `api/src/orange/client.ts`, `client.test.ts` | W2, W15, **W2b** | Strictly serial in that order. W2's route list was declared exhaustive and closed; **W2b adds the twenty-third, `GET /agent/workers/{name}`, by owner decision 2026-08-21 (R91)** — the list is closed against casual addition, not against an owner ruling |
 | `api/src/config.ts`, `.env.example` | W1, W6, W7, W8, W9, W10, W11, W12, W16, W21, X1 | **Strictly serial in dependency order.** Each ticket adds only the variables its own criteria name, and documents each in `.env.example` with a comment |
 | `api/src/app.ts` | W1, W7, W8, W11, W21 | Strictly serial; every router is mounted here, by the ticket that creates it |
 | `docker-compose.yml` (agent-wolf) | W1, W7, W8, W9, W10, W11, W16, W21, X1 | **Strictly serial, same order as `config.ts`.** A variable in `.env.example` and `config.ts` still never reaches the container without an `environment:` entry here — R81 |
@@ -1229,6 +1230,13 @@ container through `AGENTKIT_MCP_ENV` (see O8).
 
 ```
 POST   /api/auth/google                     { credential } → session cookie
+GET    /api/auth/me                         → 200 { email } signed in | 401 not signed in.
+                                              The ONLY way the UI learns who it is; W13 must not
+                                              infer it from a 401 on the board. Owner decision
+                                              2026-08-21, R100 — see W8b
+POST   /api/auth/logout                     → 204, clears the wolf_session cookie. POST, not GET,
+                                              so a prefetch or an <img> cannot sign a user out.
+                                              Owner decision 2026-08-21, R100 — see W8b
 GET    /api/hypotheses                      → [{ id, title, owner, status, support_score,
                                                  conditions_summary, updated_at, tamper? }]
 POST   /api/hypotheses                      { title } → { id }
@@ -2860,6 +2868,49 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   the ⚠️ block in § "Parallelism and file ownership"; the operative rule — this client reads no
   environment variable and takes `{ baseUrl, apiKey }` — is unchanged and was followed.
 
+### W2b: The twenty-third Orange route — worker read   [Status: pending | Model: sonnet]
+- **Scope:** Add `getWorker(name)` to the Orange client and repoint W12's bootstrap at it, removing
+  the one raw `fetch` in the repo. Owner decision 2026-08-21 (**R91**): W2's route list was
+  declared "exhaustive and closed" and had no worker **read**, while Orange serves one
+  (`go/httpapi/workers.go:77`) and W12 is graded on "a second run creates nothing and mutates
+  nothing" — undecidable without reading current worker state. W12 resolved it with a narrowly
+  scoped raw `fetch` inside `bootstrap-project.ts`, documented at its call site. This ticket makes
+  that unnecessary. The list is closed against casual addition, not against an owner ruling.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/orange/client.ts`, `api/src/orange/client.test.ts`,
+  `api/src/bootstrap/bootstrap-project.ts`, `api/src/bootstrap/bootstrap-project.test.ts`.
+- **Acceptance criteria:**
+  - `client.getWorker(name)` calls `GET /agent/workers/{name}` with the project API key, and its
+    result type is the same worker shape `putWorker` accepts — one type, not a second one that
+    happens to have the same fields.
+  - **A 404 maps to `not_found`, not to `unavailable`.** § "Shared error taxonomy" makes this
+    load-bearing: `unavailable` is the one **retryable** kind, and the bootstrap's whole use of
+    this call is "does this worker exist yet?", so conflating them turns a first run into a retry
+    loop. A test drives the 404 and asserts the kind.
+  - The call goes through the **same** retry, timeout, error-mapping and logging path as every
+    other route on the client. A test asserts a 503 from this route produces `unavailable` exactly
+    as it does for an existing route — no bespoke handling.
+  - `bootstrap-project.ts` uses `getWorker` and the raw `fetch` is **gone**. A test asserts the
+    bootstrap module's source contains no `fetch(` call, and the existing idempotency criterion
+    ("a second run creates nothing and mutates nothing; the set of create/PUT calls on run 2 is
+    empty") still passes unchanged against the new path.
+  - **W2's route list comment is updated to say twenty-three and to name this route**, so the next
+    reader is not told the list is closed at twenty-two while the code disagrees. This is the
+    documentation half of the ticket and it is a criterion, not a nicety.
+- **TDD:** yes.
+- **Validation:**
+  - `cd api && yarn test src/orange/client src/bootstrap --reporter=verbose` — confirm both files'
+    test counts went up.
+  - `cd api && yarn typecheck && yarn test` (whole package; report file and test totals).
+  - `grep -n 'fetch(' api/src/bootstrap/bootstrap-project.ts` prints nothing.
+- **Depends on:** W2, W12, **and W15** *(W15 holds `api/src/orange/client.ts` immediately before
+  this ticket and closes three separate defects in it — `classifyStatus`'s missing 401 case, the
+  port-pool override's status/kind mismatch, and `mapMemorySearchRow`'s fail-open on missing
+  provenance. Branch this from a `main` that already carries W15, or the two will conflict on the
+  same file and the error-mapping criterion above will be graded against the pre-fix taxonomy.)*
+- [ ] done
+- Notes:
+
 ### W3: Spec and condition schema + validator   [Status: done | Model: opus]
 - **Scope:** The spec type, the condition type, and the validator that is the **sole gate** on
   go-live. The graded rule set is the numbered list **V1–V27** below — that list, not the run-on
@@ -3676,6 +3727,53 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   Also: adding one dependency made yarn rewrite unrelated `yarn.lock` entries — the committed
   lockfile had drifted from the manifests before this ticket; resolved versions are unchanged.
   **48 guesses, the highest of any single ticket in five waves.**
+### W8b: `/api/auth/me` and logout   [Status: pending | Model: sonnet]
+- **Scope:** The two auth routes the plan never had. `GET /api/auth/me` tells the UI who it is;
+  `POST /api/auth/logout` clears the cookie. Nothing else — no UI, no new config, no changes to
+  how the cookie is minted or verified. Owner decision 2026-08-21 (**R100**): W8 shipped the
+  cookie and the guard, but there was no way for the UI to ask "am I signed in, and as whom?" and
+  no way to sign out except by waiting the cookie's 12 hours or rotating `WOLF_SESSION_SECRET`,
+  which signs *everyone* out. W13 would otherwise have had to infer the signed-in state from a 401
+  on the board.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/routes/auth.ts`, `api/src/routes/auth.test.ts`. Nothing else — the
+  router is already mounted by W8 in `api/src/app.ts`, so **`app.ts` is NOT on this ticket's Files
+  line** and a diff touching it is a defect.
+- **Acceptance criteria:**
+  - `GET /api/auth/me` returns **200** `{ email }` for a valid signed cookie whose email is on the
+    allowlist, and **401** otherwise — no cookie, an unsigned cookie, a cookie signed with a
+    different secret, an expired cookie, and a validly-signed cookie for an email **no longer** on
+    `WOLF_ALLOWED_EMAILS`. A test drives all five 401 cases separately; they are not one case.
+  - The 401 body is the **same shape** W8's guard already returns, not a second error shape. Reuse
+    `requireSignedIn`'s refusal rather than writing a parallel one — if the route is simply mounted
+    behind `requireSignedIn`, the 401 comes for free and that is the preferred implementation.
+  - The email returned is the one **in the cookie**, normalised the same way W8 normalises it
+    (trimmed, lower-cased). A test asserts a cookie minted from `  Kai@Example.COM  ` reads back as
+    `kai@example.com`, so the UI never has to normalise.
+  - `POST /api/auth/logout` returns **204** and clears `wolf_session` by setting it with an
+    immediate expiry, using the **same** cookie name, path, `SameSite` and `Secure` attributes W8
+    minted it with — a `Set-Cookie` that differs in any attribute does not reliably clear it.
+    A test asserts the cleared cookie's attributes match the minted one's attribute for attribute.
+  - **Logout is `POST`, never `GET`.** A `GET` logout is triggerable by a prefetch, an `<img>` tag
+    or a link in a report panel, which is a cross-site sign-out. A test asserts `GET
+    /api/auth/logout` is **404 or 405**, never 204.
+  - **Logout succeeds without a valid cookie** — 204, not 401. Signing out when you are already
+    signed out is not an error, and a 401 here makes the UI's "sign out" button fail exactly when a
+    user most wants it to work (an expired session). A test asserts the no-cookie case is 204.
+  - **R79 still holds after this ticket.** Both new routes sit under `/api`; neither is mounted
+    globally and neither adds an `app.use`. The test W8 added — `/mcp` and `/series/download`
+    answer without a cookie — is re-run and still passes.
+- **TDD:** yes.
+- **Validation:**
+  - `cd api && yarn test src/routes/auth --reporter=verbose` — confirm the test COUNT for that file
+    went up and name the new cases in the summary.
+  - `cd api && yarn typecheck && yarn test` (whole package; report the file and test totals).
+  - `git diff --name-only main -- api/src/app.ts api/src/config.ts .env.example docker-compose.yml`
+    prints **nothing**.
+- **Depends on:** W8 *(which brings W5, W2, W3, W4 and O11)*
+- [ ] done
+- Notes:
+
 ### W9: Go-live provisioning and ordered teardown   [Status: pending | Model: opus]
 - **Scope:** `POST /api/hypotheses/:id/go-live`, `/verdict`, `/retire`, `/amend`. Go-live reads the
   candidate spec, validates it, writes it as a trusted locked memory, composes the researcher
@@ -4161,7 +4259,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `docker compose config` cannot
   - `dcc` (the redacted wrapper, § "Executor orientation" — **R82**) shows both args under
     `wolf-web`'s `build.args`
-- **Depends on:** W11
+- **Depends on:** W11, **W8b** *(the signed-in state and the sign-out action come from `GET /api/auth/me` and `POST /api/auth/logout`; before W8b existed this ticket would have had to infer them from a 401 on the board — owner decision 2026-08-21, R100)*
 - [ ] done
 - Notes:
 
@@ -4979,7 +5077,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R88** | **§ "Interfaces → Memory append route (O7)" printed a doubled prefix in its example body.** The example wrote `"name":"hyp-1a2b3c4d"` while § "Memory kinds" pins the label as the bare id and § "Vocabulary" says the `hyp-` prefix belongs to the session name **and to nothing else**. Any ticket copying the printed example — the most likely thing an executor does — would write rows that match none of W5's selectors, and every hypothesis would read as having no state row. Exactly the `hyp-hyp-` family the Vocabulary warning exists to prevent, sitting in the plan's own worked example. Found by W5. **Example corrected to the bare id.** | **Resolved** — O7, W5, W8, W9 |
 | **R89** | **§ "Shared shapes" was factually wrong about the engine: `Tamper`'s two provenance fields are not mutually exclusive.** The plan pinned "exactly one of the two provenance fields is non-empty". Orange sets **both** for any session that has a worker (`go/cmd/agentd/mcpserver.go`) — which is every researcher tick, and every interview session too, since W8 creates those with `worker: "interviewer"`. W5 proved it against two independently captured live fixtures and implements the `at least one` form. This is a correction of fact, not a preference: the `exactly one` form is unsatisfiable against the running engine. **Shape corrected. X1's tamper-resistance spec must NOT assert the `exactly one` form**, and W8, W13 and W14 read the corrected shape. | **Resolved** — W5, W8, W13, W14, X1 |
 | **R90** | **THE PLAN'S OWN BOARD CRITERION REOPENED THE RESURRECTION ATTACK.** § "The trust model"'s two-step and W5's board criterion both pinned a board URL *without* `include_retracted=1`. Orange's `notRetractedSQL` then hides Wolf's newest `kind=hypothesis` row and `latest_per` hands back the OLDER trusted row beneath it — which passes the trust rule, so it renders as authoritative **with no tamper flag at all**. A prompt-injected researcher that merely **retracts** Wolf's newest state row therefore rolls the board back to the previous status, silently, on the exact surface W8's board and W13's banner render; the detail read was correct, so the two surfaces disagreed without either looking wrong. **W5's independent verifier constructed the attack and it worked.** The implementation was not at fault — it followed the criterion literally — so this is a contradiction *inside* the plan: § "The trust model"'s restated rule already says state is resolved from memories read with retractions visible. Fixed with one query parameter, which keeps the clean case at exactly one request and is what O11's paired criterion (*"this pair is the contract W5's tamper detection is written against"*) was written for. **Both the section and the criterion are corrected.** This is the single most valuable thing the adversarial-verify step has produced across four waves. | **Resolved** — W5, W8, W13, W14, X1 |
-| **R91** | **W2's "exhaustive and closed" route list has no worker READ, but W12's idempotency criterion cannot be met without one.** W2 carries `putWorker`/`deleteWorker` and no `GET /agent/workers/{name}`, while Orange serves one (`go/httpapi/workers.go:77`) and W12 is graded on "a second run creates nothing and mutates nothing" — undecidable without reading current worker state. W12 resolved it with one narrowly-scoped raw `fetch` inside `bootstrap-project.ts`, documented at length at its call site: not a second client, and it does not touch `client.ts`. But it is a second, unretried, unmapped HTTP path in a repo whose plan wanted exactly one. **Owner decision wanted:** add `GET /agent/workers/{name}` to W2's route list when W15 next holds `client.ts`, or bless the raw fetch explicitly. | **Open** — W2, W12, W15 |
+| **R91** | **W2's "exhaustive and closed" route list has no worker READ, but W12's idempotency criterion cannot be met without one.** W2 carries `putWorker`/`deleteWorker` and no `GET /agent/workers/{name}`, while Orange serves one (`go/httpapi/workers.go:77`) and W12 is graded on "a second run creates nothing and mutates nothing" — undecidable without reading current worker state. W12 resolved it with one narrowly-scoped raw `fetch` inside `bootstrap-project.ts`, documented at length at its call site: not a second client, and it does not touch `client.ts`. But it is a second, unretried, unmapped HTTP path in a repo whose plan wanted exactly one. **RESOLVED by owner decision 2026-08-21: add the route.** Kai's ruling — *"let's add a new route. That's fine. Add to W2's closed route list."* Written up as **W2b**, which adds `getWorker(name)` with the same retry/timeout/error-mapping path as every other route, maps its 404 to `not_found` rather than the retryable `unavailable`, repoints W12's bootstrap at it so the repo's one raw `fetch` disappears, and updates W2's own "exhaustive and closed" comment to say twenty-three. W2b depends on **W15** as well as W2 and W12, because W15 holds `client.ts` immediately before it and fixes three defects in the error taxonomy this ticket's mapping criterion is graded against. | **Resolved** — W2b |
 | **R92** | **The bootstrap script needs an Orange base URL and a project API key, and neither is pinned anywhere.** W12's Depends-on is W2 + W7 and its Files line restricts `config.ts`/`.env.example` to `WOLF_BASE_IMAGE` and `WOLF_CRITIC_CRON`, but constructing an `OrangeClient` needs `ORANGE_BASE_URL` and `WOLF_API_KEY`. Both are added by W8/W9 — wave-4 siblings W12 does not depend on. W12 reads them straight from `process.env` in a function that bypasses the typed `WolfConfig`, with a hardcoded `http://localhost:8099` default. This is where **R49**'s "Orange's base-URL variable, pinned nowhere" finally landed. Consequence: an operator running `scripts/bootstrap-project.ts` before W8/W9 land finds no `.env.example` guidance for either variable. Separately, `scripts/bootstrap-project.ts` sits at repo root importing into `api/src/`, and `api/tsconfig.json` does not cover repo-root `scripts/` — so `yarn typecheck` never sees it and nothing proves it even resolves under `tsx`. | **Open** — W8, W9, or a plan revision |
 | **R93** | **`prompts/researcher-preamble.md` contains the method-body marker TWICE as a substring, and W9's splitter must be line-anchored.** The literal `<!-- WOLF:METHOD-BODY -->` appears once as prose inside backticks near the top of the file (usefully — it documents the boundary) and once as the real boundary line. A splitter using `indexOf` or a bare-substring `split` cuts at the prose occurrence and **silently makes most of the locked preamble mutable**, which is the whole thing the locked preamble exists to prevent. W12 shipped a test pinning "appears as a whole line exactly once" so a future edit cannot break the assumption unnoticed. **W9's ticket now states the requirement explicitly**: `split("\n")` then `line.trim() === marker`, never `indexOf`. | **Resolved** — W9, W12 |
 | **R94** | **Two files that tickets actually edit were on no ownership row: `prompts/*.md` and `api/src/config.test.ts`.** W12 authors the four prompts and W25 rewrites the report-authoring half, with nothing serialising them; and W12 landed 68 lines in `api/src/config.test.ts`, a file on no Files line and no ownership row, so a concurrent `config.ts` ticket could collide there unserialised. Both rows added. Same root cause as **R86** and **R81**: the ownership table is maintained by hand and nothing cross-checks it against the Files lines it is supposed to summarise. Three separate waves have now found a missing row. **A mechanical check — every path in any Files line either appears in the table or is created by exactly one ticket — would end this class.** | **Resolved** (rows added) — the mechanical check remains unbuilt |
@@ -4988,4 +5086,5 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R97** | **Two operator traps O8 surfaced and correctly left for O10.** (1) `.env.example` now carries the worked `AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN` value only as an **indented in-prose comment** inside the Wolf block, while the file's column-0 declaration line `# AGENTKIT_MCP_ENV=` remains empty. An operator who uncomments the declaration gets an empty allowlist and `WOLF_MCP_TOKEN` **silently never reaches a session container** — the failure mode is a tool that is configured, mounted and inert. (2) `TestProjectMapExample` asserts the wolf project has exactly one allowed origin and that `validateOrigin` accepts it, but never that it **equals** `http://localhost:8081`; a typo'd port keeps the test green while the embed page's `frame-ancestors` CSP silently refuses to frame wolf-web. Both are one line each. Separately, `.env.example` now shows **two** `AGENTKIT_PROJECT_MAP` examples — the legacy flat form O8 does not own, and the new object form — with nothing inline explaining the relationship. | **Open** — O10 |
 | **R98** | **`api/src/hypothesis/store.ts`'s ownership row omitted W8 and printed an order the dependency graph contradicts.** W8's own Files line modifies `store.ts` and `store.test.ts`, but the row read *W5, W10, W15, W22* and never mentioned W8 — so the two tickets that became wave 5's chain heads would have run concurrently on the same file with nothing in the plan saying not to. The printed order was also wrong on its own terms: it put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9, so honouring it would have serialised the entire report layer behind the UI chain for no dependency reason. **Row corrected to W5, W8, W15, W10, W22**, and W8 goes first in wave 5 because its chain is the longer one. This is the **fourth** wave in a row to find a missing or wrong ownership row (R81, R86, R94, now R98) — the mechanical cross-check R94 describes would have caught every one of them, and is now the highest-value unbuilt item in this plan. | **Resolved** — W8, W15 |
 | **R99** | **`WOLF_TEST_LOGIN` plus `NODE_ENV=production` is now a boot failure, and `.env.example` ships `NODE_ENV=production`.** W8's `loadConfig` refuses the test-login variable outside development, which is correct — but it means **X1's `run.sh` must export `NODE_ENV=development` (or `test`) for the Wolf stack or nothing boots at all**, and the failure is at boot, before any test runs, in the one ticket with the most moving parts. Nobody would guess it from `.env.example`, which is the file an operator copies. Found by W8, which cannot fix it because `run.sh` is X1's. | **Open** — X1 |
-| **R100** | **There is no way for the UI to ask "am I signed in, and as whom?", and no way to sign out.** The plan's route table has no `GET /api/auth/me` and no logout route. W13 must therefore infer the signed-in state from a 401 on the board, and a signed-in user cannot sign out except by waiting the cookie's 12 hours or by the operator rotating `WOLF_SESSION_SECRET` — which signs *everyone* out. Not W8's to add (its criteria enumerate its routes and neither is among them) and not a blocker for W13, but it is a product gap rather than an implementation one, and it wants an owner decision before W13 designs around its absence. | **Open** — W13, or a plan revision |
+| **R100** | **There is no way for the UI to ask "am I signed in, and as whom?", and no way to sign out.** The plan's route table has no `GET /api/auth/me` and no logout route. W13 must therefore infer the signed-in state from a 401 on the board, and a signed-in user cannot sign out except by waiting the cookie's 12 hours or by the operator rotating `WOLF_SESSION_SECRET` — which signs *everyone* out. Not W8's to add (its criteria enumerate its routes and neither is among them). **RESOLVED by owner decision 2026-08-21: add both.** Kai's ruling — *"let's add api.auth.me and log out."* Written up as **W8b**, and added to § "Wolf API routes". Two shapes worth noting, both decided here rather than left to the executor: **logout is `POST`, never `GET`**, because a `GET` logout is triggerable by a prefetch, an `<img>` tag or a link inside a report panel — a cross-site sign-out, and this product renders model-authored HTML; and **logout with no valid cookie returns 204, not 401**, because signing out when already signed out is not an error and a 401 makes the sign-out button fail exactly when a user most wants it — on an expired session. W13's Depends-on now names W8b. | **Resolved** — W8b, W13 |
+| **R101** | **Two owner rulings on 2026-08-21 added the plan's first two new tickets since revision 4** — W8b (`/api/auth/me` + logout, closing R100) and W2b (the twenty-third Orange route, closing R91). Ticket count 39 → 41. Both are small and both close a debt an earlier ticket found and correctly refused to fix because the file was not its. Recorded as an entry in its own right because the plan's ticket list is otherwise fixed, and a reader comparing the count against revision 4's header should find the reason rather than a discrepancy. W8b runs immediately (it shares no file with anything in flight); W2b waits for W15 to land, since W15 holds `client.ts` first. | **Informational** |
