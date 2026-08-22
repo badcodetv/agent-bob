@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R120. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R124. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -366,7 +366,7 @@ the serial rule prevents the collision, not an ownership monopoly. Every duratio
 `WOLF_POLL_INTERVAL`, because "5m" in a variable whose unit is unstated is exactly the ambiguity
 § Vocabulary exists to prevent.
 | `api/src/routes/hypotheses.ts` | W8, W9, W22 | Strictly serial |
-| `api/src/report/*` | W16–W20 | See the report-layer sub-graph |
+| `api/src/report/*` | W15, W16, W17, W18, W19, W20, W25 | **No collision: each ticket creates its OWN file** — `kinds.ts` (W15), `template.ts` (W16), `sanitise.ts` (W17), `series.ts` (W18), `frame.ts` (W19), `drift.ts` (W20), `__fixtures__/` + `fixture.test.ts` (W25). Ordering is the dependency graph and nothing more, so W17, W18 and W20 may run concurrently once W16 lands. *(This row previously read "See the report-layer sub-graph", naming a section that does not exist — R121. A wildcard row also implied a serialisation these tickets do not need.)* |
 | `web/package.json` | W23, W24 | Strictly serial |
 | `web/src/App.tsx` | W13, W24 | Strictly serial |
 | `prompts/*.md` (agent-wolf) | W12, W25 | **Strictly serial in that order.** W12 authors the four prompts and W25 rewrites the report-authoring half; the row was missing entirely until 2026-08-21 — **R94** |
@@ -3942,7 +3942,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   make every go-live — including X1's — fail. Recorded for the owner in this ticket's unresolved
   list; the natural home is W21 or W22.
 
-### W10: Evaluation poller — the `live → challenged` trigger   [Status: pending | Model: opus]
+### W10: Evaluation poller — the `live → challenged` trigger   [Status: done | Model: opus]
 - **Scope:** The mechanism that actually moves a hypothesis to `challenged`, and the writer of the
   board's numbers. Nothing else does either: Orange cannot call Wolf (no webhook; subscriptions
   dispatch workers, not HTTP), so Wolf polls. Also owns the canonical-CSV parser, because two
@@ -4051,8 +4051,19 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `src/**/*.test.ts` only, and a positional filter that matches nothing runs zero files and exits
     **0**.
 - **Depends on:** W9
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Wave 7 phase A, 2026-08-22 — passed, zero fix rounds.** `10626bc`, 13 files, +3133/-21;
+  `api/` went 887 → 962 on the branch and **975 / 30 files** on merged `main`. The verifier drove
+  rather than read: **eleven** implementation mutations each reddening a named test — including the
+  plan's own named trap (the version-invariant branch), a swap of teardown steps 1 and 2 (which
+  reddened W9's ORDER test, proving the R112 fold did not quietly reorder them), and deleting the
+  compose entry (which reddened the wave-6 enforcer). It also wrote three tests of its own, fed 16
+  CSV inputs to the parser by hand, and ran one probe **beyond** the ticket: widening the board
+  filter so an already-`challenged` hypothesis is re-polled left the idempotence test green, which
+  shows idempotence rests on W5's self-transition rule rather than on the status filter — the
+  stronger property. `git diff main...HEAD --numstat -- api/src/config.test.ts` is `52 0`: the
+  enforcer is untouched. Two **minor** defects stand (**R122**), plus five discovered issues
+  (**R122**–**R124**).
 
 ### W11: Embed tokens and the series proxy   [Status: pending | Model: sonnet]
 - **Scope:** `GET /api/hypotheses/:id/embed-token` and `GET /api/hypotheses/:id/series/:metric` —
@@ -4857,7 +4868,7 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - [ ] done
 - Notes:
 
-### W20: Drift detection   [Status: pending | Model: sonnet]
+### W20: Drift detection   [Status: done | Model: sonnet]
 - **Scope:** `detectDrift` — orphan and unfilled slots.
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/drift.ts`, `api/src/report/drift.test.ts`.
@@ -4871,8 +4882,15 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/report/drift && yarn typecheck`
 - **Depends on:** W16
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Wave 7 phase A, 2026-08-22 — passed, zero fix rounds, zero defects.** `6091d71`, two new
+  files. Five mutations in a scratch copy — orphans dropped, unfilled dropped, the empty-tick shape
+  collapsed, `hasDrift` inverted on null, the two arrays swapped — every one reddening the suite,
+  including the collapse the plan singles out as the risk. The implementer's two-value API
+  (`DriftResult = SlotDrift | null` for the caller who must branch, plus `hasDrift` for the badge)
+  is what makes criterion 3 satisfiable at all, and `drift.ts` documents that `hasDrift` collapses
+  the distinction **on purpose** so the escape hatch is signposted rather than a trap for W22. One
+  authoring observation recorded as **R121**; one hand-off note for W22 as **R124**.
 
 ### W21: Report routes   [Status: pending | Model: opus]
 - **Scope:** The three routes in § "HTTP routes added", including fetching the datasets the frame
@@ -5451,3 +5469,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R118** | **Four minor defects stand in W16's parser, recorded rather than fixed, three of them the same shape: a URL channel the module chose to police but does not reach.** (1) **`image-set()`** is not matched by the CSS URL scanner, so `<style>.a{background:image-set("http://evil/x.png" 1x)}</style>` is accepted while the `url(...)` equivalent is refused. (2) **`iframe[srcdoc]`**, **`meta[http-equiv=refresh]`** and **`object > param[value]`** are unchecked and contribute nothing to `scriptSrcs`, so a srcdoc-hosted remote script is fetched by the browser while the go-live review screen shows the human **zero** remote scripts — which defeats criterion 10's stated purpose rather than merely narrowing it. (3) A **same-document fragment anchor is refused** — `<a href="#chart">` and `<use href="#glyph">` both fail with "must be an absolute `https:` URL", although CSS already has an explicit `#fragment` carve-out for `fill:url(#gradient)`, so the attribute path and the CSS path disagree about fragments. None is in W16's literal criteria, which name only `src` and `href`. **Recommendation: (2) is the one to fix — it silently understates the review screen — and it belongs to W21, which owns that screen. (3) wants one sentence in W25's authoring contract so the worked example is not written and then rejected.** | **Open** — (2)→W21, (3)→W25 |
 | **R119** | **The tree will hold two HTML readers with different tokenisers, as a side effect of file ownership.** W16's Files line excludes `api/package.json` (W17 owns it), so `parseTemplate` had to be hand-written with no dependency — while W17 will shortly pull **jsdom** into `api/` via `isomorphic-dompurify`. The validator and the sanitiser will then disagree about edge cases by construction, and **both of W16's blocking defects were exactly that class of disagreement**. It is a **defensible** outcome — the validator must run on stored bytes with no normalisation, which is why the structure hash forbids re-serialisation and which a DOM-based reader cannot honour — but it should be a decision on the record rather than an accident of which ticket owns `package.json`. Relatedly, § "Pinned technology choices" says "no hand-rolled tag regex" in an entry about **sanitisation**, which on a literal pass reads as forbidding W16's own parser; **one clarifying clause in that row** ("this pins the sanitiser; W16's validator is dependency-free by design") removes the contradiction. **W17's verifier should be told to check the two readers agree on the differential corpus W16's verifier already wrote** — 42 parse5 cases, in W16's test file. | **Open** — one clause, plus a W17 verifier instruction |
 | **R120** | **The two sections written to close R116 carried four defects of their own, three found by EXECUTING the profile rather than reading it, and one of them would have emptied every report in the product.** (1) **BLOCKING — `#text` was missing from `ALLOWED_TAGS`.** DOMPurify treats an explicit list as exhaustive *including text nodes*, so the pinned profile stripped every character of prose while leaving the elements standing: `<p class="lead">Gold <strong>rose</strong> 4%.</p>` sanitised to `<p class="lead"><strong></strong></p>`. W17's criteria assert that dangerous tokens are **absent** from the output, so **every one of them would still have passed** on an empty string — the ticket would have gone green while the feature rendered nothing. (2) **`KEEP_CONTENT: false` was the wrong instrument** for a real concern: measured, it turns `<article><p>some analysis</p></article>` into the empty string, so one wrapper element the model happened to reach for silently discards the whole day's analysis. `FORBID_CONTENTS` already suppresses the dangerous case under either setting; corrected to `true`. (3) **`frame-ancestors 'self'` was missing**, and it is one of four directives (`sandbox`, `base-uri`, `form-action`, `frame-ancestors`) **not covered by the `default-src` fallback** — the frame route is authenticated, so without it any third-party page could embed a signed-in user's report. The corrected string names all four and says why, so none is deleted later as redundant. (4) **The section invented an interface it was written to pin:** it justified excluding the `id` attribute by naming a specific element id "the template reads", which **nothing anywhere in this plan defines** — the series contract is W25's `window.__WOLF_SERIES__` and nothing else. Removed and replaced with the general argument. **The profile is now executed against `isomorphic-dompurify ^2` — extracted from this document, run over a 20-vector corpus — and is all green: prose survives, every vector strips, all idempotent.** ⚠️ **The lesson is the sharpest yet on the R102/R105/R108/R117 theme: the defects were not in reasoning but in library semantics, and no amount of review would have found them — running the config found three in one command.** Where a pinned literal is a *configuration of someone else's library*, pinning it without executing it is not a decision, it is a guess wearing a decision's clothes. | **Resolved** — all four fixed and verified |
+| **R121** | **Two more dangling references of the R116 class, found the same way — an executor reading forward.** (1) The file-ownership table's `api/src/report/*` row read *"See the report-layer sub-graph"*, and **no section of that name exists** — `grep -n "sub-graph"` over the whole file returns that one line. So the ordering rule for the tickets sharing that directory was a pointer to nothing. Worse, the wildcard implied a serialisation they do not need: **each of those tickets creates its own file**, so W17, W18 and W20 were always free to run concurrently once W16 landed. Row rewritten to name the seven files and their owners explicitly. (2) **W20's criterion 2** ("drift is reported per hypothesis, so the UI shows one indicator") is **not literally satisfiable inside W20**: its Scope is a pure function and its Files line permits only `drift.ts` + test, so the module has no hypothesis identifier and per-hypothesis aggregation is W22's job. W20's verifier graded the sane reading — one indicator per (template, latest-report) pair — and flagged the wording. **Same family as R102/R105/R108/R117; that is now six.** | **Resolved** (the row) / **Open** (W20's wording, cosmetic) |
+| **R122** | **The R112 fold had one satisfiable implementation and the plan did not say so, which is a lesson about how tightly a criterion can be specified before it over-determines the code.** "W9's existing teardown-order test must still pass unchanged" plus "the exclusion is a delivery read" are jointly satisfiable **only** if the exclusion reuses a page the drain already fetched: that test's ordered filter is `step.startsWith("DELETE") || step === "GET /agent/deliveries"`, so **any** second delivery request appears in the sequence and fails it, wherever it is placed. The implementer found the one path through, and a test now pins it (*"the in-flight exclusion costs NO extra request — the drain's own page answers it"*). The consequence, recorded as the wave's two **minor** defects: the drain's read moved from server-side `?status=pending` to one **unfiltered** page split client-side, with the limit raised 200 → Orange's 1000 ceiling, and neither the drain nor the sweep loops on offset — so a project with more than 1000 deliveries newer than a pending one would still miss it. Rows come back `created_at DESC` so in-flight rows sort first, which bounds it in practice. Also: the 404-skip path asserts the two substantive halves but **not** that its log line is emitted, so a refactor could make an operator-visible skip silent with every test green. | **Open** — offset paging on both delivery reads |
+| **R123** | **wolf-api now builds TWO Orange clients and TWO hypothesis stores per process.** `createApp(logger, config)` returns only the Express app, and `app.ts` is owned by other tickets (W1/W7/W8/W11/W21), so `index.ts` cannot reach the app's instances and the poller constructs its own. W10 closed the resulting transition race by making the store's `KeyedMutex` **module-scoped** — which also, incidentally, is the durable answer to **R107** (the mutex was per-instance and assigned to nobody). The duplication itself is a smell, not a bug: the clean fix is `createApp` accepting or exposing the store, and it belongs to whichever ticket next legitimately owns `app.ts` (**W11** or **W21**). ⚠️ Note the shape of this one: a *file-ownership rule* produced a *runtime architecture*. Worth remembering when the next ticket's Files line looks arbitrarily tight. | **Open** — fold into W11 or W21 |
+| **R124** | **Two hand-off notes for W22, both cheap to honour and expensive to discover late.** (1) `store.ts`'s `ReportTemplateRecord` carries `{memoryId, hypothesisId, structureHash, html, createdAtMs}` and **not** `slotIds`, so whichever ticket first wires `detectDrift` into a route must re-run W16's `parseTemplate(html, maxBytes)` on the stored HTML to recover them. (2) Per-hypothesis request cost per tick at the 300s default is roughly **8–10 requests against agentd, 288 times a day, per hypothesis**, and the poller calls `store.readBoard()` every tick — the single most repeated read in the system, because `readBoard` is the one call whose resolver already applies the retraction rules and duplicating that logic was judged not worth it. Neither is a defect at the scale this product is being built for; both are the first things to look at if the stack feels slow. | **Open** — informational, for W22 and any perf pass |
