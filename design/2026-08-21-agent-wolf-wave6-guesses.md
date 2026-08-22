@@ -62,3 +62,46 @@ All three phase-A verifiers mutated the implementation rather than reading it, w
 See the workflow journal at
 `subagents/workflows/wf_74bdfa3a-677/journal.jsonl` (phase A) for every guess with the plan text it
 was made against.
+
+---
+
+## Phase B — W16 (added 2026-08-22)
+
+**31 guesses** from the implementer plus 11 across two fix rounds, bringing wave 6 to **115** in
+total across four tickets — 62 + 42 trivial, 11 + 8 moderate, **zero hard**. W16 alone accounts for
+more than a third, and the reason is the one the wave-5 log identified: it is the first of five
+report-layer tickets, so every interface it exposes is a promise to W17, W19, W21 and W25, none of
+which exist. Its four unproven criteria are all of that shape — "W21 must not re-add these
+variables" is a constraint on a future ticket that nothing in this branch can enforce.
+
+### W16 is the strongest evidence yet for the verify step
+
+It is the only ticket in six waves to need **both** fix rounds, and each round closed a **parser
+differential** — a case where a browser builds an element the validator cannot see. Neither was
+findable by reading the scanner. The verifier found both by writing a **42-case differential test
+against parse5** (already present in `node_modules`) asserting: *if a real parser builds an element
+with a non-https fetchable URL, `parseTemplate` MUST refuse*, and *every script src parse5 builds
+must appear in `scriptSrcs` or the template is refused*.
+
+- **Round 1, comment closes.** The scanner closed a comment only on the literal `-->`. The HTML
+  tokenizer closes one in four ways — `-->`, `<!-->`, `<!--->` and `--!>`. Everything between an
+  unmodelled close and the next literal `-->` was markup to a browser and invisible to the
+  validator, defeating **four** acceptance criteria at once with a 5–6 character payload.
+- **Round 2, foreign content.** `style`, `title`, `textarea`, `xmp`, `noembed`, `noframes` were
+  treated as raw text unconditionally — but inside `<svg>`/`<math>` the tree builder never switches
+  the tokenizer, so markup inside `<svg><style>…</style></svg>` was invisible while a browser builds
+  real elements from it.
+
+The lesson generalises past this ticket: **where a criterion says "must refuse X", the cheap and
+decisive verification is a differential against a real implementation**, not a reading of the
+refusal logic. That corpus now lives in W16's test file and W17's verifier should be pointed at it
+(R119) — W17's sanitiser is a second HTML reader with a different tokeniser, and the two disagreeing
+is precisely the bug class above.
+
+### The authoring defect the verifier refused to fail correct code over
+
+W16's Validation line could not exercise its own criterion 2 (R117). The verifier ran the ticket's
+command, observed that it gates nothing about `config.ts`, `.env.example` or `docker-compose.yml`,
+and reported it as a **defect in the ticket** rather than marking the criterion unproven and failing
+the implementation. That is the fourth authoring error caught this way, and the second attributable
+to the standing "grade the ticket, not just the code" instruction.

@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R115. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R119. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -4489,7 +4489,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   node, and rewrote the test's comment to state the limit rather than overclaiming. That is the
   Validation rule applied to a test the executor wrote itself. 26 guesses.
   Found **R104**, **R105**, **R106**, **R107**.
-### W16: Template parser, structure hash, and the report config   [Status: pending | Model: opus]
+### W16: Template parser, structure hash, and the report config   [Status: done | Model: opus]
 - **Scope:** `parseTemplate` — slot extraction, fragment-shape validation, https-only enforcement,
   size limit, structure hashing. Plus the two config variables this feature introduces.
 - **Repo:** agent-wolf
@@ -4519,10 +4519,39 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - A template exceeding `maxBytes` is an error naming both the limit and the actual size.
   - `scriptSrcs` lists every external script and stylesheet URL, for the go-live review screen.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/report/template && yarn typecheck`
+- **Validation:**
+  - `cd api && yarn test src/report/template src/config && yarn typecheck`
+  - Confirm the vitest summary reports **2 test files**. ⚠️ **The single-path form of this command
+    was an authoring defect, corrected 2026-08-22 after W16's verifier caught it.**
+    `yarn test src/report/template` runs exactly one file, and that file touches neither
+    `config.ts`, `.env.example` nor `docker-compose.yml` — so acceptance criterion 2 (the two
+    variables, in three places, through `present()`) was gated by nothing at all, and `yarn
+    typecheck` compiles rather than exercises. The `src/config` leg is what reaches it, including
+    the **R81/R110** cross-check block (**R111**), which must be **passing and unmodified** — a
+    ticket that edits that block to make itself pass has committed a blocking defect.
 - **Depends on:** W15
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **Wave 6 phase B, 2026-08-22 — passed after TWO fix rounds, the wave's hardest ticket.**
+  `19f39ab` → `734d1e5` → `992ba8e`; 6 files, +2033. Both fix rounds closed a **parser
+  differential**, and both were found the same way: the verifier wrote a 42-case differential test
+  against **parse5** (already in `node_modules`) asserting *"if a real parser builds an element with
+  a non-https fetchable URL, `parseTemplate` MUST refuse"*. Reading the scanner would not have found
+  either.
+  **Round 1 — comment closes.** `scan()` closed an HTML comment only on the literal `-->`. The
+  tokenizer closes one in four ways: `-->`, `<!-->` and `<!--->` (abrupt-closing-of-empty-comment)
+  and `--!>` (comment end bang state). Everything between an unmodelled close and the next literal
+  `-->` was markup to a browser and **invisible to the validator** — defeating four criteria at once
+  (https-only, fragment-only, duplicate-slot, and the `scriptSrcs` go-live list) with a 5–6
+  character payload.
+  **Round 2 — foreign content.** `style`, `title`, `textarea`, `xmp`, `noembed` and `noframes` were
+  treated as raw text unconditionally, but inside `<svg>`/`<math>` the tree builder never switches
+  the tokenizer, so markup inside `<svg><style>…</style></svg>` was invisible while a browser builds
+  real elements from it. `scan()` now tracks foreign content, a self-closing `<svg/>` opens nothing,
+  an inner `</svg>` does not close an outer one, and an unclosed root is handled.
+  Verified on merged `main`: 157 template cases, 57 config cases, 887 in `api/` overall. The
+  **R81/R110 enforcer is byte-identical** — `git diff da49393..HEAD -- api/src/config.test.ts` is
+  **68 insertions, 0 deletions** — and all four of its cases pass. Four **minor** defects stand,
+  recorded as **R118**.
 
 ### W17: The slot sanitiser and template validation   [Status: pending | Model: opus]
 - **Scope:** `sanitiseSlot`, the strip counter, and `validateTemplate`. This is the security
@@ -5208,3 +5237,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R113** | **`/amend`'s source of truth was never stated, and the executor picked the safer of two readings.** W9's criterion says `/amend` "re-runs W3's validator over the amended spec" without saying where the amended spec text lives. The implementer read it from the `kind=spec-amendment` memory named by `amendment_id`, and explicitly rejected a spec supplied in the request body on the grounds that **a body-supplied spec would be a second, unaudited way for a human to set the scoreboard** — which is the same property the trust model exists to protect. That reasoning is sound and the shipped behaviour is the one to keep; this row exists so the choice is ratified in the plan rather than left as an undocumented guess that W22 or X1 might contradict. | **Resolved by ratification** — memory-sourced, not body-sourced |
 | **R114** | **Two O9 findings for whoever next owns those files, neither in O9's scope.** (1) `httpapi.DownloadDataset` orders the `DatasetScope` pin before the version lookup — correct for the non-oracle rule — but **nothing in the non-integration suite covers the interaction**. A single table case in `httpapi/datasets_test.go` presenting a scoped token against another *name* at a version that name does not have would have caught O9's blocking defect without needing Docker at all. (2) `agentdb` exposes **no way to delete a dataset row**: `ReapDatasetVersions` never deletes the highest version per name, so O9's teardown issues raw SQL through `store.DB()`. Worth knowing for O10's retention section and for any future "delete a dataset" request. Separately: `go test -tags integration ./...` at *module* scope is a trap — `go/systemtest`'s `TestMain` unconditionally shells out to `docker build ../../sandbox` and `os.Exit(1)`s rather than skipping. O9's package-scoped Validation avoids it; anyone generalising that command would not. | **Open** — one cheap httpapi case; the rest recorded |
 | **R115** | **The plan's § "The throwaway Postgres" names port 5433 and no wave has used only that port.** Concurrent Go tickets each need their own instance (R95), so every wave has supplied a different port out of band — 5434 in wave 5, 5441 in wave 6 — and every executor has had to be told the real one in its briefing. O9's implementer flagged the mismatch as a discovered issue. The section should say that 5433 is the *canonical single-ticket* instance and that a concurrent wave gets one instance per ticket on orchestrator-assigned ports, so an executor reading the plan alone does not connect to a sibling's database and wonder why its fixtures are already there. | **Open** — one paragraph in § "Executor orientation" |
+| **R116** | **Two sections that W17 and W19 are told to copy BYTE-FOR-BYTE do not exist in the plan.** W17's criterion names § "The slot sanitiser profile, pinned as an ALLOW list" as the source of `SLOT_PROFILE`; W19's names § "The CSP header, byte-for-byte" and adds that the value must be "asserted as a string literal — a substring check does not satisfy this criterion". **Neither section was ever written.** Both tickets are therefore unrunnable as specified: an executor can only invent the profile and the header, which is precisely what "byte-for-byte" exists to forbid, and the criterion would then be self-satisfying. Found by W16's implementer reading forward from its own ticket. **This must be authored before W17 or W19 is cut** — and authored by the owner, not by an executor, because the whole point of pinning them is that they are decided once, centrally, and never drifted. Same class as **R102**/**R105**/**R108**: orchestrator-authored text that no adversarial pass ever saw. | **Open** — blocks W17 and W19 |
+| **R117** | **W16's Validation could not exercise its own criterion 2, and its verifier caught it as an authoring defect rather than failing correct code.** The line read `cd api && yarn test src/report/template && yarn typecheck`. That runs exactly one file, and that file touches neither `config.ts`, `.env.example` nor `docker-compose.yml` — so the entire "two variables, three places, through `present()`" criterion was gated by nothing, with `yarn typecheck` compiling rather than exercising. Corrected to `yarn test src/report/template src/config` with a pinned 2-file count. **This is the fourth authoring error caught by an executor or a verifier rather than by review** (after R102, R105, R108) and the second surfaced by the standing instruction to *grade the ticket, not just the code*. The same verifier also used it to flag that the brief's phrase "rejects a 32-character-plus id" is loose against the pinned regex — `^[a-z][a-z0-9-]{0,31}$` makes exactly 32 legal — and graded the ticket's literal regex instead of the brief. ⚠️ **Every ticket whose Validation is a single `yarn test <one-path>` while its criteria span more than one file has this defect.** Worth one sweep before wave 7. | **Resolved** (W16) / **Open** (the sweep) |
+| **R118** | **Four minor defects stand in W16's parser, recorded rather than fixed, three of them the same shape: a URL channel the module chose to police but does not reach.** (1) **`image-set()`** is not matched by the CSS URL scanner, so `<style>.a{background:image-set("http://evil/x.png" 1x)}</style>` is accepted while the `url(...)` equivalent is refused. (2) **`iframe[srcdoc]`**, **`meta[http-equiv=refresh]`** and **`object > param[value]`** are unchecked and contribute nothing to `scriptSrcs`, so a srcdoc-hosted remote script is fetched by the browser while the go-live review screen shows the human **zero** remote scripts — which defeats criterion 10's stated purpose rather than merely narrowing it. (3) A **same-document fragment anchor is refused** — `<a href="#chart">` and `<use href="#glyph">` both fail with "must be an absolute `https:` URL", although CSS already has an explicit `#fragment` carve-out for `fill:url(#gradient)`, so the attribute path and the CSS path disagree about fragments. None is in W16's literal criteria, which name only `src` and `href`. **Recommendation: (2) is the one to fix — it silently understates the review screen — and it belongs to W21, which owns that screen. (3) wants one sentence in W25's authoring contract so the worked example is not written and then rejected.** | **Open** — (2)→W21, (3)→W25 |
+| **R119** | **The tree will hold two HTML readers with different tokenisers, as a side effect of file ownership.** W16's Files line excludes `api/package.json` (W17 owns it), so `parseTemplate` had to be hand-written with no dependency — while W17 will shortly pull **jsdom** into `api/` via `isomorphic-dompurify`. The validator and the sanitiser will then disagree about edge cases by construction, and **both of W16's blocking defects were exactly that class of disagreement**. It is a **defensible** outcome — the validator must run on stored bytes with no normalisation, which is why the structure hash forbids re-serialisation and which a DOM-based reader cannot honour — but it should be a decision on the record rather than an accident of which ticket owns `package.json`. Relatedly, § "Pinned technology choices" says "no hand-rolled tag regex" in an entry about **sanitisation**, which on a literal pass reads as forbidding W16's own parser; **one clarifying clause in that row** ("this pins the sanitiser; W16's validator is dependency-free by design") removes the contradiction. **W17's verifier should be told to check the two readers agree on the differential corpus W16's verifier already wrote** — 42 parse5 cases, in W16's test file. | **Open** — one clause, plus a W17 verifier instruction |
