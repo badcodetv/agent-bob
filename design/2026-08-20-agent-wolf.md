@@ -14,7 +14,7 @@
 
 Status: approved
 Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R119. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+the report-layer amendment; see the Discovered Issues Log, entries R1–R120. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -4573,6 +4573,195 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   **68 insertions, 0 deletions** — and all four of its cases pass. Four **minor** defects stand,
   recorded as **R118**.
 
+## The slot sanitiser profile, pinned as an ALLOW list
+
+> **Pinned 2026-08-22 to close R116.** W17 copies `SLOT_PROFILE` from here byte-for-byte and a test
+> asserts `ALLOWED_TAGS` and `ALLOWED_ATTR` equal these literals, so a later widening is a
+> deliberate, visible act rather than a diff nobody reads. **Widening this list is an owner
+> decision.** If a report genuinely needs something absent from it, the answer is almost always
+> that the thing belongs in the *template* — which is reviewed at go-live and frozen by
+> `structureHash` — and not in a slot, which is filled daily by a model nobody reviews.
+>
+> **This profile was executed against `isomorphic-dompurify ^2` before being pinned**, not reasoned
+> about — which is how the two defects recorded in **R120** were found. W17 should re-run that
+> corpus rather than trust this note.
+
+```ts
+export const SLOT_PROFILE = {
+  ALLOWED_TAGS: [
+    // ⚠️ `#text` is LOAD-BEARING and must stay first. DOMPurify treats an
+    // explicit ALLOWED_TAGS list as exhaustive INCLUDING text nodes, so
+    // omitting it strips every character of prose while leaving the elements
+    // standing: `<p class="lead">Gold <strong>rose</strong> 4%.</p>` sanitises
+    // to `<p class="lead"><strong></strong></p>`. Every report would render
+    // empty and no test that only checks "the dangerous token is absent"
+    // would notice. Proved against isomorphic-dompurify ^2 on 2026-08-22.
+    "#text",
+    "p", "br", "hr", "span", "div", "section",
+    "strong", "em", "b", "i", "u", "s", "small", "mark",
+    "code", "pre", "kbd", "samp", "var", "sub", "sup",
+    "abbr", "dfn", "q", "blockquote", "cite", "time",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "dl", "dt", "dd",
+    "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td",
+  ],
+  ALLOWED_ATTR: [
+    "class", "title", "lang", "dir",
+    "datetime", "colspan", "rowspan", "scope", "headers",
+  ],
+  ALLOW_DATA_ATTR: false,
+  ALLOW_ARIA_ATTR: false,
+  ALLOW_UNKNOWN_PROTOCOLS: false,
+  USE_PROFILES: false,
+  WHOLE_DOCUMENT: false,
+  RETURN_DOM: false,
+  RETURN_DOM_FRAGMENT: false,
+  RETURN_TRUSTED_TYPE: false,
+  SANITIZE_DOM: true,
+  KEEP_CONTENT: true,
+  FORBID_CONTENTS: ["script", "style", "template", "noscript", "title", "textarea", "xmp"],
+} as const;
+```
+
+**Why each of the non-obvious entries is there.** These are the lines a later reader is most likely
+to "simplify", so the reason is recorded next to each:
+
+- **`img`, `a`, `src`, `href` and `style` are absent, and that is the point.** No URL survives a
+  slot. A remote `src` in a slot would be a **daily, human-unreviewed egress channel** inside a
+  frame whose whole design is that nothing untrusted reaches the network. Every URL a report needs
+  lives in the template, where a human approved it once and `structureHash` froze it.
+- **`id` is absent.** Slot content that could set an `id` could shadow elements the template's own
+  script looks up — a template that does any `getElementById` at all, which charting code routinely
+  does, can be fed a decoy by the daily tick. `[data-wolf-fallback]` is the same hazard in the
+  attribute namespace and is already covered by `ALLOW_DATA_ATTR: false` below. `class` is enough
+  for styling. *(An earlier draft justified this by naming a specific id the template supposedly
+  reads. **No such id is defined anywhere in this plan** — it was invented by the section that was
+  meant to pin the interface, which is the exact failure R116 exists to prevent. Removed; the
+  general argument above is the real one, and the series contract remains W25's
+  `window.__WOLF_SERIES__` and nothing else.)*
+- **`ALLOW_DATA_ATTR: false`.** DOMPurify permits `data-*` by default. Left on, a tick could emit
+  `data-wolf-slot="…"` **inside a slot** and manufacture a phantom slot region — which W20 would
+  then report as drift on a healthy report, or which would nest a slot inside a slot. The attribute
+  namespace that names our own machinery must not be writable by the content that machinery holds.
+- **`ALLOW_ARIA_ATTR: false`.** Tight beats broad in a locked profile, and the template — reviewed,
+  frozen — is where accessible structure belongs. Revisit only with a concrete report that needs it.
+- **`USE_PROFILES: false` and no `svg`/`math` in `ALLOWED_TAGS`.** Foreign content is where W16's
+  second blocking defect lived (**R119**): inside `<svg>`/`<math>` the HTML tree builder does not
+  switch the tokenizer, so raw-text assumptions stop holding and a browser builds real elements out
+  of what a scanner reads as text. Slots need no graphics — charts come from the template — so the
+  cheapest correct answer is that foreign content never enters a slot at all.
+- **`KEEP_CONTENT: true`, with `FORBID_CONTENTS` doing the actual work.** The concern is real —
+  DOMPurify's default keeps the *text* of a removed element, so `<script>alert(1)</script>` would
+  otherwise render the literal `alert(1)` to a human as though it were analysis — but
+  `KEEP_CONTENT: false` is the **wrong instrument** for it and an earlier draft of this section got
+  that wrong. Measured against isomorphic-dompurify ^2: with `false`, a slot written as
+  `<article><p>some analysis</p></article>` sanitises to the **empty string**, because one wrapper
+  element the model happened to reach for takes the whole day's analysis with it, silently. With
+  `true` the same input yields `<p>some analysis</p>` — the wrapper is dropped, the prose survives —
+  and `<a href="https://x">link</a>` yields `link`, which is exactly right: the text stays, the URL
+  does not. `FORBID_CONTENTS` is what suppresses the dangerous case: with it,
+  `<script>alert(1)</script>` yields `""` under **both** settings, and
+  `<p>before</p><script>alert(1)</script><p>after</p>` yields `<p>before</p><p>after</p>`.
+- **`ALLOW_UNKNOWN_PROTOCOLS: false`.** With no URL-bearing attribute allowed this is belt and
+  braces, and belt and braces is correct on the one boundary the whole feature rests on.
+
+**What W17 must still prove, because a config literal is not a guarantee.** The profile is
+necessary and not sufficient: W17's vector table, its idempotence check and its mutation-XSS
+regressions are what demonstrate the library applies the profile the way we think it does. A test
+that asserts only `SLOT_PROFILE` equals this literal has tested our typing, not our sanitiser.
+
+---
+
+## The CSP header, byte-for-byte
+
+> **Pinned 2026-08-22 to close R116.** W19 asserts this exact string as a literal and W21 asserts
+> the route emits it. A substring check satisfies neither.
+
+```
+sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src https: data:; font-src https: data:; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; manifest-src 'none'; media-src 'none'; worker-src 'none'
+```
+
+⚠️ **Four directives here are NOT covered by the `default-src` fallback and must be written out, which
+is why they appear despite `default-src 'none'`:** `sandbox`, `base-uri`, `form-action` and
+`frame-ancestors`. Deleting any of them as "redundant" silently removes the protection.
+`frame-ancestors 'self'` in particular was **missing from an earlier draft of this section**: the
+frame route is authenticated, so without it any third-party page could embed a signed-in user's
+report. The rest (`script-src`, `style-src`, `img-src`, `font-src`, `connect-src`, `frame-src`,
+`child-src`, `object-src`, `manifest-src`, `media-src`, `worker-src`) *do* fall back to `default-src`
+and are listed explicitly so the intent is readable at the point of use rather than inferred.
+
+### The two decisions inside it
+
+**1. `sandbox allow-scripts`, and deliberately no `allow-same-origin`.** The sandbox lives in the
+*CSP*, not only in the iframe attribute, because the frame has a real URL a person can paste into
+an address bar: `GET /api/hypotheses/:id/report/frame`. An `iframe sandbox=` attribute does nothing
+on direct navigation, and X1's **direct-navigation leg** exists precisely to catch a regression back
+to that. The pair `allow-scripts allow-same-origin` **cancels the sandbox** — that is the mistake
+`docs/19-embedding.md` records as hazard **H3** in Orange's own UI — so `allow-same-origin` must
+never appear here or in `ReportPanel`'s attribute. With it absent the document has an **opaque
+origin**: `window.origin === "null"`, no cookie access, no `localStorage`, no same-origin fetch back
+into Wolf.
+
+**2. `'unsafe-inline'` on `script-src`, which looks wrong and is not.** Two things need it, and
+neither can be replaced by a nonce or a hash:
+
+- **The template's own chart code is inline.** That is a settled property, not an accident:
+  `structureHash` is sha256 of the stored bytes with *no* normalisation precisely because
+  "whitespace inside a `<script>` body is semantically significant" (W16), which only matters
+  because script bodies live in the template.
+- **The series injection is inline by construction.** § W25 pins the contract as
+  `window.__WOLF_SERIES__`, and W19 pins its position as the last child of `<head>`.
+
+A **nonce** is per-request and a **hash** changes whenever the series data changes — i.e. daily.
+Either would make the CSP string vary, which contradicts the byte-for-byte criterion this section
+exists to satisfy, and would trade a real, checkable invariant for the appearance of hardening.
+
+The security does not come from CSP restricting scripts. **It comes from there being no untrusted
+script to restrict**: the template is reviewed by a human at go-live, frozen by `structureHash`, and
+changeable only through an amendment; the daily content is sanitised into slots by `SLOT_PROFILE`,
+from which every script, every event handler and every URL is absent. CSP's job here is the
+*second* line — bound what a compromised or careless template can reach — and that is what the
+`'none'` directives do.
+
+⚠️ **If a later reader is tempted to remove `'unsafe-inline'`:** doing so silently disables every
+chart in every report, and no test in the suite fails, because the tests assert the string and the
+composition — not that a browser executed the chart. Only X1's happy-path leg would catch it.
+
+### What is deliberately still reachable, and why that is bounded
+
+`script-src` and `style-src` permit **any** `https:` origin, and `img-src`/`font-src` permit
+`https:` and `data:`. That is a real egress channel — a URL can carry data in its path — and it is
+open on purpose:
+
+- W16 validates and **lists** every external script and stylesheet URL (`scriptSrcs`) *for the
+  go-live review screen*, and a template with no `[data-wolf-fallback]` is a validation error
+  because "a CDN failure is invisible inside an opaque frame". Both only make sense if CDN assets
+  load. A CSP that blocked them would make that machinery dead code.
+- Everything reachable through it is in the **template**, which a human read and approved once and
+  which cannot change without an amendment. Nothing the daily tick writes can add a URL, because
+  `SLOT_PROFILE` allows no URL-bearing attribute at all.
+
+So the boundary is: **assets a human approved may load; data may not leave.** `connect-src 'none'`
+kills `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` and `navigator.sendBeacon`;
+`form-action 'none'` kills form submission; `frame-src`/`child-src`/`worker-src 'none'` kill nested
+browsing contexts and workers; `base-uri 'none'` stops a `<base>` from re-pointing relative URLs.
+
+⚠️ **Two known gaps, recorded rather than papered over.** (a) A template author who wanted to
+exfiltrate could still encode data into an `img` URL — but that author is the model whose output a
+human reviewed and froze, which is the same trust boundary the whole locking design already rests
+on. (b) `script-src https:` is an allow-any-origin list; a **pinned CDN allowlist** would be
+strictly tighter and is the obvious future hardening. It is not done now because no ticket yet
+knows which CDNs the reporting vocabulary settles on — W25 is where that becomes knowable, and
+tightening this string is an owner decision at that point.
+
+### Serving requirements
+
+The header travels with `GET …/report/frame` alongside `X-Content-Type-Options: nosniff` and **no
+`Set-Cookie`** (W21 asserts all three; the session middleware will otherwise refresh a cookie onto
+this response). `ReportPanel` renders `sandbox="allow-scripts"` on the iframe as well — belt and
+braces for the embedded case, with the CSP carrying the load for the direct-navigation case.
+
+
 ### W17: The slot sanitiser and template validation   [Status: pending | Model: opus]
 - **Scope:** `sanitiseSlot`, the strip counter, and `validateTemplate`. This is the security
   boundary of the whole feature.
@@ -5261,3 +5450,4 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R117** | **W16's Validation could not exercise its own criterion 2, and its verifier caught it as an authoring defect rather than failing correct code.** The line read `cd api && yarn test src/report/template && yarn typecheck`. That runs exactly one file, and that file touches neither `config.ts`, `.env.example` nor `docker-compose.yml` — so the entire "two variables, three places, through `present()`" criterion was gated by nothing, with `yarn typecheck` compiling rather than exercising. Corrected to `yarn test src/report/template src/config` with a pinned 2-file count. **This is the fourth authoring error caught by an executor or a verifier rather than by review** (after R102, R105, R108) and the second surfaced by the standing instruction to *grade the ticket, not just the code*. The same verifier also used it to flag that the brief's phrase "rejects a 32-character-plus id" is loose against the pinned regex — `^[a-z][a-z0-9-]{0,31}$` makes exactly 32 legal — and graded the ticket's literal regex instead of the brief. ⚠️ **Every ticket whose Validation is a single `yarn test <one-path>` while its criteria span more than one file has this defect.** Worth one sweep before wave 7. | **Resolved** (W16) / **Open** (the sweep) |
 | **R118** | **Four minor defects stand in W16's parser, recorded rather than fixed, three of them the same shape: a URL channel the module chose to police but does not reach.** (1) **`image-set()`** is not matched by the CSS URL scanner, so `<style>.a{background:image-set("http://evil/x.png" 1x)}</style>` is accepted while the `url(...)` equivalent is refused. (2) **`iframe[srcdoc]`**, **`meta[http-equiv=refresh]`** and **`object > param[value]`** are unchecked and contribute nothing to `scriptSrcs`, so a srcdoc-hosted remote script is fetched by the browser while the go-live review screen shows the human **zero** remote scripts — which defeats criterion 10's stated purpose rather than merely narrowing it. (3) A **same-document fragment anchor is refused** — `<a href="#chart">` and `<use href="#glyph">` both fail with "must be an absolute `https:` URL", although CSS already has an explicit `#fragment` carve-out for `fill:url(#gradient)`, so the attribute path and the CSS path disagree about fragments. None is in W16's literal criteria, which name only `src` and `href`. **Recommendation: (2) is the one to fix — it silently understates the review screen — and it belongs to W21, which owns that screen. (3) wants one sentence in W25's authoring contract so the worked example is not written and then rejected.** | **Open** — (2)→W21, (3)→W25 |
 | **R119** | **The tree will hold two HTML readers with different tokenisers, as a side effect of file ownership.** W16's Files line excludes `api/package.json` (W17 owns it), so `parseTemplate` had to be hand-written with no dependency — while W17 will shortly pull **jsdom** into `api/` via `isomorphic-dompurify`. The validator and the sanitiser will then disagree about edge cases by construction, and **both of W16's blocking defects were exactly that class of disagreement**. It is a **defensible** outcome — the validator must run on stored bytes with no normalisation, which is why the structure hash forbids re-serialisation and which a DOM-based reader cannot honour — but it should be a decision on the record rather than an accident of which ticket owns `package.json`. Relatedly, § "Pinned technology choices" says "no hand-rolled tag regex" in an entry about **sanitisation**, which on a literal pass reads as forbidding W16's own parser; **one clarifying clause in that row** ("this pins the sanitiser; W16's validator is dependency-free by design") removes the contradiction. **W17's verifier should be told to check the two readers agree on the differential corpus W16's verifier already wrote** — 42 parse5 cases, in W16's test file. | **Open** — one clause, plus a W17 verifier instruction |
+| **R120** | **The two sections written to close R116 carried four defects of their own, three found by EXECUTING the profile rather than reading it, and one of them would have emptied every report in the product.** (1) **BLOCKING — `#text` was missing from `ALLOWED_TAGS`.** DOMPurify treats an explicit list as exhaustive *including text nodes*, so the pinned profile stripped every character of prose while leaving the elements standing: `<p class="lead">Gold <strong>rose</strong> 4%.</p>` sanitised to `<p class="lead"><strong></strong></p>`. W17's criteria assert that dangerous tokens are **absent** from the output, so **every one of them would still have passed** on an empty string — the ticket would have gone green while the feature rendered nothing. (2) **`KEEP_CONTENT: false` was the wrong instrument** for a real concern: measured, it turns `<article><p>some analysis</p></article>` into the empty string, so one wrapper element the model happened to reach for silently discards the whole day's analysis. `FORBID_CONTENTS` already suppresses the dangerous case under either setting; corrected to `true`. (3) **`frame-ancestors 'self'` was missing**, and it is one of four directives (`sandbox`, `base-uri`, `form-action`, `frame-ancestors`) **not covered by the `default-src` fallback** — the frame route is authenticated, so without it any third-party page could embed a signed-in user's report. The corrected string names all four and says why, so none is deleted later as redundant. (4) **The section invented an interface it was written to pin:** it justified excluding the `id` attribute by naming a specific element id "the template reads", which **nothing anywhere in this plan defines** — the series contract is W25's `window.__WOLF_SERIES__` and nothing else. Removed and replaced with the general argument. **The profile is now executed against `isomorphic-dompurify ^2` — extracted from this document, run over a 20-vector corpus — and is all green: prose survives, every vector strips, all idempotent.** ⚠️ **The lesson is the sharpest yet on the R102/R105/R108/R117 theme: the defects were not in reasoning but in library semantics, and no amount of review would have found them — running the config found three in one command.** Where a pinned literal is a *configuration of someone else's library*, pinning it without executing it is not a decision, it is a guess wearing a decision's clothes. | **Resolved** — all four fixed and verified |
