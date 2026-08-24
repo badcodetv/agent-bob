@@ -130,7 +130,7 @@ A **changing state**: how much should you trust this *right now*?
 | Stale metric | `machine` | **`degraded`** | hatched trailing region on the chart + a caption: `never fetched` or `no update since <date>` |
 | `stripped_count > 0` | `model` | **`degraded`** | a sentence above the panel with the count |
 | Report drift (orphan / unfilled slots) | `model` | **`degraded`** | a sentence naming the slots |
-| `titleTruncated` | `machine` | **`degraded`** | an ellipsis affordance; the UI never claims the title is complete |
+| `titleTruncated` | `machine` | `none` on the board, **`degraded`** on the detail page | **Board:** an ellipsis affordance and nothing else — the UI never claims the title is complete, but a mandatory cause sentence on twenty rows would destroy § 2b principle 4's density, and a truncated title is a display limit rather than a reliability problem. **Detail page:** the full title is available, so the `degraded` sentence costs nothing and is carried there. *(Amended 2026-08-24 — this row previously said `degraded` in the Channel-S column while its own Rendered-as column described a treatment that is not `degraded` and carries no sentence. See the plan's **R141**.)* |
 | The support score | `machine` | `none` | labelled a **summary**, with an explicit note that it **decides nothing — only conditions do** |
 
 Note how the two channels compose and why that matters: a research note is
