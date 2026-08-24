@@ -16,8 +16,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
+    // Typecheck against the EMITTED declarations, not against web/src — the
+    // same package surface the Vite alias resolves at build time (O12).
+    // `npm run build` in web/ must have run first.
     "paths": {
-      "@agentkit/chat-ui": ["../../web/src/index.ts"]
+      "@agentkit/chat-ui": ["../../web/dist/index.d.ts"],
+      "@agentkit/chat-ui/pure": ["../../web/dist/pure.d.ts"],
+      "@agentkit/chat-ui/components": ["../../web/dist/components/index.d.ts"]
     }
   },
   "include": ["src"]
