@@ -11,11 +11,9 @@
 import React, { useState, useRef, useCallback } from 'react'
 import { Box, Typography, IconButton, useTheme } from '@mui/material'
 import { alpha } from '@mui/material/styles'
-import {
-  Download as DownloadIcon,
-  Fullscreen as FullscreenIcon,
-  Share as ShareIcon,
-} from '@mui/icons-material'
+import DownloadIcon from '@mui/icons-material/Download'
+import FullscreenIcon from '@mui/icons-material/Fullscreen'
+import ShareIcon from '@mui/icons-material/Share'
 import type { ArtifactInfo } from '../types.js'
 import { webappEntryRelPath } from '../artifactFilters.js'
 import AgentMarkdown from './AgentMarkdown.js'

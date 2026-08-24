@@ -1,7 +1,7 @@
 {
   "name": "@agentkit/chat-ui",
-  "version": "0.1.0",
-  "description": "React components that render an agent chat from its event stream — the single agentEventReducer plus chat UI, generalised from Platinum's frontend agent components. See ../docs/09-frontend-components.md.",
+  "version": "0.1.2",
+  "description": "React components that render an agent chat from its event stream \u2014 the single agentEventReducer plus chat UI, generalised from Platinum's frontend agent components. See ../docs/09-frontend-components.md.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,6 +17,10 @@
     "./components": {
       "types": "./dist/components/index.d.ts",
       "default": "./dist/components/index.js"
+    },
+    "./components/*": {
+      "types": "./dist/components/*.d.ts",
+      "default": "./dist/components/*.js"
     },
     "./package.json": "./package.json"
   },
@@ -61,5 +65,5 @@
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
-  "comment": "PUBLISHED PACKAGE — not private. `exports` declares three doors: '.' (everything), './pure' (tier 1: types + pure logic, zero React in its graph) and './components' (tier 2: presentational components, themed by the HOST). src/pure.test.ts enforces the tier line. The five deps above were devDependencies while this package was consumed through a Vite source alias; they are RUNTIME imports of src/, so a real consumer installing the tarball gets an unresolvable import without them. react/react-dom/@mui/material/@emotion/* stay PEER deps deliberately — that is what keeps one React copy and one emotion cache in the consumer, and it is what lets the consumer's ThemeProvider colour our components. No dependency on Platinum app state, routing, or contexts. Source of the copy is the Platinum repo's frontend/src/ per ../docs/90-provenance-map.md."
+  "comment": "PUBLISHED PACKAGE \u2014 not private. `exports` declares three doors: '.' (everything), './pure' (tier 1: types + pure logic, zero React in its graph) and './components' (tier 2: presentational components, themed by the HOST). src/pure.test.ts enforces the tier line. The five deps above were devDependencies while this package was consumed through a Vite source alias; they are RUNTIME imports of src/, so a real consumer installing the tarball gets an unresolvable import without them. react/react-dom/@mui/material/@emotion/* stay PEER deps deliberately \u2014 that is what keeps one React copy and one emotion cache in the consumer, and it is what lets the consumer's ThemeProvider colour our components. No dependency on Platinum app state, routing, or contexts. Source of the copy is the Platinum repo's frontend/src/ per ../docs/90-provenance-map.md."
 }

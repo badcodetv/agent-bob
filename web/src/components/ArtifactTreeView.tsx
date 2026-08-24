@@ -5,12 +5,10 @@
 
 import { useState } from 'react'
 import { Box, Collapse, Typography } from '@mui/material'
-import {
-  Folder as FolderIcon,
-  FolderOpen as FolderOpenIcon,
-  ExpandMore as ExpandMoreIcon,
-  ChevronRight as ChevronRightIcon,
-} from '@mui/icons-material'
+import FolderIcon from '@mui/icons-material/Folder'
+import FolderOpenIcon from '@mui/icons-material/FolderOpen'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import { FileIcon } from '@untitledui/file-icons'
 import type { ArtifactTreeNode } from '../artifactTree.js'
 import type { ArtifactInfo } from '../types.js'

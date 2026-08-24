@@ -27,13 +27,11 @@ import {
   Tooltip,
   useTheme,
 } from '@mui/material'
-import {
-  Close as CloseIcon,
-  Download as DownloadIcon,
-  Share as ShareIcon,
-  WarningAmber as WarningAmberIcon,
-  ErrorOutline as ErrorOutlineIcon,
-} from '@mui/icons-material'
+import CloseIcon from '@mui/icons-material/Close'
+import DownloadIcon from '@mui/icons-material/Download'
+import ShareIcon from '@mui/icons-material/Share'
+import WarningAmberIcon from '@mui/icons-material/WarningAmber'
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline'
 import { FileIcon } from '@untitledui/file-icons'
 import { Highlight, themes } from 'prism-react-renderer'
 import type { ArtifactInfo } from '../types.js'
