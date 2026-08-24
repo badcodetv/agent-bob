@@ -5,8 +5,7 @@
 
 import React, { useCallback } from 'react'
 import { Box, IconButton, Typography } from '@mui/material'
-import { Close as CloseIcon } from '@mui/icons-material'
-
+import CloseIcon from '@mui/icons-material/Close'
 interface ArtifactLightboxProps {
   open: boolean
   imageUrl: string

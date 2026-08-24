@@ -23,10 +23,8 @@ import {
   Chip,
   useTheme,
 } from '@mui/material'
-import {
-  Close as CloseIcon,
-  Download as DownloadIcon,
-} from '@mui/icons-material'
+import CloseIcon from '@mui/icons-material/Close'
+import DownloadIcon from '@mui/icons-material/Download'
 import { Highlight, themes } from 'prism-react-renderer'
 import { ArtifactInfo } from '../types.js'
 import type { PlatinumArtifactData } from '../platinumArtifact.js'

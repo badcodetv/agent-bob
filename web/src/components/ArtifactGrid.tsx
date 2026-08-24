@@ -5,15 +5,13 @@
 
 import React, { useState } from 'react'
 import { Box, Button, Checkbox, Chip, TextField, Typography } from '@mui/material'
-import {
-  Download as DownloadIcon,
-  InsertDriveFile as FileIcon,
-  Image as ImageIcon,
-  Code as CodeIcon,
-  TableChart as CsvIcon,
-  BarChart as ChartIcon,
-  Description as ReportIcon,
-} from '@mui/icons-material'
+import DownloadIcon from '@mui/icons-material/Download'
+import FileIcon from '@mui/icons-material/InsertDriveFile'
+import ImageIcon from '@mui/icons-material/Image'
+import CodeIcon from '@mui/icons-material/Code'
+import CsvIcon from '@mui/icons-material/TableChart'
+import ChartIcon from '@mui/icons-material/BarChart'
+import ReportIcon from '@mui/icons-material/Description'
 import type { ArtifactInfo } from '../types.js'
 import {
   ArtifactTypeFilter,

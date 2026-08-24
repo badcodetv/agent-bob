@@ -10,13 +10,11 @@
 
 import { useCallback, useMemo } from 'react'
 import { Box, Typography, IconButton } from '@mui/material'
-import {
-  ArrowForward as ArrowIcon,
-  PushPin as PinIcon,
-  CheckCircle as CheckCircleIcon,
-  RadioButtonUnchecked as UncheckedIcon,
-  FiberManualRecord as DotIcon,
-} from '@mui/icons-material'
+import ArrowIcon from '@mui/icons-material/ArrowForward'
+import PinIcon from '@mui/icons-material/PushPin'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import UncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
+import DotIcon from '@mui/icons-material/FiberManualRecord'
 import type { ArtifactInfo, TodoItem } from '../types.js'
 
 interface ArtifactPanelProps {
