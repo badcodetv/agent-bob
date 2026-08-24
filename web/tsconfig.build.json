@@ -1,0 +1,40 @@
+// The EMITTING config. tsconfig.json stays `noEmit` for the editor and for
+// `npm run typecheck`; this one is what `npm run build` uses to produce the
+// `dist/` that `npm pack` ships.
+//
+// Three overrides and one exclude, each load-bearing:
+//   - `noEmit: false`                  — the whole point.
+//   - `allowImportingTsExtensions`     — TS forbids it whenever emit is on.
+//   - `declaration`                    — package.json points `types` at
+//                                        dist/index.d.ts; without this there is
+//                                        no such file and consumers get `any`.
+//   - the `exclude`                    — without it `dist/` carries every
+//                                        *.test.js, the jsdom test-setup and the
+//                                        11MB bench-report fixture. Confirmed by
+//                                        the R125 probe, which shipped all three.
+//
+// No `declarationMap` and no `sourceMap`: `files` ships `dist` only, so a map
+// pointing at `../src/…` would dangle in every consumer. Ship `src` too if you
+// ever want them back.
+//
+// `types: []` drops the base config's `@testing-library/jest-dom` global
+// augmentation: it is a devDependency, so a consumer typechecking against our
+// .d.ts files must not be told to look for it.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": []
+  },
+  "include": ["src"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/__fixtures__",
+    "src/test-setup.ts"
+  ]
+}

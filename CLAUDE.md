@@ -181,8 +181,20 @@ Lockfiles are inconsistent and it matters:
 - `examples/web/` tracks **only** `yarn.lock` (no `package-lock.json`), which is what
   `deploy/web.Dockerfile` uses. Use yarn there, not `npm ci`.
 
-`web/`'s `npm run build` is `tsc -p tsconfig.json`, and that tsconfig sets `"noEmit": true` — so it
-typechecks and emits no `dist/`, despite `package.json` pointing `main`/`types` there.
+**`web/` is a published package as of O12** (2026-08-24), not a source folder consumed by alias.
+`npm run build` is `tsc -p tsconfig.build.json` and really emits `dist/` (`tsconfig.json` still sets
+`noEmit` — that one is the editor's and `npm run typecheck`'s). `exports` declares three doors:
+`.` (everything), `./pure` (types + pure logic, no React in its graph) and `./components` (the
+presentational components, themed by the *host's* `ThemeProvider`). `src/pure.test.ts` enforces
+that tier line. **`examples/web` consumes the emitted `dist`**, so `web/` must be built before
+`examples/web` is built or typechecked — `deploy/web.Dockerfile` and the `examples-web` CI job both
+do it, and a fresh clone that skips it fails with "Cannot find module '@agentkit/chat-ui'".
+*This entry previously said the build emitted nothing; that was true until O12.*
+
+`web/scripts/verify-package.sh` is the gate that makes any of that trustworthy: it builds, packs,
+installs the tarball into a throwaway app with its own react/MUI/emotion, renders `ArtifactPanel`
+and asserts a status dot takes the **consumer's** `success.main`. `npm test` and `npm run typecheck`
+cannot see any of those failures — they compile source in place. CI runs it in the `web` job.
 
 ## Core concepts (where to look)
 

@@ -1,3 +1,10 @@
+# The chat-ui package's build output and the tarball `npm pack` leaves beside
+# it. Both are generated (web/scripts/verify-package.sh, deploy/web.Dockerfile),
+# and the tarball is copied into agent-wolf/web/vendor/ by hand rather than
+# committed here.
+web/dist/
+web/*.tgz
+
 # Local env + secrets — never commit
 .env
 node_modules

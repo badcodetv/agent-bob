@@ -148,6 +148,15 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
+      # THE PACKAGING GATE. `npm run typecheck` and `npm test` above both pass
+      # against a package nobody can install: they compile source in place with
+      # web/node_modules on the resolution path. This step builds it, packs it,
+      # installs the TARBALL into a throwaway app with its own react/MUI/emotion
+      # and renders a component — including the assertion the whole package
+      # exists for, that a status dot takes the CONSUMER's theme colour.
+      # See web/scripts/verify-package.sh; the probe it reproduces is R125.
+      - run: ./scripts/verify-package.sh
+
   # examples/web is the app shell the stack actually SERVES — web/ is a
   # component library with no router — and until now nothing in CI built it.
   # A break here is invisible to the web job above and shows up as a blank page
@@ -166,19 +175,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      # web/'s dependencies, installed before examples/web's own. Not
-      # belt-and-braces: examples/web's tsconfig maps `@agentkit/chat-ui` to
-      # `../../web/src/index.ts`, so typechecking this package compiles web's
-      # SOURCE — and that needs react and its types on disk under web/.
-      # Without this the job fails with "Cannot find module 'react'" pointing at
-      # ../../web/src/watermark.ts, which reads like an examples/web bug and is
-      # not one. (This dependency is undeclared and bites a fresh clone too; it
-      # went unnoticed because anyone building examples/web locally had already
-      # installed web/.)
+      # web/'s dependencies AND its build, both before examples/web's own
+      # install. Since O12 this app consumes the EMITTED package — its Vite
+      # alias resolves `@agentkit/chat-ui` to ../../web/dist/index.js and its
+      # tsconfig `paths` to ../../web/dist/index.d.ts — so without the build
+      # step both the typecheck and the build fail with "Cannot find module
+      # '@agentkit/chat-ui'", which reads like an examples/web bug and is not
+      # one. web/'s own dependencies are still needed: the emitted dist imports
+      # react-markdown, prism-react-renderer and friends by bare specifier and
+      # resolves them out of web/node_modules.
+      #
+      # (Before O12 the alias pointed at web/src, and this step was `npm ci`
+      # alone for the same reason in a different guise.)
       #
       # npm, not yarn: web/ tracks package-lock.json only.
-      - name: Install web/ dependencies
-        run: npm ci
+      - name: Install and build web/
+        run: npm ci && npm run build
         working-directory: web
       - run: yarn install --frozen-lockfile
       - run: yarn typecheck
