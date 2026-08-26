@@ -487,21 +487,41 @@ exists**, which is why this is worth doing now rather than later:
 The skeleton, with the substitution points marked:
 
 ```
-sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' <ORIGINS>; style-src 'unsafe-inline' <ORIGINS>; img-src <ORIGINS> data:; font-src <ORIGINS> data:; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; manifest-src 'none'; media-src 'none'; worker-src 'none'
+sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' <CODE>; style-src 'unsafe-inline' <CODE>; img-src <ORIGINS> data:; font-src <ORIGINS> data:; connect-src 'none'; form-action 'none'; frame-ancestors 'self'; frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'none'; manifest-src 'none'; media-src 'none'; worker-src 'none'
 ```
 
-`<ORIGINS>` is the sorted, space-joined origin list. A template referencing nothing remote yields
-`script-src 'unsafe-inline'` with no host at all — **strictly tighter than today**, and the common
-case for a chart drawn from the injected series.
+> 🔴 **AMENDED 2026-08-26 — there are TWO placeholders, not one (R152).** This section originally
+> printed a single `<ORIGINS>` at all four positions. That granted **script execution** to any host
+> the template merely fetches an image from, or merely navigates to: `remoteOrigins` is deliberately
+> the superset and includes `meta[http-equiv=refresh]` targets and `object > param` values. With
+> `'unsafe-inline'` already granted, the template's own inline script could then load code from a
+> host the reviewing human filed under "images" — erasing the very distinction between *approved as
+> code* and *approved as an asset* that `scriptSrcs` exists to carry.
+>
+> - **`<CODE>`** — the sorted, deduplicated `new URL(u).origin` over **`scriptSrcs`**. Remote code
+>   and stylesheets: what a human approves *as code*.
+> - **`<ORIGINS>`** — **`remoteOrigins`**, already sorted and deduplicated. Everything the document
+>   fetches at all: non-executable, so the broad list is correct here.
+>
+> `scriptSrcs`' origins are a strict **subset** of `remoteOrigins`, which is also what this section's
+> own "W24 renders everything else as a set difference" depends on — W19 asserts it rather than
+> assuming it. Both lists already ship; no W30 change. **Residual, recorded:** a *stylesheet*-only
+> host still gains `script-src`, because `scriptSrcs` mixes scripts and stylesheets in one untagged
+> array. Splitting it is a W30 change and a future hardening.
+
+A template referencing nothing remote yields `script-src 'unsafe-inline'` with no host at all —
+**strictly tighter than today**, and the common case for a chart drawn from the injected series.
 
 **Why it is safe to freeze:** `structureHash` already freezes the template, so the origin set is
 frozen with it. A new origin means a different template, which means a new human review. That is the
 property `https:` never had.
 
 **W19's criterion changes** from *"equals this exact string as a string literal"* to *"equals this
-exact skeleton with the origin list substituted at the four named positions"* — still asserted
-exactly, now with a table test over: no origins; one origin; several; and the same origin arriving
-from two different channels collapsing to one entry.
+exact skeleton with the two origin lists substituted at their named positions"* — still asserted
+exactly, now with a table test over: no origins at all; one origin; several; the same origin arriving
+from two different channels collapsing to one entry; and 🔴 **an origin present in `remoteOrigins`
+but absent from `scriptSrcs`, which must appear in `img-src`/`font-src` and NOT in
+`script-src`/`style-src`** (the R152 case — a table without that row does not test the amendment).
 
 **What this deliberately does NOT close, recorded honestly:**
 

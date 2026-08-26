@@ -1,12 +1,31 @@
 # Agent Wolf report layer — Design & Implementation Plan
 
+> # ⛔ SUPERSEDED — 2026-08-26. DO NOT EXECUTE FROM THIS DOCUMENT.
+>
+> This document was **folded into `design/2026-08-20-agent-wolf.md` (revision 4, then amended by
+> revision 5)** exactly as its own § "How this document lands" said it would be. Tickets `R1`–`R12`
+> below became `W15`–`W26`; ten of them are **built and merged**. It is kept only as the record of
+> *why* the report layer is shaped the way it is — its Context, threat model, locking mechanism and
+> rejected alternatives are still the best statement of the reasoning.
+>
+> **Three sections below are STALE and actively contradict the code. Do not read them for values:**
+>
+> | Section here | Superseded by | How it is wrong |
+> | --- | --- | --- |
+> | § "The CSP header, byte-for-byte" | `2026-08-20-agent-wolf.md` § of the same name, **then `2026-08-24-agent-wolf-ui.md` § 6b** | Prints a **shorter, differently ordered string** that omits `frame-src`, `child-src`, `object-src`, `manifest-src`, `media-src` and `worker-src`. It is also **constant**, whereas revision 5 **derives** the origin list from the approved template. Two different answers to the same question — this is **R130**. |
+> | § "The slot sanitiser profile, pinned as an ALLOW list" | `2026-08-20-agent-wolf.md` § of the same name | Pre-**R116** and pre-**R120**; the pinned profile since gained `KEEP_CONTENT`, `FORCE_BODY` (**R149**) and a corrected `#text` rationale (**R147**), each of which closed a real defect. |
+> | § "Tickets" (`R1`–`R12`) | `2026-08-20-agent-wolf.md` § "Tickets" (`W15`–`W26`) | Renumbered, re-scoped, and their Status/checkboxes here were **never maintained** — every one still reads `pending` while ten have shipped. |
+>
+> Everything above § "Interfaces" remains accurate as *reasoning*. The **main plan is the only
+> source of truth for any value, signature, ticket or command.**
+
 > **EXECUTION RULES (for agents):** Work ONE ticket at a time, in order unless dependencies say
 > otherwise. Only the orchestrator changes ticket Status; workers may only append to Notes and the
 > Discovered Issues Log. A ticket's checkbox is checked only after its Validation commands have
 > been re-run by the orchestrator and pass. Do not expand scope; log surprises in the Discovered
 > Issues Log instead.
 
-Status: proposed
+Status: **superseded** (folded into the main plan, revision 4 → 5; see the banner above)
 Relates: `design/2026-08-20-agent-wolf.md` (the main plan, revision 3),
 `design/2026-08-21-agent-wolf-executability-audit.md` (26 blocking defects awaiting revision 4)
 
@@ -369,6 +388,11 @@ export function detectDrift(template: ParsedTemplate, slots: Record<string, stri
 
 ### The slot sanitiser profile, pinned as an ALLOW list
 
+> ⛔ **STALE — superseded by `design/2026-08-20-agent-wolf.md` § "The slot sanitiser profile, pinned
+> as an ALLOW list".** The profile below predates **R116**, **R120**, **R147** and **R149**. The
+> shipped profile (`api/src/report/sanitise.ts`) differs in ways that each closed a defect. **Do not
+> copy any value from here.**
+
 DOMPurify is an allow-list sanitiser; specifying only what it strips leaves the boundary undefined
 and two executors would ship materially different security while passing the same criteria.
 `SLOT_PROFILE` is exactly:
@@ -424,6 +448,13 @@ POST /api/hypotheses/:id/report-amendment    { amendment_id, decision, rationale
 existing tickets".
 
 ### The CSP header, byte-for-byte
+
+> ⛔ **STALE — this is R130, and it is the reason R130 exists.** The string below is **not** the
+> policy. It is superseded twice over: first by `design/2026-08-20-agent-wolf.md` § "The CSP header,
+> byte-for-byte" (which adds `frame-src`, `child-src`, `object-src`, `manifest-src`, `media-src` and
+> `worker-src`, and fixes the directive order), and then by
+> `design/2026-08-24-agent-wolf-ui.md` § 6b, which makes the origin list **derived from the approved
+> template** rather than the constant `https:` printed here. **Do not copy this string.**
 
 ```
 sandbox allow-scripts; default-src 'none'; script-src https: 'unsafe-inline'; style-src https: 'unsafe-inline'; img-src https: data:; font-src https: data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'
@@ -496,6 +527,10 @@ Revision 4 applies these; they are listed here so nothing is lost in the fold.
 ---
 
 ## Tickets
+
+> ⛔ **STALE — do not execute.** These twelve tickets became `W15`–`W26` in the main plan and their
+> Status fields here were never maintained: every one below still reads `pending`, while W15, W16,
+> W17, W18, W20 and W30 are **merged**. Work the main plan's ticket list, never this one.
 
 Twelve tickets, `R1`–`R12`. Revision 4 renumbers them into the `W` series and merges the dependency
 graph; dependencies below are stated against the main plan's ticket ids so the fold is mechanical.
