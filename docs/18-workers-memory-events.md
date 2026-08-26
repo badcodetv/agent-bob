@@ -415,6 +415,7 @@ What a chat session still does **not** get: the core preamble, a briefing, and a
 | Group | Tools |
 | --- | --- |
 | Memory (§7.3) | `memory_create` `memory_search` `memory_get` `memory_current` |
+| Datasets ([20](20-datasets.md)) | `dataset_list` `dataset_get` `dataset_put` |
 | Sessions | `session_list` |
 | Workers & prompts (§9) | `worker_list` `worker_create` `worker_update` `worker_prompt_read` `worker_prompt_write` `project_prompt_read` `project_prompt_write` |
 | Wiring (§8) | `subscription_list` `subscription_create` `subscription_delete` `schedule_list` `schedule_create` `schedule_update` `schedule_delete` |
@@ -422,6 +423,26 @@ What a chat session still does **not** get: the core preamble, a briefing, and a
 | Skills (§14) | `skill_create` `skill_list` `skill_get` `skill_install` |
 | History (§15) | `config_history` |
 | Humans (§9) | `request_human_attention` |
+
+The **dataset** tools (added 2026-08 with the dataset atom) are the shared-file counterpart to
+memory, and their contracts are one line each — the full document is [`20-datasets.md`](20-datasets.md):
+
+- `dataset_list(selector?, limit?)` — one entry per dataset at its **current** version, filtered by
+  the same selector grammar `memory_search` uses. Limit defaults to 20, capped at 100, and the
+  result *says* when the cap bit.
+- `dataset_get(name, version?)` — metadata plus a **short-lived, single-dataset `download_url`**
+  (300s by default) for the agent to `curl` to a file. Omit `version` for the current one.
+- `dataset_put(name, path, if_version, labels?, content_type?, allow_shrink?)` — agentd pulls
+  `path` (relative to `/workspace`) out of the **calling session's own** container and writes a new
+  version. `if_version` is compare-and-swap and is **not optional**: it must equal the current
+  version, or be `0` meaning "must not exist"; a conflict names the real current version. A
+  replacement with under half the current version's rows is refused without `allow_shrink: true`.
+
+⚠️ **Metadata and URLs only, never bytes in a tool result.** A dataset is a series that would be
+absurd to retype into a memory, so the bytes travel by `Exec`+`cat` on write and by a downloaded
+file on read, and never through the conversation. The one thing that *does* enter the transcript is
+`download_url`'s **bearer token** — bounded by its short TTL and its single-dataset scope, and by
+nothing else. See [`20-datasets.md`](20-datasets.md) § 10.
 
 Notable absences, all deliberate: no `memory_update`/`memory_delete`, no `worker_delete` (retiring
 is `worker_update(name, {enabled:false})`; hard delete stays HTTP/UI-only), no

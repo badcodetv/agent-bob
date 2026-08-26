@@ -1,8 +1,8 @@
 # 19 — Embedding Agent Orange in another application
 
 This is the document you read if you are building an application that uses Agent Orange as its
-agent runtime and does **not** want to read any Go. It covers the three credentials, the config
-ops has to set, the routes your backend calls, the iframe you drop into your page, and the two
+agent runtime and does **not** want to read any Go. It covers the credentials, the config
+ops has to set, the routes your backend calls, the iframe you drop into your page, and the three
 patterns for keeping state between runs.
 
 The driving use case is **Agent Wolf** — a product with its own UI, its own vocabulary
@@ -21,31 +21,42 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
   **501** there (`go/httpapi/session.go:75`, `go/httpapi/sessions_byname.go:104`,
   `go/cmd/agentd/embedtoken.go:111`). `DATABASE_URL` must be set.
 - **Not available in dev-open mode.** The whole flow needs a project credential, and configuring
-  a project API key is exactly what turns dev-open off (`go/cmd/agentd/auth.go:63`). A zero-config
+  a project API key is exactly what turns dev-open off (`devOpen`, `go/cmd/agentd/auth.go:118`). A zero-config
   demo stack cannot exercise any of this.
 
 ---
 
-## 1. The three credentials
+## 1. The credentials — three you hold, one you never see
 
 | Credential | Lifetime | Where it lives | Sent as | Grants |
 | --- | --- | --- | --- | --- |
 | **Project API key** | Long-lived; rotated by editing an env var and restarting | `agentd`'s environment, named by the project map. **Server-side only** | `X-API-Key: <raw>` | Full API access to one project |
 | **Embed token** | 900s by default, clamped to `[60, 3600]` | The browser, in memory, arriving in a URL **fragment** | `Authorization: Bearer <jwt>` | One session on session-by-id routes — **but read hazard H1 below** |
 | **Console JWT** | 12h | `localStorage` on the Orange origin (unchanged) | `Authorization: Bearer <jwt>` | Full API access to **one** project |
+| **Dataset download token** — *minted by agentd, never held by you* | 300s by default, clamped to `[60, 900]` | Inside a session container, in a URL agentd handed the agent | `?token=<jwt>` **in the query string** | One dataset's bytes on one route — **and read hazard H14 below** |
+
+The first three are yours to hold and mint. The fourth is agentd's own: it exists so an agent inside
+a container can `curl` one dataset without being handed the project's API key
+([`20-datasets.md`](20-datasets.md) § 7). A fifth class exists and is also not yours — the
+**per-session container token** — see § 5.1 and **H12**.
 
 Login mints **one JWT per project** the user's email maps to — `mintProjectTokens` issues a token
 per project id, each carrying a single `customer` claim (`go/cmd/agentd/googleauth.go:354-367`).
 The browser holds the set and picks one; no single console JWT spans two projects.
 
-One middleware accepts all three (`go/cmd/agentd/auth.go:62`). It tries `X-API-Key` **first**; a
-bad key is a `401` and never falls through to the bearer path or to dev-open
-(`auth.go:65-78`) — a silent downgrade on a typo is how a project ends up authenticated as
-someone else. An API key's principal email is the synthetic `api-key:<project>`
-(`auth.go:120`); this matters for `GET /agent/sessions` (see the hazards).
+**One middleware accepts all four** (`apiAuthMiddleware`, `go/cmd/agentd/auth.go:117`). It tries
+`X-API-Key` **first**; a bad key is a `401` and never falls through to the bearer path or to dev-open
+(`auth.go:120-125`) — a silent downgrade on a typo is how a project ends up authenticated as someone
+else. The `?token=` leg sits **after** the key branch and **before** dev-open, and is gated to one
+request shape (`datasetDownloadPath`, `auth.go:71-90`; the leg at `:152-166`). An API key's principal
+email is the synthetic `api-key:<project>` (`apiKeyEmail`, `auth.go:246`); this matters for
+`GET /agent/sessions` (see the hazards).
+
+*(Cite the symbol, not the line: the three citations in this paragraph all drifted once when ~55
+lines were inserted at the top of `auth.go`, and pointed at unrelated constants for a while.)*
 
 The console JWT is minted with a 12h TTL by `/auth/google` and `/auth/password`
-(`go/cmd/agentd/main.go:473`). Nothing in this document changes it.
+(`loginIssuer`, `go/cmd/agentd/main.go:546`). Nothing in this document changes it.
 
 ---
 
@@ -271,11 +282,26 @@ X-API-Key: $WOLF_API_KEY
 - `404` for an unknown or foreign name, whatever the reason. `403` if the credential carries no
   project. `501` if session names or `AGENTKIT_JWT_SECRET` are not configured.
 
-The token carries a `scope: "session:<id>"` claim. Its `sid` claim is deliberately **empty** — in
-a real deployment `agentd` signs each container's own session token with the same secret and the
-core MCP server authenticates its caller by exactly that claim, so an embed token carrying a `sid`
-would be a working credential for the project's memory and worker-prompt tools
-(`embedtoken.go:158-172`).
+The token carries a `scope: "session:<id>"` claim. Its `sid` claim is deliberately **empty**, and
+that is still load-bearing even though the reason has changed since it was written.
+
+- **It used to be the whole defence.** `agentd` once signed each container's own session token with
+  the *same* secret, and the core MCP server authenticates its caller by exactly the `sid` claim —
+  so an embed token carrying a `sid` would have been a working credential for the project's memory
+  and worker-prompt tools, handed to a browser inside a third-party page.
+- **The secrets are now separate** (`go/cmd/agentd/sessionsecret.go`; `main.go:152-153`; **H12**),
+  and `/mcp` verifies with the *session* key (`main.go:601`), so an embed token — signed with the
+  API key — cannot authenticate there whatever its `sid` says. ⚠️ **With one exception**: a
+  deployment that sets `AGENTKIT_SESSION_JWT_SECRET` to the **same value** as `AGENTKIT_JWT_SECRET`
+  collapses the two classes again. agentd prints a `WARNING` at boot when it detects exactly that.
+- **The empty `sid` is now the second of two locks, not the only one.** The API middleware also
+  rejects any token carrying a non-empty `sid` with **401** (`go/cmd/agentd/auth.go`), so an embed
+  token that grew one would simply stop working on the routes it exists for.
+
+Confinement rides on the `scope` claim either way — it is the claim built for the question "what
+may this token touch" — and **scope is enforced only on session-by-id routes** (**H1**). *(The
+comment at `go/cmd/agentd/embedtoken.go:158-172` still describes the pre-split world and is stale;
+the code around it is correct.)*
 
 ### 5.2 Frame it
 
@@ -320,7 +346,9 @@ map and nginx copies it onto the static page via an `internal` `auth_request` to
 ## 6. Fetch artifacts (the proxy pattern)
 
 Your backend fetches bytes with the API key and re-serves them from **your** origin. That is the
-whole reason there is no CORS and no signed-URL machinery.
+whole reason there is no CORS and no signed-URL machinery **on the browser-facing paths**. (One
+signed-URL mechanism does exist, and it is not for browsers: the dataset download token, minted for
+an agent inside a container — [`20-datasets.md`](20-datasets.md) § 7.)
 
 ```
 GET /agent/sessions/by-name/hypothesis-a/artifacts                    → metadata list
@@ -373,16 +401,16 @@ index (the sqlite fallback).
 
 ---
 
-## 7. Read memory over HTTP
+## 7. Read memory over HTTP — and the one write
 
-Three routes (`go/httpapi/memories.go`; patterns at `go/httpapi/httpapi.go:385-389`, registered at
-`:463-465`):
+Four routes (`go/httpapi/memories.go`), three reads and one append:
 
 | Route | Returns |
 | --- | --- |
 | `GET /agent/memories?selector=&query=&limit=` | `{"memories": [...]}` — search results carrying a **`snippet` cut at 500 bytes** and no `content` field at all |
 | `GET /agent/memories/{id}` | one memory **in full** |
 | `GET /agent/memories/current?name=<n>` | the **newest** memory labelled `name=<n>`, in full |
+| `POST /agent/memories` | **201** and the appended row — the trust anchor, below |
 
 The last two are what T18 added, and they are what makes "render the current state from memory"
 possible: before them, full content was reachable only from inside a container through the
@@ -412,20 +440,84 @@ across the product surface, so read the field's own note rather than assuming.
 - Unknown name or id → **404 `memory not found`**, one string for absent, malformed and
   other-project alike. A store outage is **500**, not 404.
 - `403` when the credential names no project; `501` when the memory store is not Postgres.
-- **Read-only.** There is no HTTP write or delete; memories are append-only and written by agents
-  through their tools.
+
+### The append route — `POST /agent/memories`
+
+This is how an embedding application holds state of its own. Until it shipped, the only write
+surface was `memory_create` on the core MCP server, authenticated by a **session token an embedder
+does not hold** — so an application embedding Orange could hold no authoritative state at all.
+
+```http
+POST /agent/memories
+X-API-Key: $YOUR_PROJECT_KEY
+Content-Type: application/json
+
+{ "labels": {"kind":"hypothesis","name":"1a2b3c4d","status":"live"},
+  "content": "…", "embed": false }
+```
+
+- **Auth: a project API key or a console JWT, and nothing else.** An **embed token is 403** (`403`
+  on `Identity.SessionScope`); a **session token is 401** before this handler runs, rejected by
+  agentd's middleware on its non-empty `sid` (see **H12**). A credential that reaches a container
+  must never be able to mint state the application will read back as its own.
+- **201 Created**, body = the stored row read back from the database: `id`, `labels`, `content`,
+  both provenance fields, `created_at` in unix **milliseconds**.
+- **Provenance is server-stamped EMPTY** and the body cannot influence it. A body carrying
+  `created_by_worker` or `created_by_session` is **rejected 400** — including `""` and `null` —
+  rather than ignored: silently dropping them would leave the caller believing it had attributed
+  the memory. **Empty provenance is what marks a row as the application's own word**; anything
+  written from inside a container carries a worker name or a session id. (Necessary, not
+  sufficient — `POST /agent/topologies/apply` also writes provenance-free memory seeds, so pin the
+  label vocabulary you trust as well.)
+- **Project comes from the credential.** There is no project field.
+- Labels go through the existing validator; a bad label is **400** with the validator's own message.
+  Blank content is **400**.
+- **`embed` defaults to `true`.** Content over **24576 bytes** with `embed: true` is **400** naming
+  the `embed: false` remedy; the hard ceiling for any memory is **1048576 bytes** and is checked
+  first, so a caller 2MB over is not told to retry and then refused again.
+- **501** when the memory store is not Postgres — or when the database has no column to hold an
+  embedding.
+- **No config event is written.** A memory is data, not configuration.
+
+Still append-only: no `PUT` and no `DELETE` anywhere on these routes. "Changing" a memory is
+appending a newer one.
+
+### Seeing what was withdrawn — `?include_retracted=1`
+
+`retracts=<id>` is an ordinary label, and the SQL that hides retracted rows correlates on the
+**retracted row's id and project only — it never checks who wrote the retraction**. So anything
+holding the core MCP tools can withdraw your application's own authoritative row from every search
+path, and with the filter always on that erasure is indistinguishable from the row never having
+existed. A `latest_per=` query then quietly hands back the *older* row beneath it.
+
+`GET /agent/memories?selector=…&latest_per=…&include_retracted=1` is the audit view:
+
+- Retracted rows come back, each carrying **`retracted_by`** — **every** retraction against it,
+  newest first, each with its own `memory_id`, `created_by_worker`, `created_by_session` and
+  `created_at`. All of them, not just the newest: a reader honours a withdrawal only if *some*
+  retraction of the row has empty provenance, and with only the newest an attacker can stack its own
+  retraction on top of a legitimate one and resurrect state you took back.
+- Rows nothing retracts omit the field entirely, so an ordinary search is byte-identical to what it
+  was before.
+- **Auth: key or JWT only. `403` for a session-scoped (embed) credential** — handing the audit view
+  to an actor with a container's reach tells it exactly which erasure was noticed.
+- Any value other than exactly `1` (including present-but-empty) is **400**.
+
+`GET /agent/memories/{id}` is deliberately **not** retraction-filtered: asking for an id is an
+explicit request for that row, and reading what was withdrawn is the point of not deleting anything.
 
 ---
 
 ## 8. The two-bot pattern
 
-Agent Orange offers **two** ways to carry state between runs, and an application-layer builder
+Agent Orange offers **three** ways to carry state between runs, and an application-layer builder
 picks. Do not collapse them.
 
 | Strategy | Mechanism | Suits |
 | --- | --- | --- |
 | **Memory** | Labelled, append-only rows; `memory_current(name)` returns the newest match; injected per-job via a worker's `briefing` selectors | Product-layer workers, where every scheduled tick spawns a fresh session and container by design |
 | **Session snapshot** | The archive loop snapshots an idle session and releases its container; the next message restores the filesystem *and* rehydrates conversation history | Long-lived workspaces where **files are the state** |
+| **Dataset** | A project-scoped, named, **versioned blob** written under compare-and-swap by the `dataset_put` tool and read over four HTTP routes; bytes never pass through a tool result. [`20-datasets.md`](20-datasets.md) | A numeric series many fresh containers rewrite — where the *bytes* are the state and putting them in a memory would cost tokens daily |
 
 The recommended shape for a user-facing, continuously-researched thing is **two atoms plus project
 memory as the system of record**:
@@ -571,6 +663,11 @@ Everything an embedding backend touches, in one table.
 | `GET /agent/memories?selector=&query=&limit=` | key or JWT | **snippets only** |
 | `GET /agent/memories/{id}` | key or JWT | full content |
 | `GET /agent/memories/current?name=<n>` | key or JWT | full content, newest |
+| `POST /agent/memories` | **key or JWT only** | 201; provenance stamped empty, a body supplying it is 400; embed token 403, session token 401 |
+| `GET /agent/datasets?selector=&limit=` | key or JWT | `{"datasets":[…]}`, one row per name at its current version |
+| `GET /agent/datasets/{name}` | key or JWT | current version's metadata, **bare object** |
+| `GET /agent/datasets/{name}/versions?limit=` | key or JWT | `{"versions":[…]}`, newest first |
+| `GET /agent/datasets/{name}/download?version=&token=` | key, JWT, **or a matching scoped dataset token in `?token=`** | raw bytes; 410 when the row is there and the blob is gone |
 | `POST /agent/embed-token` | **key only** | `{session, ttl_seconds?}` → `{token, expires_at}` |
 | `POST /auth/verify-google` | **key only** | needs `GOOGLE_CLIENT_ID`, else 404 |
 | `GET /embed/session/{name}#token=…` | fragment token | static page served by nginx |
@@ -592,6 +689,11 @@ picture of the surface.
 | `AGENTKIT_PUBLIC_BASE_URL` | Externally reachable base for permalinks (`<base>/p/<project>/s/<session>`) |
 | `AGENTKIT_SESSION_IDLE_TIMEOUT` | Default `30m` — idle sessions are snapshotted and their container released; the next message restores them |
 | `AGENTKIT_PORT_RANGE_START` / `_END` | The concurrent-session ceiling per host (default 100) |
+| `AGENTKIT_DATASET_MAX_BYTES` | Per-write cap on a dataset pulled out of a workspace. Default `67108864` (**64 MiB**), given as a plain integer count of bytes |
+| `AGENTKIT_DATASET_REAP_INTERVAL` | How often the dataset version reaper and orphan blob sweep run. Default `6h`; **`0` (or `off`) means never sweep**. Bounded to `[1m, 30d]` |
+| `AGENTKIT_DATASET_KEEP_VERSIONS` | Versions kept per `(project, name)`. Default `30`; an integer **count**, max `10000`. ⚠️ `0` here means **keep everything**, the opposite of `0` on the interval above |
+
+Datasets, in full: [`20-datasets.md`](20-datasets.md).
 
 ---
 
@@ -611,8 +713,15 @@ The credential table says an embed token grants one session. The **mechanism** �
 `:245-247`) — is reachable only from routes that take a session id. An embed token still carries
 `customer: <project>` (`go/cmd/agentd/auth.go:104-114,123-130`), so for its life it can also call
 every project-wide route: `PUT /agent/workers/{name}`, `PUT /agent/project-settings`,
-`POST /agent/events`, the schedule CRUD, `GET /agent/memories` and both new full-content memory
-reads (`go/httpapi/memories.go:193,227` take no session id, so `ownsSession` never runs).
+`POST /agent/events`, the schedule CRUD, `GET /agent/memories` and both full-content memory reads
+(none of those handlers takes a session id, so `ownsSession` never runs).
+
+⚠️ **Two routes now refuse a scoped credential directly, without `ownsSession`** — they check
+`Identity.SessionScope` themselves and answer **403** (`go/httpapi/memories.go`): the memory append
+`POST /agent/memories`, and `GET /agent/memories?…&include_retracted=1`. So an embed token **cannot
+mint trusted state and cannot read the audit view**, which is the pair this hazard would otherwise
+hand it. That is a per-route patch on the two places it mattered most, **not** the project-wide rule
+below — everything else in the paragraph above is unchanged.
 
 That credential is handed to a browser inside a third-party page. **This is a real privilege
 escalation bounded only by the token's TTL** — which is why the TTL ceiling is one hour
@@ -730,19 +839,70 @@ API/MCP-only** for now.
 (`examples/web/src/EmbedSession.tsx:57`), so `/embed/session/session` resolves to the empty string.
 `session` is legal kebab-case. Cosmetic; just do not use that name.
 
-### H12 — the session-token secret and the API secret are the same value
+### H12 — ✅ CLOSED: the two credential classes are now separately signed, and `sid` is locked out
 
-`go/cmd/agentd/main.go:129-131` reads `jwtSecret := os.Getenv("AGENTKIT_JWT_SECRET")` and
-`sessionSecret := envOr("AGENTKIT_JWT_SECRET", "dev-secret")`. They diverge only in the dev-open
-case. Consequence, which pre-dates this work: a container's per-session token is already a
-structurally valid credential for the API middleware, and is accepted there with **full project
-scope**. Not exploited by anything in-repo, and it is the reason the embed token uses an explicit
-`scope` claim rather than overloading `sid`.
+**This hazard used to read "the session-token secret and the API secret are the same value", and
+that no longer describes the code.** It was true when written: agentd signed a container's
+per-session token with `AGENTKIT_JWT_SECRET`, the same value the API middleware verifies bearer
+tokens with, so a token a prompt-injected model could read out of its own container was a
+structurally valid **full-project** credential on every route the middleware protects.
+
+Two independent defences now stand, either of which alone closes it:
+
+1. **Different signing keys** (`go/cmd/agentd/sessionsecret.go`; `main.go:152-153`). The session
+   class gets its own key, **derived** from the API secret by HMAC-SHA256 under a fixed, versioned
+   label. Derivation rather than a new mandatory variable was deliberate: no deployment has to
+   change anything to get the fix, the derived key is a one-way function of the API secret, and
+   rolling `AGENTKIT_JWT_SECRET` rolls both together. A deployment wanting to roll them
+   independently sets `AGENTKIT_SESSION_JWT_SECRET`; setting it to the *same* value as
+   `AGENTKIT_JWT_SECRET` re-opens the defect, and agentd says so loudly at boot.
+2. **The `sid` lock** (`go/cmd/agentd/auth.go`, which marks it *"doc 22, RD30"* — that is the Go
+   comment's own reference to a design log, **not** a `docs/22-*.md`; no such file exists). The API
+   middleware independently
+   rejects **any** token carrying a non-empty `sid` claim with **401**, before routing — belt and
+   braces for a future issuer that stamps `sid` by accident.
+
+Consequences for an embedder, both of which the rest of this document depends on: a session token
+cannot reach `POST /agent/memories` at all (it is 401, not 403), and **empty provenance therefore
+means "written by something holding project authority"** rather than "written by anything with a
+token". Note that an **embed token is still API-class** — same secret, empty `sid` — and is confined
+only by its `scope` claim (**H1**), so it is refused explicitly by the routes that mint or read
+trusted state rather than by its signature.
+
+*Upgrading a live deployment:* restart, no config change and no data migration. In-flight session
+tokens minted by the previous binary stop verifying at the core MCP server; they carry a one-hour
+TTL and are re-minted on every provision, restore and rehydrate, so the window is bounded by that
+TTL and touches only the core tools of containers adopted across the restart.
 
 ### H13 — `GET /agent/memories/current` reserves the name `current` in the id path space
 
 Harmless today because ids are uuids, but `CreateMemory` accepts a caller-supplied id, so a memory
 created with the literal id `current` would be unreachable by id. Nothing in-repo supplies one.
+
+### H14 — ⚠️ a dataset download token travels **in the query string**, where the rest of the tree never puts a credential
+
+Every other credential here rides in a header (`X-API-Key`, `Authorization`) or in a URL **fragment**
+that browsers never transmit (the embed token, § 5.2). The **dataset download token** is the one
+exception in the whole tree: it is a bearer JWT in `?token=` on
+`GET /agent/datasets/{name}/download` (`go/cmd/agentd/auth.go:152-166`). The reason is concrete — the
+caller is a model's `curl` inside a container, curl cannot send a fragment, and a header would make
+the model compose one from a URL it was handed — but the consequences follow the query string
+wherever it goes:
+
+- **Anything that logs a URL logs the credential.** `agentd` itself writes no access log, but nginx
+  proxies `/agent/` (`deploy/web.nginx.conf:54-62`) and its default `access_log` format includes the
+  query string, so a download fetched through the web origin lands in a log file with the token in
+  it. So would any sidecar, load balancer, APM tracer or proxy an operator adds.
+- **It reaches the model, and therefore the transcript.** The URL is returned by `dataset_get` as a
+  tool result — see [`20-datasets.md`](20-datasets.md) § 10 for the full reach and the two caveats.
+- **`Referer` is not a risk here** (nothing renders these URLs in a page), but it becomes one the
+  moment anybody puts a download URL into HTML.
+
+**The bound is the whole mitigation, and it is a bound rather than a barrier:** a **300s** default
+TTL (ceiling 900s) and a scope pinned to one `(project, name)` pair — so a leaked token buys one
+dataset's bytes for a few minutes, and cannot be replayed against another dataset or another project.
+**Do not extend the TTL, do not log these URLs, and do not re-serve one to a browser** — proxy the
+bytes from your own backend the way § 6 does for artifacts.
 
 ---
 
@@ -750,6 +910,8 @@ created with the literal id `current` would be unreachable by id. Nothing in-rep
 
 - `docs/18-workers-memory-events.md` — the product layer from an operator's seat: workers, memory,
   triggers, the core tools, the config log.
+- `docs/20-datasets.md` — the dataset atom (the fourth credential class, the four read routes, the
+  reaper) and the provenance trust rule behind `POST /agent/memories` in § 7.
 - `docs/06-artifacts.md` — the artifact contract and the status state machine behind § 6.
 - `docs/14-host-adapters.md` — the tenancy contract and the store seams.
 - `design/2026-08-06-embeddable-agent-orange.md` — the plan this was built from, including the
