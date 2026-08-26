@@ -21,7 +21,7 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
   **501** there (`go/httpapi/session.go:75`, `go/httpapi/sessions_byname.go:104`,
   `go/cmd/agentd/embedtoken.go:111`). `DATABASE_URL` must be set.
 - **Not available in dev-open mode.** The whole flow needs a project credential, and configuring
-  a project API key is exactly what turns dev-open off (`go/cmd/agentd/auth.go:63`). A zero-config
+  a project API key is exactly what turns dev-open off (`devOpen`, `go/cmd/agentd/auth.go:118`). A zero-config
   demo stack cannot exercise any of this.
 
 ---
@@ -56,7 +56,7 @@ email is the synthetic `api-key:<project>` (`apiKeyEmail`, `auth.go:246`); this 
 lines were inserted at the top of `auth.go`, and pointed at unrelated constants for a while.)*
 
 The console JWT is minted with a 12h TTL by `/auth/google` and `/auth/password`
-(`go/cmd/agentd/main.go:473`). Nothing in this document changes it.
+(`loginIssuer`, `go/cmd/agentd/main.go:546`). Nothing in this document changes it.
 
 ---
 
