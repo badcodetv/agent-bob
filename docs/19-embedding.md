@@ -1,8 +1,8 @@
 # 19 — Embedding Agent Orange in another application
 
 This is the document you read if you are building an application that uses Agent Orange as its
-agent runtime and does **not** want to read any Go. It covers the three credentials, the config
-ops has to set, the routes your backend calls, the iframe you drop into your page, and the two
+agent runtime and does **not** want to read any Go. It covers the credentials, the config
+ops has to set, the routes your backend calls, the iframe you drop into your page, and the three
 patterns for keeping state between runs.
 
 The driving use case is **Agent Wolf** — a product with its own UI, its own vocabulary
@@ -26,28 +26,34 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
 
 ---
 
-## 1. The three credentials
+## 1. The credentials — three you hold, one you never see
 
 | Credential | Lifetime | Where it lives | Sent as | Grants |
 | --- | --- | --- | --- | --- |
 | **Project API key** | Long-lived; rotated by editing an env var and restarting | `agentd`'s environment, named by the project map. **Server-side only** | `X-API-Key: <raw>` | Full API access to one project |
 | **Embed token** | 900s by default, clamped to `[60, 3600]` | The browser, in memory, arriving in a URL **fragment** | `Authorization: Bearer <jwt>` | One session on session-by-id routes — **but read hazard H1 below** |
 | **Console JWT** | 12h | `localStorage` on the Orange origin (unchanged) | `Authorization: Bearer <jwt>` | Full API access to **one** project |
+| **Dataset download token** — *minted by agentd, never held by you* | 300s by default, clamped to `[60, 900]` | Inside a session container, in a URL agentd handed the agent | `?token=<jwt>` **in the query string** | One dataset's bytes on one route — **and read hazard H14 below** |
+
+The first three are yours to hold and mint. The fourth is agentd's own: it exists so an agent inside
+a container can `curl` one dataset without being handed the project's API key
+([`20-datasets.md`](20-datasets.md) § 7). A fifth class exists and is also not yours — the
+**per-session container token** — see § 5.1 and **H12**.
 
 Login mints **one JWT per project** the user's email maps to — `mintProjectTokens` issues a token
 per project id, each carrying a single `customer` claim (`go/cmd/agentd/googleauth.go:354-367`).
 The browser holds the set and picks one; no single console JWT spans two projects.
 
-One middleware accepts all three (`go/cmd/agentd/auth.go:62`) — **and, on exactly one route, a
-fourth credential class it mints for itself**: the short-lived, name-scoped **dataset download
-token**, presented as `?token=` on `GET /agent/datasets/{name}/download` and accepted nowhere else
-([`20-datasets.md`](20-datasets.md) § 7). You never hold or mint that one; it is handed to an agent
-inside a container so its `curl` can fetch one dataset without carrying the project's API key. It
-tries `X-API-Key` **first**; a
-bad key is a `401` and never falls through to the bearer path or to dev-open
-(`auth.go:65-78`) — a silent downgrade on a typo is how a project ends up authenticated as
-someone else. An API key's principal email is the synthetic `api-key:<project>`
-(`auth.go:120`); this matters for `GET /agent/sessions` (see the hazards).
+**One middleware accepts all four** (`apiAuthMiddleware`, `go/cmd/agentd/auth.go:117`). It tries
+`X-API-Key` **first**; a bad key is a `401` and never falls through to the bearer path or to dev-open
+(`auth.go:120-125`) — a silent downgrade on a typo is how a project ends up authenticated as someone
+else. The `?token=` leg sits **after** the key branch and **before** dev-open, and is gated to one
+request shape (`datasetDownloadPath`, `auth.go:71-90`; the leg at `:152-166`). An API key's principal
+email is the synthetic `api-key:<project>` (`apiKeyEmail`, `auth.go:246`); this matters for
+`GET /agent/sessions` (see the hazards).
+
+*(Cite the symbol, not the line: the three citations in this paragraph all drifted once when ~55
+lines were inserted at the top of `auth.go`, and pointed at unrelated constants for a while.)*
 
 The console JWT is minted with a 12h TTL by `/auth/google` and `/auth/password`
 (`go/cmd/agentd/main.go:473`). Nothing in this document changes it.
@@ -850,7 +856,9 @@ Two independent defences now stand, either of which alone closes it:
    rolling `AGENTKIT_JWT_SECRET` rolls both together. A deployment wanting to roll them
    independently sets `AGENTKIT_SESSION_JWT_SECRET`; setting it to the *same* value as
    `AGENTKIT_JWT_SECRET` re-opens the defect, and agentd says so loudly at boot.
-2. **The `sid` lock** (`go/cmd/agentd/auth.go`, "doc 22, RD30"). The API middleware independently
+2. **The `sid` lock** (`go/cmd/agentd/auth.go`, which marks it *"doc 22, RD30"* — that is the Go
+   comment's own reference to a design log, **not** a `docs/22-*.md`; no such file exists). The API
+   middleware independently
    rejects **any** token carrying a non-empty `sid` claim with **401**, before routing — belt and
    braces for a future issuer that stamps `sid` by accident.
 
@@ -870,6 +878,31 @@ TTL and touches only the core tools of containers adopted across the restart.
 
 Harmless today because ids are uuids, but `CreateMemory` accepts a caller-supplied id, so a memory
 created with the literal id `current` would be unreachable by id. Nothing in-repo supplies one.
+
+### H14 — ⚠️ a dataset download token travels **in the query string**, where the rest of the tree never puts a credential
+
+Every other credential here rides in a header (`X-API-Key`, `Authorization`) or in a URL **fragment**
+that browsers never transmit (the embed token, § 5.2). The **dataset download token** is the one
+exception in the whole tree: it is a bearer JWT in `?token=` on
+`GET /agent/datasets/{name}/download` (`go/cmd/agentd/auth.go:152-166`). The reason is concrete — the
+caller is a model's `curl` inside a container, curl cannot send a fragment, and a header would make
+the model compose one from a URL it was handed — but the consequences follow the query string
+wherever it goes:
+
+- **Anything that logs a URL logs the credential.** `agentd` itself writes no access log, but nginx
+  proxies `/agent/` (`deploy/web.nginx.conf:54-62`) and its default `access_log` format includes the
+  query string, so a download fetched through the web origin lands in a log file with the token in
+  it. So would any sidecar, load balancer, APM tracer or proxy an operator adds.
+- **It reaches the model, and therefore the transcript.** The URL is returned by `dataset_get` as a
+  tool result — see [`20-datasets.md`](20-datasets.md) § 10 for the full reach and the two caveats.
+- **`Referer` is not a risk here** (nothing renders these URLs in a page), but it becomes one the
+  moment anybody puts a download URL into HTML.
+
+**The bound is the whole mitigation, and it is a bound rather than a barrier:** a **300s** default
+TTL (ceiling 900s) and a scope pinned to one `(project, name)` pair — so a leaked token buys one
+dataset's bytes for a few minutes, and cannot be replayed against another dataset or another project.
+**Do not extend the TTL, do not log these URLs, and do not re-serve one to a browser** — proxy the
+bytes from your own backend the way § 6 does for artifacts.
 
 ---
 

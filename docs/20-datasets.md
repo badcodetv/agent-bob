@@ -5,8 +5,11 @@
 > that an agent cannot forge. Those are the two things Orange could not do before
 > `design/2026-08-20-agent-wolf.md`, and this document is what shipped for them.
 >
-> Read [`19-embedding.md`](19-embedding.md) first for the credential model — the three credential
-> classes named below (project API key, console JWT, session token) are defined there.
+> Read [`19-embedding.md`](19-embedding.md) first for the credential model. Its § 1 tables the three
+> an embedding application holds — **project API key**, **embed token**, **console JWT** — and § 5.1
+> and hazard **H12** cover the fourth class, the per-container **session token**, which an embedder
+> never holds. The **dataset download token** below is a fifth, minted by agentd for a container and
+> accepted on one route (§ 7).
 >
 > **Postgres-only.** Every route, tool and sweep here needs `DATABASE_URL`. On the sqlite fallback
 > the store returns `ErrDatasetRequiresPostgres` and the HTTP routes answer **501**
@@ -24,7 +27,7 @@ A **dataset** is a project-scoped, named, versioned, labelled blob (`go/agentdb/
 | **Project-scoped** | The project is the credential's `customer` claim, in code, always. There is no project parameter on any route or tool, and another project's dataset is indistinguishable from one that does not exist |
 | **Named** | `name` uses the label-value charset — `[A-Za-z0-9]` plus `-`, `_`, `.`, at most 63 characters — and, unlike a label value, may not be empty (`ValidateDatasetName`) |
 | **Versioned** | Every write creates a **new immutable version**, numbered from 1. Nothing is ever mutated in place |
-| **"Current"** | The **highest version** for `(project, name)`. Not "the newest by timestamp" — the version column is the authority, and `CurrentDataset` reads `COALESCE(MAX(version), 0)` |
+| **"Current"** | The **highest version** for `(project, name)`. Not "the newest by timestamp" — the version column is the authority. `CurrentDataset` reads it as `Order("version DESC").First()` (`go/agentdb/datasets.go:324-327`); the CAS path reads the same high-water mark as `COALESCE(MAX(version), 0)` (`:227-230`) |
 | **Labelled** | The same `LabelSet` memories use, the same validator, the same Kubernetes-style selector parser. Labels are **per version**, so a superseded version's labels never decide whether the current one matches a selector |
 | **Provenance** | `created_by_worker` / `created_by_session`, stamped from the writing session's token — see § 9 |
 
@@ -129,11 +132,12 @@ model verbatim.
 **`row_count` is `max(0, N-1)`**, where N counts `\n`-terminated runs plus a final unterminated run
 when the last byte is not `\n` (`countCSVRows`, `go/cmd/agentd/datasetpull.go:219`). So `"h\na\nb"`
 and `"h\na\nb\n"` both give 2, header-only gives 0, empty gives 0 — **never negative**: the column is
-`NOT NULL` and the shrink guard divides by it. CRLF still counts; the `\r` stays in the bytes.
+`NOT NULL` and the shrink guard compares against it. CRLF still counts; the `\r` stays in the bytes.
 
 `row_count` is **counted server-side from the pulled bytes and never supplied by the caller**, and it
-is only counted for `text/csv` (`content_type` defaults to `text/csv`; anything else stores
-`row_count = 0`, which also switches the shrink guard off for that dataset).
+is only counted for `text/csv` — parameters are allowed, so `text/csv; charset=utf-8` still counts
+(`isCSVContentType`, `go/cmd/agentd/datasetpull.go:205-212`). `content_type` defaults to `text/csv`;
+anything else stores `row_count = 0`, which also switches the shrink guard off for that dataset.
 
 ---
 
@@ -265,9 +269,12 @@ two concurrent pulls of the same dataset cannot collide.
 **Version reaping.** `ReapDatasetVersions(keepPerName, blobs)` keeps the newest `keepPerName` versions
 of each `(project, name)` and deletes the rest — **blob first, then row**, so a failure leaves an
 orphaned blob (recoverable, § below) rather than a row pointing at nothing. `keepPerName <= 0` is a
-no-op on any backend: **0 means keep everything**. A delete failure stops further reaping of that same
-name, lets other names continue, and is returned once every name has been attempted; the count
-returned is exactly what was deleted, so the next pass retries the remainder.
+no-op on any backend: **0 means keep everything**. The two delete failures are handled differently and
+the asymmetry is deliberate: a **blob** delete failure stops further reaping of that same name, lets
+other names continue, and is returned once every name has been attempted, so the next pass retries the
+remainder; a **row** delete failure — the blob is already gone and the row is not — is a graver,
+systemic failure and **halts the whole sweep immediately** (`go/agentdb/datasets.go:563-571`). The
+count returned is exactly what was deleted either way.
 
 **The orphan sweep** finds blob keys under the prefix that **no row references**. It is genuinely
 two-pass, and the safety lives in the caller, not the store: a blob key carries no timestamp, so
@@ -334,7 +341,11 @@ a newer one.
 ### The two hazards an embedder must handle
 
 🔴 **1. `ApplyTopology` is a second producer of empty provenance.** `POST /agent/topologies/apply` is
-reachable by any API-class credential, and its memory seeds are written with no provenance
+reachable by any API-class credential — **including an embed token**, because
+`ApplyTopologyHandler` calls `identify` and applies **no `SessionScope` gate**
+(`go/httpapi/topologies.go:230-234`), unlike `POST /agent/memories` and `?include_retracted=1`, which
+both refuse one explicitly. That is the credential an embedder hands to a browser inside a
+third-party page. Its memory seeds are written with no provenance
 (`go/agentdb/topology_apply.go`). Today no shipped topology can seed an arbitrary label set — the one
 that seeds memory uses fixed `{kind: registry, name: label-registry}` and the request body cannot
 supply its own — so there is no live forgery path. But **empty provenance is necessary, not
