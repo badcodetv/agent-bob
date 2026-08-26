@@ -1,7 +1,7 @@
 # 19 — Embedding Agent Orange in another application
 
 This is the document you read if you are building an application that uses Agent Orange as its
-agent runtime and does **not** want to read any Go. It covers the credentials, the config
+agent runtime and does **not** want to read any Go. It covers the three credentials, the config
 ops has to set, the routes your backend calls, the iframe you drop into your page, and the three
 patterns for keeping state between runs.
 
@@ -26,7 +26,7 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
 
 ---
 
-## 1. The credentials — three you hold, one you never see
+## 1. The three credentials
 
 | Credential | Lifetime | Where it lives | Sent as | Grants |
 | --- | --- | --- | --- | --- |
@@ -35,10 +35,12 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
 | **Console JWT** | 12h | `localStorage` on the Orange origin (unchanged) | `Authorization: Bearer <jwt>` | Full API access to **one** project |
 | **Dataset download token** — *minted by agentd, never held by you* | 300s by default, clamped to `[60, 900]` | Inside a session container, in a URL agentd handed the agent | `?token=<jwt>` **in the query string** | One dataset's bytes on one route — **and read hazard H14 below** |
 
-The first three are yours to hold and mint. The fourth is agentd's own: it exists so an agent inside
-a container can `curl` one dataset without being handed the project's API key
-([`20-datasets.md`](20-datasets.md) § 7). A fifth class exists and is also not yours — the
-**per-session container token** — see § 5.1 and **H12**.
+**The three in the title are the three you hold and mint.** The fourth row is agentd's own and is
+listed because the same middleware accepts it: it is **minted by agentd, never held by you**, it
+exists so an agent inside a container can `curl` one dataset without being handed the project's API
+key ([`20-datasets.md`](20-datasets.md) § 7), and — uniquely in this tree — **it travels in a URL**,
+which is why it has a hazard of its own (**H14**). A fifth class is also not yours: the per-session
+container token, covered in § 5.1 and **H12**.
 
 Login mints **one JWT per project** the user's email maps to — `mintProjectTokens` issues a token
 per project id, each carrying a single `customer` claim (`go/cmd/agentd/googleauth.go:354-367`).
