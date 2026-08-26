@@ -5357,7 +5357,8 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - **Validation:** `cd web && yarn test && yarn typecheck`
 - **Depends on:** W23, W13
 - [ ] done
-- Notes:
+- Notes: 🔴 **Hand-off from W21 (2026-08-26): `script_srcs` on the wire is NOT the set that reaches `script-src`.** `POST …/report-template` returns `script_srcs` as the **raw list of URLs in document order**, while W19's CSP maps only the **`https:` entries** to origins (R155 — `scriptSrcs` is not https-only, and a CSS `@import url(data:…)` puts a `data:` URL in it). So a review screen labelling that list "permitted script origins" **would be lying to the human approving it**. Render it as "remote code this template references", and derive anything you call a CSP origin the way `frame.ts`'s `codeOrigins()` does — do not write a third mapping. 🔴 **"Everything else" is `remote_origins` MINUS THE ORIGINS OF `script_srcs`**, and the difference is routinely **empty** (§ 6b's "strict subset" was corrected to "subset" — for a template whose only remote URL is a `<script src>` the two sets are equal). Do not render an empty difference as an error. And per **R173**, `remote_origins` does not include hosts reached through SVG `fill`/`filter`, which the walker does not scan — the list is what the validator saw, not a guarantee.
+- Notes (original):
 
 ### W25: Report authoring prompts   [Status: done | Model: opus]
 - **Scope:** `prompts/report-authoring.md`, the fixture that keeps it honest, and the interviewer
