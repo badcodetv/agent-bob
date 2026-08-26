@@ -4666,13 +4666,23 @@ W1, W3 and W6 have no Orange dependency and may start immediately in parallel.
 ```ts
 export const SLOT_PROFILE = {
   ALLOWED_TAGS: [
-    // ⚠️ `#text` is LOAD-BEARING and must stay first. DOMPurify treats an
-    // explicit ALLOWED_TAGS list as exhaustive INCLUDING text nodes, so
-    // omitting it strips every character of prose while leaving the elements
-    // standing: `<p class="lead">Gold <strong>rose</strong> 4%.</p>` sanitises
-    // to `<p class="lead"><strong></strong></p>`. Every report would render
-    // empty and no test that only checks "the dangerous token is absent"
-    // would notice. Proved against isomorphic-dompurify ^2 on 2026-08-22.
+    // ⚠️ `#text` and `KEEP_CONTENT: true` DEFEND THE SAME FAILURE AND MOVE
+    // TOGETHER — do not delete either because the other makes it look inert.
+    // DOMPurify treats an explicit ALLOWED_TAGS list as exhaustive INCLUDING
+    // text nodes, so with `KEEP_CONTENT: false` omitting `#text` strips every
+    // character of prose while leaving the elements standing:
+    // `<p class="lead">Gold <strong>rose</strong> 4%.</p>` sanitises to
+    // `<p class="lead"><strong></strong></p>`, every report renders empty, and
+    // no test that only checks "the dangerous token is absent" would notice.
+    // ⚠️ With `KEEP_CONTENT: true` — which this profile sets — the library
+    // adds `#text` itself (`dompurify/dist/purify.cjs.js:916`), so removing
+    // `#text` TODAY changes nothing and mutation-testing it reddens only the
+    // literal pin. That inertness is the trap: an editor who deletes it now
+    // re-opens a blocking defect the moment anyone revisits `KEEP_CONTENT`,
+    // which looks like the safer setting. Measured all four combinations,
+    // W17, 2026-08-26 — see R146. R120(1) was observed against the pre-R120(2)
+    // draft, where `KEEP_CONTENT` was still `false`; this entry corrects the
+    // rationale, not the value. Proved against isomorphic-dompurify ^2.
     "#text",
     "p", "br", "hr", "span", "div", "section",
     "strong", "em", "b", "i", "u", "s", "small", "mark",
@@ -4697,6 +4707,20 @@ export const SLOT_PROFILE = {
   SANITIZE_DOM: true,
   KEEP_CONTENT: true,
   FORBID_CONTENTS: ["script", "style", "template", "noscript", "title", "textarea", "xmp"],
+  // ⚠️ ADDED 2026-08-26 by owner ruling, and it is a VISIBILITY fix, not a
+  // safety one — the output was already safe without it. Without `FORCE_BODY`,
+  // DOMPurify parses slot content in document context and returns only
+  // `<body>` (`WHOLE_DOCUMENT: false`), so content that BEGINS with `<script>`,
+  // `<style>`, `<link>`, `<meta>`, `<base>`, `<title>` or `<template>` is
+  // hoisted into `<head>` by the PARSER and never reaches the sanitiser at all.
+  // It is discarded — but `strippedCount` is then **0**, so the worst possible
+  // slot in the product (`<script>alert(1)</script>` alone) renders as an empty
+  // region with NO degraded-severity notice, because W23 gates that notice on
+  // `stripped_count > 0`. `FORCE_BODY` prefixes a throwaway element to push the
+  // parser into body mode: output is unchanged, counting becomes correct.
+  // See R147. W17 measured the gap and declined to close it unilaterally,
+  // which was right — this is a byte-for-byte pinned profile.
+  FORCE_BODY: true,
 } as const;
 ```
 
@@ -4871,7 +4895,13 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     fails if `sanitize-html`, `xss`, `dompurify` (bare) or `sanitize-html-react` appears as a
     dependency. It checks **manifests, not source**, so the test cannot fail on its own text.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/report/sanitise && yarn typecheck`
+- **Validation:** `cd api && yarn test && yarn typecheck` — 🔴 **the WHOLE api suite, corrected
+  2026-08-26 (R117's sweep, first instance executed).** The single-path form was **proved**
+  insufficient rather than merely suspected: `yarn test src/report/sanitise` ran **green** while
+  `yarn test` ran **red**, because this ticket's own test file broke `api/src/import-boundary.test.ts`
+  by containing the token `@import` (R145(2), fourth instance). This ticket also pulls **jsdom** into
+  `api/`, and a filtered run cannot show that perturbation either. The blast radius is "any file in
+  `api/`" and the whole suite runs in ~1.3s, so the whole suite IS the right filter here.
 - **Depends on:** W16
 - [ ] done
 - Notes:
@@ -5513,7 +5543,9 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     `new URL(u).origin` for every URL the validator already visits — `src`, `href`, `srcset`,
     `poster`, `action`, `formaction`, `xlink:href`, `background`, `ping` (`template.ts:596`), plus
     CSS `url()` and `@import`. One push in an existing loop; **do not write a second walker**.
-  - **`scriptSrcs` is unchanged.** It means "remote code and stylesheets, which a human is
+  - **`scriptSrcs` KEEPS ITS MEANING.** *(Reworded 2026-08-26: this bullet said "is unchanged" while
+    the R118(2) bullet below requires a `srcdoc`-hosted `<script src>` to enter it, so the two
+    contradicted on a literal read. Its contents may grow; its meaning may not.)* It means "remote code and stylesheets, which a human is
     approving as code" and W24 keeps listing it separately. `remoteOrigins` is the superset and
     answers a different question: everything this document will fetch.
   - A test proves the gap this closes: a template whose only remote URL is
@@ -5522,7 +5554,12 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     phones home and the review screen shows them zero remote hosts.
   - Origins collapse: two URLs on the same host with different paths yield **one** entry; `https://a`
     and `https://a:443` are the same origin; ordering is deterministic.
-  - A fragment-only `href="#chart"` and a `data:` URL contribute **no** origin.
+  - A `data:` URL contributes **no** origin; a fragment-only `href="#chart"` **remains refused by the
+    attribute path** per R118(3), and the CSS `#fragment` carve-out (`fill:url(#gradient)`) remains
+    **accepted** and contributes no origin. *(Reworded 2026-08-26: as originally written this was
+    unsatisfiable — R118(3), which this ticket must NOT fix, makes a template containing
+    `href="#chart"` **invalid**, so it has no `remoteOrigins` to inspect at all. Both halves are
+    pinned by test so W30 cannot drift R118(3) in either direction.)*
   - 🔴 **R118(2) IS FOLDED IN HERE — added 2026-08-24, moved from W21 by orchestrator decision.**
     W16's walker does **not** visit `iframe[srcdoc]`, `meta[http-equiv=refresh]` (the `URL=` part of
     its `content`) or `object > param[value]`, so a template can contact a remote host through any
@@ -5543,6 +5580,11 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     origin now appears; a test asserts `scriptSrcs` is still **unchanged** by all three additions,
     because `scriptSrcs` means "remote code a human is approving as code" and a `srcdoc`-hosted
     `<script src>` **does** belong in it while an `<img>` in the same srcdoc does not.
+  - 🔴 **R118(1) IS ALSO FOLDED IN — added 2026-08-26, same argument as R118(2).** The CSS URL
+    scanner does not match **`image-set()`**, so
+    `<style>.a{background:image-set("https://is.example/x.png" 1x)}</style>` parses valid with an
+    **empty** `remoteOrigins` — verified. Add the alternative to `cssUrls`. It is one alternative in
+    an existing scanner, not a second walker.
   - **`R118(3)` is NOT in scope** — the fragment-anchor disagreement between the attribute path and
     the CSS path stays with W25's authoring contract. Do not fix it here; do not break it either.
 - **TDD:** yes.
