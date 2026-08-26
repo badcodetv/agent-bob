@@ -499,11 +499,16 @@ sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' <CODE>; st
 > code* and *approved as an asset* that `scriptSrcs` exists to carry.
 >
 > - **`<CODE>`** — the sorted, deduplicated `new URL(u).origin` over **`scriptSrcs`**. Remote code
->   and stylesheets: what a human approves *as code*.
+>   and stylesheets: what a human approves *as code*. 🔴 **The `https:` entries only** —
+>   `scriptSrcs` is not https-only (a CSS `@import url(data:…)` validates clean), and
+>   `new URL("data:…").origin` is the four characters `null`, which in a CSP is a **host name**
+>   rather than the keyword `'none'`. Measured, W19, **R155**.
 > - **`<ORIGINS>`** — **`remoteOrigins`**, already sorted and deduplicated. Everything the document
 >   fetches at all: non-executable, so the broad list is correct here.
 >
-> `scriptSrcs`' origins are a strict **subset** of `remoteOrigins`, which is also what this section's
+> `scriptSrcs`' origins are a **subset** of `remoteOrigins` — *not* a strict/proper one: for a template
+> whose only remote URL is a `<script src>` the two sets are **equal**, and W24's "everything else"
+> difference is then routinely empty. That is also what this section's
 > own "W24 renders everything else as a set difference" depends on — W19 asserts it rather than
 > assuming it. Both lists already ship; no W30 change. **Residual, recorded:** a *stylesheet*-only
 > host still gains `script-src`, because `scriptSrcs` mixes scripts and stylesheets in one untagged
