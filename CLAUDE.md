@@ -73,6 +73,19 @@ Agent Orange. Three pieces:
 > mode.** The integration guide, and a hazard list you should read before exposing the stack to
 > another application, is **`docs/19-embedding.md`**. Still open at the time of writing: the live
 > stack checks for T13/T15 and the end-to-end spec (T17).
+>
+> **Datasets and the memory append route** (`design/2026-08-20-agent-wolf.md`) close the two gaps
+> that stopped an application from embedding Orange as a system of record. A **dataset** is a
+> project-scoped, named, **versioned blob** (migration `045_datasets`, `go/agentdb/datasets.go`):
+> every write is compare-and-swap, the bytes are pulled out of a container by `Exec`+`cat` and read
+> back through a short-lived scoped download URL, so a shared numeric series never crosses the
+> model's context — three MCP tools (`dataset_list`/`_get`/`_put`), four HTTP read routes, and a
+> version reaper whose blob prefix (`_datasets/bytes/`) is load-bearing because agentd runs **one
+> global `BlobStore`** shared with artifacts and snapshots. **`POST /agent/memories`** is the
+> trust anchor: an API key or console JWT may now append a memory, provenance is server-stamped
+> **empty** and a body supplying it is refused, so a reader can tell the application's own word from
+> anything written inside a container (`?include_retracted=1` is the matching audit view). Both are
+> Postgres-only. Documented in **`docs/20-datasets.md`**.
 
 ## Reading path
 
@@ -103,7 +116,7 @@ If you need to understand the system rather than patch one file, read in this or
 | `sandbox/` | In-image agent (TS). The HTTP/SSE control server + harness adapter that runs inside a session container. `sandbox/Dockerfile` builds the harness image. |
 | `web/` | React component library: chat (one event reducer drives live + replay identically) plus the product-layer pages — project settings, workers, events/jobs, subscriptions + schedules editors, changelog. No router; the app shell is `examples/web/`. |
 | `installations/` | **Example** base images (`core`, `example`) — see `installations/README.md`. Real per-project images live in their own project repos. |
-| `docs/` | Numbered architecture docs, consolidated 2026-07-22 (numbering has deliberate gaps): `01-architecture`, `02-execution-environment`, `03-image-registry`, `05-event-streaming`, `06-artifacts`, `07-in-image-agent`, `13-fleet-placement`, `14-host-adapters`, `15-standalone-stack`, `18-workers-memory-events` (the product layer, from an operator's seat — read it before touching workers/memory/events code), `19-embedding` (integration guide + hazard log for an application embedding Orange: the three credentials, the project map's object form, named sessions, session schedules, embed tokens/iframe, artifact + memory reads). Order: see **Reading path** above. The authoritative product spec is `docs/product/17-product-spec.md` (entry point: goal, atoms, principles, § map) + `docs/product/00`–`09` (`00-overview` = quick map; component designs; original § numbers preserved). The research trail and executed plan records live beside the spec as dated files in the same folder. |
+| `docs/` | Numbered architecture docs, consolidated 2026-07-22 (numbering has deliberate gaps): `01-architecture`, `02-execution-environment`, `03-image-registry`, `05-event-streaming`, `06-artifacts`, `07-in-image-agent`, `13-fleet-placement`, `14-host-adapters`, `15-standalone-stack`, `18-workers-memory-events` (the product layer, from an operator's seat — read it before touching workers/memory/events code), `19-embedding` (integration guide + hazard log for an application embedding Orange: the three credentials, the project map's object form, named sessions, session schedules, embed tokens/iframe, artifact + memory reads), `20-datasets` (the dataset atom — CAS writes, the two byte paths, the canonical CSV, retention and the shared-blob-prefix warning — plus `POST /agent/memories` and the provenance trust rule an embedder holding authoritative state depends on). Order: see **Reading path** above. The authoritative product spec is `docs/product/17-product-spec.md` (entry point: goal, atoms, principles, § map) + `docs/product/00`–`09` (`00-overview` = quick map; component designs; original § numbers preserved). The research trail and executed plan records live beside the spec as dated files in the same folder. |
 | `migration-reference/` | **Reference only — do NOT build or import.** Platinum host-side image pipeline + the original Platinum installations, kept to port from. May contain host-app coupling. |
 | `deploy/`, `docker-compose*.yml`, `README-stack.md` | The standalone stack (run it with one command — below). `deploy/gcp/setup.sh` provisions the GCP side (idempotent, safe to re-run). |
 | `e2e/`, `examples/` | End-to-end tests — **`e2e/features/` + `playwright.stack.config.ts` is the only rig**, run against the compose stack (the legacy Vite rig under `e2e/tests/` was deleted 2026-08-08). `e2e/experiments/` is the offline comparison rig, run with `./e2e/experiments/run.sh test`. Example host + `examples/web/` (the app shell the stack actually serves — `web/` is a component library with no router). |
