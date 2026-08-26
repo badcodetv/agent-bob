@@ -4774,6 +4774,93 @@ that asserts only `SLOT_PROFILE` equals this literal has tested our typing, not 
 
 ---
 
+## HTTP routes added
+
+> **Authored 2026-08-26 to close R154.** W21's Scope cites this section by name and it did not
+> exist: the revision-4 fold moved `2026-08-21-agent-wolf-report-layer.md`'s *tickets* into the `W`
+> series and left its *reference* sections behind. What follows is that document's § of the same
+> name, corrected against the code as merged. The superseded copy is not a source of truth.
+
+```
+GET  /api/hypotheses/:id/report/frame
+       → 200 text/html, the document `composeFrame` returned
+         Content-Security-Policy: the value `composeFrame` DERIVED for this template
+         X-Content-Type-Options: nosniff
+         and NO Set-Cookie
+       → 404 when no locked template exists, with a body the UI distinguishes from a
+             server error (an empty state, not a blank frame)
+
+POST /api/hypotheses/:id/report-template     { html }
+       → 201 { structure_hash }              writes kind=report-template, status=locked
+       → 422 { errors: [{ path, message }] } template failed validation
+       → 409                                 a locked template already exists; use an amendment
+
+POST /api/hypotheses/:id/report-amendment    { amendment_id, decision, rationale }
+       → 200                                 accepting re-validates, then writes a NEW
+                                             kind=report-template
+       → 422                                 the proposed template failed validation, and
+                                             NO template is written
+```
+
+Four notes the route author needs and the old copy did not carry:
+
+1. 🔴 **The CSP is a HEADER and only a header.** `composeFrame` deliberately emits no
+   `<meta http-equiv="Content-Security-Policy">`, and a test pins that. A meta policy silently
+   ignores `sandbox` and `frame-ancestors` — two of the four directives `default-src` does not
+   cover — so a meta copy reads as a second line of defence while being neither. `sandbox` in the
+   CSP is the entire reason direct navigation to this URL is safe; the iframe attribute does
+   nothing there.
+2. 🔴 **`composeFrame` returns `{html, csp, strippedCount, strippedBySlot}` from ONE call.** Take
+   the CSP from that return value; do not call `frameCsp` a second time and do not re-derive it.
+   And **read `strippedCount` from here rather than sanitising again** — a second `sanitiseSlot`
+   pass produces a second number that can disagree with the document actually served.
+3. 🔴 **The version-gated cache key must include the template's `structureHash`, not only the
+   dataset versions.** The dataset version lives inside the series payload; an accepted amendment
+   changes the template and no dataset, so a version-only key keeps serving the old frame for ever.
+4. `422` and `409` are `invalid` and `conflict` in § "Shared error taxonomy". A validation failure
+   is never `internal`, and a template that already exists is never `invalid`.
+
+`POST /api/hypotheses` and `GET /api/hypotheses/:id` are **amended, not added** — the detail route's
+addition is the next section, and its writer is W22.
+
+## The detail route's report block, pinned
+
+> **Authored 2026-08-26 to close R154**, from the superseded doc's § of the same name, reconciled
+> with `api/src/report/drift.ts` and `api/src/routes/hypotheses.ts` as merged. W22 cites this
+> section by name.
+
+Wire JSON is snake_case throughout and units live in the field names, per § Vocabulary:
+
+```json
+"report": {
+  "has_template": true,
+  "structure_hash": "9f2c…",
+  "stripped_count": 0,
+  "updated_at_ms": 1789000000123,
+  "drift": { "orphan_slots": ["stale-slot"], "unfilled_slots": [] },
+  "tamper": null
+}
+```
+
+- **`has_template` is the first field because it is the gate.** Per
+  `design/2026-08-24-agent-wolf-ui.md` § 6b, W24's Go Live button is enabled iff
+  `spec_validation.valid && report.has_template`, and **W22 owns the server-side `422` backstop**.
+  W9 is never reopened for this.
+- 🔴 **`stripped_count`'s SIGN is the contract; its MAGNITUDE is not.** It counts DOMPurify
+  *records* — nodes **and** attributes — so a library upgrade moves the number without anything
+  being wrong. W23 renders `> 0` as a degraded-severity notice and must be magnitude-agnostic. It
+  is also why `<p onclick="alert(1)">` matters: that removes no element, so a node-only counter
+  would report a live XSS attempt as "nothing was removed".
+- **`drift` is `null` when no `kind=report` memory exists at all** — the empty state, which is
+  **not** drift and must stay distinguishable from `{orphan_slots: [], unfilled_slots: []}` (a tick
+  that matched the template exactly). W20 built that distinction deliberately; `drift.ts`'s
+  `DriftResult = SlotDrift | null` is the shape, and its field names are `orphanSlotIds` /
+  `unfilledSlotIds` in TS and `orphan_slots` / `unfilled_slots` on the wire.
+- **`tamper`** is the pinned `Tamper` shape from § "Shared shapes that four or more tickets must
+  agree on", carrying at least one provenance field (R89).
+- `updated_at_ms` is unix **milliseconds** — the memory table's unit, not the `agent_*` tables'
+  seconds.
+
 ## The CSP header, byte-for-byte
 
 > **Pinned 2026-08-22 to close R116.** W19 asserts this exact string as a literal and W21 asserts
@@ -5279,7 +5366,8 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
     test`; and in agent-orange `cd go && go build ./... && go vet ./... && go test ./...`.
 - **TDD:** no.
 - **Validation:** `./e2e/run.sh report-layer` plus the three gate command groups above. *(X1 must
-  give `run.sh` an optional spec-name filter — see § "Amendments to existing tickets".)*
+  give `run.sh` an optional spec-name filter, so `./e2e/run.sh report-layer` is a defined command.
+  The § it used to cite does not exist in this document — R154.)*
 - **Depends on:** W24, W25, X1
 - [ ] done
 - Notes:
@@ -5999,5 +6087,5 @@ close, and an executor hitting one should log it rather than invent an answer.**
 | **R151** | **The seventeenth instance, and this one was in a hand-off note written to warn about exactly this class.** W19's Notes, written by the orchestrator at the close of wave 11, opened with "🔴 `frame-src` and `form-action` are absent from the CSP skeleton entirely". Both are present in `design/2026-08-24-agent-wolf-ui.md` § 6b, both as `'none'`, alongside `child-src`, `object-src`, `manifest-src`, `media-src` and `worker-src`. Had it been dispatched, an implementer would have "fixed" a policy that was already correct and moved attention away from the defect that is real. The defect the note was *reaching for* is R152. Two things generalise. (1) **A hand-off note is written at the moment of least context about its destination** — the orchestrator has just spent a wave inside the *producer* (W30's URL walker) and writes the note pointing at a *consumer* section it has not re-read since revision 5 rewrote it. The fix is mechanical and now standing: **before dispatch, re-read every section a ticket's Notes name and check the claim against the text, not against memory.** (2) The note was *directionally* right and *factually* wrong, which is the shape R147 named — a correction can be right about the value and wrong about the reason, and here it was right about the risk and wrong about the mechanism. The risk survived the error; a worker following the letter would have lost it. |
 | **R152** | 🔴 **§ 6b's single `<ORIGINS>` placeholder grants script execution to hosts that only ever receive a fetch or a navigation — the CSP substitutes TWO lists, not one.** `remoteOrigins` is deliberately the superset: W30 pushes into it from `meta[http-equiv=refresh]` targets and `object > param` values as well as from `src`/`href`/`srcset`/CSS `url()`. § 6b then substitutes that one list at all four of `script-src`, `style-src`, `img-src` and `font-src`. So a template whose only mention of `cdn-images.example` is an `<img>` — or whose only mention of `evil.example` is a meta-refresh — makes both a **permitted script origin**. With `'unsafe-inline'` already granted (and it must be, the chart code is inline), the template's own inline script can then `document.createElement("script")` against a host the reviewing human filed under "images". The bound § 6b sells — *"the hosts a human approved for this template"* — is real, but it silently erases the distinction between approving a host **as code** and approving it **as an asset**, which is the exact distinction `scriptSrcs` was built to carry and which R118 made W30 compute. **Ruled 2026-08-26, amending § 6b:** `script-src`/`style-src` take the sorted, deduplicated origins of **`scriptSrcs`**; `img-src`/`font-src` take **`remoteOrigins`**. No W30 change — both lists already ship. The invariant that makes it safe is that `scriptSrcs`' origins are a **subset** of `remoteOrigins`, which is also what W24's "everything else" set difference depends on, so W19 asserts it directly rather than assuming it. Note the residual, recorded rather than papered over: a **stylesheet**-only host still gains `script-src`, because `scriptSrcs` mixes scripts and stylesheets in one array with no channel tag. Splitting that is a W30 change and a future hardening. The general lesson is the one R146 keeps teaching from the other end: **when a producer is deliberately widened to a superset, every consumer that was written against the narrow list must be re-derived, not re-pointed.** W30 widened the inventory for a *human review screen*; the CSP consumer inherited the widening for free and got weaker for it.
 | **R153** | 🔴 **A mutation harness that cannot go red is the same defect as a test that cannot — R146, applied one level up.** W19's implementer ran its first five mutations with `vitest run --reporter=basic`. That flag does not exist in **vitest 4**: the run crashed loading a reporter module, the harness grepped the crash text for a failure marker, found none, and reported **GREEN — mutation survived** five times. Every one was red on re-run under exit-code detection. Three things generalise. (1) **Grep the exit code, never the output.** A test runner has three outcomes — pass, fail, *did not run* — and text matching collapses the third into whichever of the first two the pattern happens to miss. It fails in the direction that manufactures confidence: a harness that cannot execute reports a clean bill of health for code it never loaded. (2) **The harness needs its own control.** W19 later ran two: deleting the injection escape and bypassing the sanitiser, each producing a specific, counted failure signature from the live oracle. A sweep that has never been seen to fail is indistinguishable from a sweep that cannot. (3) The same shape appeared twice more in the same ticket and was caught both times by asking R146's question. `M19` (move the injection to the first child of `<head>`) reddened **seven** tests; on inspection the edit had mangled the file, and the honest mutation reddens exactly **two**. `M10+M12` exists only to separate two rules that both fire on the same fixture — without deliberately disabling the superset invariant, there was no way to tell whether the `data:` row was caught by the CSP string assertion or by the invariant throwing first. **A red you have not attributed is not evidence.** |
-| **R154** | 🔴 **W21 and W22 both cite plan sections that DO NOT EXIST, and the only copies live in the document that was marked superseded this morning. Blocking for wave 13.** W21's Scope says "The three routes in § 'HTTP routes added'"; W22's criteria say "exactly as pinned in § 'The detail route's report block, pinned'". Neither section is in `design/2026-08-20-agent-wolf.md`. Both are in `design/2026-08-21-agent-wolf-report-layer.md` (lines 404 and 389) — folded into revision 4 as *tickets*, while these two *reference* sections were left behind. This is **R116 exactly**, the defect that blocked W17 and W19, recurring on the next two unbuilt tickets: an executor greps `design/`, finds exactly one answer, and it is inside the file whose banner tells them it is not a source of truth for any value. Worse than R116 in one respect — R116's sections were merely stale, these are **absent**, so an executor told "you do not need to read anything outside this document" has been handed a ticket that cannot be executed from it. The general rule the fold should have followed and did not: **when a document is folded, its reference sections move with its tickets, and the fold is checked by grepping every surviving `§ "…"` citation against the destination's own headings.** That check is mechanical, has never been run, and would have caught this on the day. **Author both sections in the main plan before W21 is cut** — and run the citation grep across all eleven remaining tickets while doing it, because two found by accident implies more found by looking. |
+| **R154** | 🔴 **W21 and W22 both cite plan sections that DO NOT EXIST, and the only copies live in the document that was marked superseded this morning. Blocking for wave 13.** W21's Scope says "The three routes in § 'HTTP routes added'"; W22's criteria say "exactly as pinned in § 'The detail route's report block, pinned'". Neither section is in `design/2026-08-20-agent-wolf.md`. Both are in `design/2026-08-21-agent-wolf-report-layer.md` (lines 404 and 389) — folded into revision 4 as *tickets*, while these two *reference* sections were left behind. This is **R116 exactly**, the defect that blocked W17 and W19, recurring on the next two unbuilt tickets: an executor greps `design/`, finds exactly one answer, and it is inside the file whose banner tells them it is not a source of truth for any value. Worse than R116 in one respect — R116's sections were merely stale, these are **absent**, so an executor told "you do not need to read anything outside this document" has been handed a ticket that cannot be executed from it. The general rule the fold should have followed and did not: **when a document is folded, its reference sections move with its tickets, and the fold is checked by grepping every surviving `§ "…"` citation against the destination's own headings.** That check is mechanical, has never been run, and would have caught this on the day. **CLOSED 2026-08-26, same day.** Both sections were authored into the main plan (§ "HTTP routes added" and § "The detail route's report block, pinned"), reconciled against the code as merged rather than copied — the old copies predate `composeFrame`'s return shape, `drift.ts`'s null convention and the derived CSP, and carried none of the four route notes W21 actually needs. **And the mechanical check was written and run across the whole document**: normalise every `§ "…"` citation and every heading, prefix-match one against the other. 53 citations; **three dangling**, not two. The third was W26 citing § "Amendments to existing tickets", the *other* reference section left behind by the same fold — found only by the grep, exactly as predicted, and fixed in place since that section is genuinely obsolete. One further dangling citation remains and is deliberately left: R67 cites § "The graded rule set", which has never existed here; it is a rationale reference inside a log entry, not an executable instruction. Two citations resolve to `README-stack.md` and are correct. 🔴 **Run this grep at every future fold and before every wave cut** — it takes seconds, it has now caught three defects in one pass, and it is the only check in this project that can prove a ticket is executable from the document its executor was told is sufficient. |
 | **R155** | **`scriptSrcs` is not `https:`-only, so the obvious mapping to a CSP source list emits a HOST NAME called `null`.** R152's ruling said `<CODE>` is "sorted, deduplicated `new URL(u).origin` over `scriptSrcs`", and § 6b claims the validator "requires every one to be `https:`". Both are wrong, measured against the merged `parseTemplate`: `<style>@import url(data:text/css,x)</style>` **validates clean** and pushes `data:text/css,x` into `scriptSrcs`, because a `data:` URL in CSS is an image or a font and the CSS channel allows it. `new URL("data:…").origin` is the string `"null"` — and in a CSP source list the bare token `null` is a **host name**, not the keyword `'none'`, so the literal recipe emits `script-src 'unsafe-inline' null`. Separately, `<script src="https:">` also validates (`classifyUrl` reads only the scheme) and `new URL("https:")` **throws**. Two lessons. (1) **A field's guarantee belongs to the channel that fills it, not to the field's name.** `scriptSrcs` reads like "scripts, therefore https", but it is filled from three channels with three different URL policies; the https requirement lives on *some* of them. (2) 🔴 **The superset invariant would have caught the `data:` case by throwing** — R152 instructed W19 to "assert it rather than assume it", and that instruction paid for itself against a defect in the same ruling that issued it. An invariant asserted at runtime is worth more than the reasoning that motivated it, because it survives the reasoning being wrong. |
