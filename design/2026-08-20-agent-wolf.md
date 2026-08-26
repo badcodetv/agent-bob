@@ -17,7 +17,9 @@
 > running mutation testing must: decide on **exit code**, never grepped output, and classify
 > "did not run" separately; run an **opening control** proving the harness can go red; run a
 > **closing control** proving the tree ended as it began; apply a **per-mutation landing gate**
-> asserting the set of files differing from pristine is exactly the intended file; **and assert
+> asserting the set of files differing from pristine **EQUALS** exactly the intended file — 🔴 **the
+> SET, so that the intended file DID change; a gate written as "no OTHER file changed" passes a
+> mutation that changed NOTHING and reads it as SURVIVED** (R218); **and assert
 > the COLLECTED TEST TOTAL (`failed + passed`) equals the baseline on every run, alongside the
 > test-file count** — the fifth, because a *collection*
 > failure prints a summary line and reports zero test failures while a third of the suite never
