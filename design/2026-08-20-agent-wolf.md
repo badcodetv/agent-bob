@@ -17,8 +17,9 @@ Revision: 5 (2026-08-24) — incorporates two adversarial reviews, one executabi
 report-layer amendment and **the UI design** (`design/2026-08-24-agent-wolf-ui.md`, approved
 2026-08-24); see the Discovered Issues Log, entries R1–R150. Two owner rulings on 2026-08-21 added
 W8b and W2b; revision 5 adds O12, O13, W27, W28, W29 and W30, so the ticket count is **47**, not 39.
-**36 are done.** W13 and W14 landed 2026-08-24; W30 and W17 landed 2026-08-26, so the report chain
-continues **W19 → W21 → W22**, and W22 is what unblocks both W23 and W27.
+**37 are done.** W13 and W14 landed 2026-08-24; W30, W17 and **W19** landed 2026-08-26, so the report
+chain continues **W21 → W22**, and W22 is what unblocks both W23 and W27. W25 and W29 are also
+ready now and independent of that chain.
 
 ⚠️ **Revision 5 reverses a standing decision and rewrites five criteria.** `web/` **is** installable
 — proved by building, packing and consuming it (see **R125**) — so Wolf now imports Orange's types
@@ -5053,7 +5054,7 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
   owns the injection site; and the per-metric-budget test uses a single metric, so it would not catch an
   implementation that divided `maxPoints` across all metrics.
 
-### W19: Frame composition and the CSP value   [Status: pending | Model: opus]
+### W19: Frame composition and the CSP value   [Status: done | Model: opus]
 - **Scope:** `composeFrame` — assemble the document, produce the CSP string.
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/frame.ts`, `api/src/report/frame.test.ts`.
@@ -5088,7 +5089,8 @@ braces for the embedded case, with the CSP carrying the load for the direct-navi
 - **TDD:** yes.
 - **Validation:** `cd api && yarn test && yarn typecheck` — 🔴 **the WHOLE api suite (R117's sweep, second instance).** This ticket edits `template.ts` under Ruling 2, so `src/report/frame` alone cannot see the blast radius; W17 already proved a single-path filter green while the suite ran red.
 - **Depends on:** W17, W18, **W30** *(revision 5: `composeFrame` derives the CSP from `remoteOrigins`)*
-- [ ] done
+- [x] done — verified 2026-08-26, one fix round. Merged to agent-wolf `main` as `ae7e654`; main gated green after (api **34 files / 1548 tests**, web 31 / 347, typechecks clean, `yarn build` clean). No new dependency, so no `yarn install` is required after this merge.
+- Notes: Implemented `dcf34b4`, amended to `352bdb6` (tests moved) and `025177c` (fix round 1). **Eight files, all additions bar four lines.** 🔴 **The CSP that shipped is NOT § 6b as written when this ticket was cut** — it substitutes **two** lists (R152, and R155 corrected the recipe: the `https:` entries of `scriptSrcs` only). Seven whole-string literals are asserted, and the R152 row — an origin in `remoteOrigins` but not `scriptSrcs` — is **mutation-proved to be the only test that catches a regression to one list**. The implementer found three defects in the rulings that dispatched it (R155, § 6b's "strict subset", R150(3)'s element count being five short) and one in a shipped ticket's hand-off (W18's `<!--<script>` gap, measured to swallow the entire template fragment including its `[data-wolf-fallback]`, and reachable from a model-chosen `Metric.unit`). Its verifier ran **51 mutations** in round 1 and **574 composed-document attacks** with a parse5 re-parse oracle, then **675** in round 2 with the oracle taught to detect a prototype leak; both rounds proved the harness red-capable first, and round 2's oracle controls were **seen to fire**. 🔴 **One blocking defect, and it had a sibling already on `main`:** an unguarded `slots[slot.id]` read put `function Object() { [native code] }` into a locked report with `strippedCount: 0` (**R156**) — and the same shape in merged `spec.ts`'s `present()` crashed `buildSeriesPayload` for **seven** legal metric slugs, falsifying W18's own criterion (**R160**, **R162**). Both fixed at the helper, not the call site. Also closed: an R133-shaped null row that left the whole suite green when its guard was deleted, and three byte-exactness mutations (`trimEnd`, `trimStart`, `toLowerCase`) that the `AWKWARD` fixture could not see — `toLowerCase` would have rewritten every template's inline chart code with 1521 tests green. **Ruled during the ticket:** `TemplateSlot` gains `tagName` (recovering it from byte offsets fails **open**); the two unfillable-element sets are deliberately different sizes (nine at validation, eleven at composition) and pinned in both directions; and the `api/src/report/*` ownership row was suspended for narrow additive edits to `template.ts`, `spec.ts` and `series.ts` plus their tests. **Recorded, not fixed:** `PROTOTYPE_SLUGS` in `series.test.ts` is a literal where `spec.test.ts` derives its list (drift caught only on the derived side), and R159's `iframe`/`plaintext` gap in `RAW_TEXT_ELEMENTS`.
 - Notes: **Hand-off from W30 and W17, plus TWO ORCHESTRATOR RULINGS made 2026-08-26 before dispatch. Read all of it before starting.**
 
   🔴 **Correction to this ticket's own earlier hand-off note — R151.** A previous revision of this
