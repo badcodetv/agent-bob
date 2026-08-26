@@ -38,7 +38,12 @@ Login mints **one JWT per project** the user's email maps to — `mintProjectTok
 per project id, each carrying a single `customer` claim (`go/cmd/agentd/googleauth.go:354-367`).
 The browser holds the set and picks one; no single console JWT spans two projects.
 
-One middleware accepts all three (`go/cmd/agentd/auth.go:62`). It tries `X-API-Key` **first**; a
+One middleware accepts all three (`go/cmd/agentd/auth.go:62`) — **and, on exactly one route, a
+fourth credential class it mints for itself**: the short-lived, name-scoped **dataset download
+token**, presented as `?token=` on `GET /agent/datasets/{name}/download` and accepted nowhere else
+([`20-datasets.md`](20-datasets.md) § 7). You never hold or mint that one; it is handed to an agent
+inside a container so its `curl` can fetch one dataset without carrying the project's API key. It
+tries `X-API-Key` **first**; a
 bad key is a `401` and never falls through to the bearer path or to dev-open
 (`auth.go:65-78`) — a silent downgrade on a typo is how a project ends up authenticated as
 someone else. An API key's principal email is the synthetic `api-key:<project>`
@@ -271,11 +276,26 @@ X-API-Key: $WOLF_API_KEY
 - `404` for an unknown or foreign name, whatever the reason. `403` if the credential carries no
   project. `501` if session names or `AGENTKIT_JWT_SECRET` are not configured.
 
-The token carries a `scope: "session:<id>"` claim. Its `sid` claim is deliberately **empty** — in
-a real deployment `agentd` signs each container's own session token with the same secret and the
-core MCP server authenticates its caller by exactly that claim, so an embed token carrying a `sid`
-would be a working credential for the project's memory and worker-prompt tools
-(`embedtoken.go:158-172`).
+The token carries a `scope: "session:<id>"` claim. Its `sid` claim is deliberately **empty**, and
+that is still load-bearing even though the reason has changed since it was written.
+
+- **It used to be the whole defence.** `agentd` once signed each container's own session token with
+  the *same* secret, and the core MCP server authenticates its caller by exactly the `sid` claim —
+  so an embed token carrying a `sid` would have been a working credential for the project's memory
+  and worker-prompt tools, handed to a browser inside a third-party page.
+- **The secrets are now separate** (`go/cmd/agentd/sessionsecret.go`; `main.go:152-153`; **H12**),
+  and `/mcp` verifies with the *session* key (`main.go:601`), so an embed token — signed with the
+  API key — cannot authenticate there whatever its `sid` says. ⚠️ **With one exception**: a
+  deployment that sets `AGENTKIT_SESSION_JWT_SECRET` to the **same value** as `AGENTKIT_JWT_SECRET`
+  collapses the two classes again. agentd prints a `WARNING` at boot when it detects exactly that.
+- **The empty `sid` is now the second of two locks, not the only one.** The API middleware also
+  rejects any token carrying a non-empty `sid` with **401** (`go/cmd/agentd/auth.go`), so an embed
+  token that grew one would simply stop working on the routes it exists for.
+
+Confinement rides on the `scope` claim either way — it is the claim built for the question "what
+may this token touch" — and **scope is enforced only on session-by-id routes** (**H1**). *(The
+comment at `go/cmd/agentd/embedtoken.go:158-172` still describes the pre-split world and is stale;
+the code around it is correct.)*
 
 ### 5.2 Frame it
 
@@ -320,7 +340,9 @@ map and nginx copies it onto the static page via an `internal` `auth_request` to
 ## 6. Fetch artifacts (the proxy pattern)
 
 Your backend fetches bytes with the API key and re-serves them from **your** origin. That is the
-whole reason there is no CORS and no signed-URL machinery.
+whole reason there is no CORS and no signed-URL machinery **on the browser-facing paths**. (One
+signed-URL mechanism does exist, and it is not for browsers: the dataset download token, minted for
+an agent inside a container — [`20-datasets.md`](20-datasets.md) § 7.)
 
 ```
 GET /agent/sessions/by-name/hypothesis-a/artifacts                    → metadata list
@@ -685,8 +707,15 @@ The credential table says an embed token grants one session. The **mechanism** �
 `:245-247`) — is reachable only from routes that take a session id. An embed token still carries
 `customer: <project>` (`go/cmd/agentd/auth.go:104-114,123-130`), so for its life it can also call
 every project-wide route: `PUT /agent/workers/{name}`, `PUT /agent/project-settings`,
-`POST /agent/events`, the schedule CRUD, `GET /agent/memories` and both new full-content memory
-reads (`go/httpapi/memories.go:193,227` take no session id, so `ownsSession` never runs).
+`POST /agent/events`, the schedule CRUD, `GET /agent/memories` and both full-content memory reads
+(none of those handlers takes a session id, so `ownsSession` never runs).
+
+⚠️ **Two routes now refuse a scoped credential directly, without `ownsSession`** — they check
+`Identity.SessionScope` themselves and answer **403** (`go/httpapi/memories.go`): the memory append
+`POST /agent/memories`, and `GET /agent/memories?…&include_retracted=1`. So an embed token **cannot
+mint trusted state and cannot read the audit view**, which is the pair this hazard would otherwise
+hand it. That is a per-route patch on the two places it mattered most, **not** the project-wide rule
+below — everything else in the paragraph above is unchanged.
 
 That credential is handed to a browser inside a third-party page. **This is a real privilege
 escalation bounded only by the token's TTL** — which is why the TTL ceiling is one hour
@@ -848,6 +877,8 @@ created with the literal id `current` would be unreachable by id. Nothing in-rep
 
 - `docs/18-workers-memory-events.md` — the product layer from an operator's seat: workers, memory,
   triggers, the core tools, the config log.
+- `docs/20-datasets.md` — the dataset atom (the fourth credential class, the four read routes, the
+  reaper) and the provenance trust rule behind `POST /agent/memories` in § 7.
 - `docs/06-artifacts.md` — the artifact contract and the status state machine behind § 6.
 - `docs/14-host-adapters.md` — the tenancy contract and the store seams.
 - `design/2026-08-06-embeddable-agent-orange.md` — the plan this was built from, including the

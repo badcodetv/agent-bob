@@ -384,11 +384,16 @@ were. Two caveats, both real:
 1. 🔴 **The bytes stay out of context; the CREDENTIAL does not.** `dataset_get`'s `download_url`
    carries a **bearer token**, and it is returned **as a tool result**. It therefore enters the model
    context, the **persisted transcript**, the **SSE event stream**, and **every subscriber of
-   `worker.finished`** — whose text is the full rendered transcript. Anything that can read the
-   conversation can fetch that dataset. The mitigations are the whole of the defence and they are
-   bounds, not barriers: a **300s** default TTL (ceiling 900s) and a scope pinned to **one
+   `worker.finished`**. Anything that can read the conversation can fetch that dataset. **Assume it
+   reaches every one of those.** The mitigations are the whole of the defence and they are bounds,
+   not barriers: a **300s** default TTL (ceiling 900s) and a scope pinned to **one
    `(project, name)` pair**. The tool description tells the model not to echo the URL, which is a
-   prompt and not an enforcement.
+   prompt and not an enforcement. One further bound, worth knowing and not worth relying on: the
+   **rendered transcript** truncates each tool result to **200 characters**
+   (`maxToolOutputChars`, `go/runner.go:2060`, applied in `toolOutcome`), and a `dataset_get` result
+   spends most of that budget on metadata before reaching the URL — so a whole JWT rarely survives
+   into a `worker.finished` subscriber's text. The persisted events and the live SSE stream are
+   **not** truncated, and a 200-character cut is a rendering detail, not a security boundary.
 2. **Nothing stops a model reading a downloaded file into its own context.** `head prices.csv`, a
    `df.head()`, a `cat` in a bash tool — all are ordinary agent actions and all put rows in the
    transcript. The tool description says not to, for the same reason and with the same force.
