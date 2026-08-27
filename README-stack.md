@@ -127,6 +127,17 @@ and this is the line that means you are not being billed:
     docker compose logs agentd | grep 'model proxy'
     [agentd] ANTHROPIC_API_KEY unset → MOCK model proxy (set it for a real agent)
 
+**…unless a mock SCRIPT is configured, in which case you get a different line and this one never
+appears.** With `AGENTKIT_MOCK_MODEL_SCRIPT` or `AGENTKIT_MOCK_MODEL_SCRIPT_FILE` set, agentd prints
+
+    [agentd] ANTHROPIC_API_KEY unset → SCRIPTED mock model proxy (N rule(s))
+
+instead — the two are **exclusive branches** (`go/cmd/agentd/modelproxy.go:58-63`). Anything that
+greps for the first line to prove mock mode will fail on every scripted run; `e2e/run.sh` asserts the
+scripted form and separately asserts that neither `real model proxy →` nor `subscription mode →`
+appears. *(Added 2026-08-27, R234 — this section documented only the scriptless form, and X1 was
+written to it.)*
+
 ## The product layer needs Postgres
 
 The compose stack sets `DATABASE_URL`, so this is only a trap if you run `agentd`
