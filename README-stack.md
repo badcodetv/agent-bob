@@ -17,6 +17,8 @@ so you do not have to remember the workaround:
     ./stack psql           # a psql shell
     ./stack testdb up      # throwaway Postgres for the live-PG Go suite
     ./stack test-go        # go test with that database wired up correctly
+    ./stack wolf up        # BOTH stacks — Orange + Agent Wolf — against the real
+                           #   providers; see "the joint development workflow" below
 
 It bypasses `docker-compose.override.yml` and forces the local `fs`/`blobarchive`
 backends, which is exactly what the manual invocation below does by hand.
@@ -137,6 +139,80 @@ greps for the first line to prove mock mode will fail on every scripted run; `e2
 scripted form and separately asserts that neither `real model proxy →` nor `subscription mode →`
 appears. *(Added 2026-08-27, R234 — this section documented only the scriptless form, and X1 was
 written to it.)*
+
+## Agent Wolf: the joint development workflow
+
+Agent Wolf is a separate product built on this engine (its own repo, a sibling
+checkout at `../agent-wolf`). It is not a library that links against Orange — it
+talks to `agentd` over HTTP with a project API key, and its sessions run in
+containers Orange provisions. Developing it means running **both** stacks, wired
+together, and one command does that:
+
+    ./stack wolf up                    # REAL model, real registry, real Google sign-in
+    ./stack wolf up mock               # the same wiring, free deterministic model
+    ./stack wolf up --cron '*/15 * * * *'   # ticks you can actually watch
+    ./stack wolf down                  # stop both
+
+It runs six steps in order, and each is separately re-runnable:
+
+1. **`./stack wolf image`** — builds `installations/wolf` from the **published**
+   `session-core:<tag>` and pushes it as `session-wolf:<tag>`. Needs
+   `./stack publish-base` to have run at least once.
+2. Starts Orange in **registry mode** with a `wolf` project merged into
+   `AGENTKIT_PROJECT_MAP`, and waits until that project's API key is accepted —
+   which is the proof the map parsed *and* that `agentd` resolved `api_key_env`
+   at boot.
+3. Starts Wolf, sharing DinD's network namespace, and waits for
+   `/api/auth/me` to answer **401** (up, and refusing anonymous callers).
+4. **`./stack wolf bootstrap`** — seeds the `wolf` project's settings, the
+   interviewer and critic workers and the critic schedule. Idempotent.
+5. **`./stack wolf env`** — dumps what both stacks actually resolved to, secrets
+   redacted. A declaration, not a behaviour: it records what you configured.
+6. Prints the URLs and the one manual step (below).
+
+### What is real here, and what still differs from a deployment
+
+Real, deliberately: the **model** (billable — `mock` opts out), the **session
+image** pulled from Artifact Registry through `ociregistry` with your ADC, and
+**Google sign-in** end to end. Wolf's own credentials are local dev secrets,
+generated once into `.stack-wolf-secrets.env` (gitignored, `chmod 600`, never
+printed); `./stack wolf rotate` replaces them.
+
+Different, and it is a short list:
+
+| | Local | Deployed |
+| --- | --- | --- |
+| origins | `localhost:8080` / `localhost:8081` | your domains |
+| `ORANGE_BASE_URL` | `http://localhost:8099` (same netns as DinD) | a service address |
+| `WOLF_MCP_URL` | DinD's inner `docker0` address | a service address |
+| snapshots | local disk, unless `--gcs` | GCS |
+
+The networking line is the only structural one. `wolf-api` shares DinD's network
+namespace because `agentd` does too, and a nested session container cannot
+resolve compose DNS names — so a `wolf-api` on an ordinary compose network is
+unreachable from the very containers that need its market-data tools. In a
+deployment both become ordinary addresses.
+
+### The one step this cannot do for you
+
+Google sign-in needs the origin registered against the OAuth client, in the
+Google Cloud console, once:
+
+    Authorized JavaScript origins  +=  http://localhost:8081
+
+Without it the Google button renders and the popup fails `origin_mismatch`.
+Note also that `VITE_GOOGLE_CLIENT_ID` is inlined into Wolf's bundle at **build**
+time — changing it needs a rebuild, which `./stack wolf up` always does.
+
+### Cost, which is the thing to watch
+
+Every researcher tick is an agent session against a real model, so the
+researcher schedule keeps Wolf's own default — daily at 06:00 UTC — rather than
+something fast. `--cron '*/15 * * * *'` is how you ask for ticks you can watch,
+and it is roughly **96 billable sessions a day per live hypothesis**. Sessions
+also each hold a container and one of the 100 host ports until they are deleted
+or reclaimed for idleness: `./stack wolf status` counts them and `./stack clean`
+releases them.
 
 ## The product layer needs Postgres
 

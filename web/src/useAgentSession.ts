@@ -964,8 +964,34 @@ export default function useAgentSession(options: UseAgentSessionOptions = {}): U
         startContainerStatePoll(sessionId)
       }
 
-      // Check for active streaming query and reconnect if needed
-      if (resumed.status === 'active' || resumed.status === 'streaming') {
+      // Check for active streaming query and reconnect if needed.
+      //
+      // 🔴 THE GATE IS "NOT TERMINAL", NOT A LIST OF LIVE STATUSES, and that
+      // is a bug fix (2026-09-07). It used to read
+      // `status === 'active' || status === 'streaming'` — two values from
+      // `AgentSession['status']` in types.ts. The SERVER writes neither on a
+      // session created through the HTTP API: `go/cmd/agentd/dispatch.go`
+      // writes `"creating"` and then `"running"`, and `'running'` is not even
+      // in the union this file's type declares. So on RESUME — which is every
+      // page load of an existing session, and every load of the embed page —
+      // the probe was skipped outright and an in-flight turn was never
+      // reattached. The transcript rendered whatever was already persisted and
+      // then sat there, live events arriving nowhere, until the reader
+      // reloaded and saw a completed turn appear "by magic".
+      //
+      // The UI's OWN create path sets `status: 'active'` in memory (:417,
+      // :441), which is why this only ever bit the resume path and why it
+      // survived: the flow a developer clicks through most is the one flow
+      // where the gate happened to be true.
+      //
+      // `activeQuery` from the status probe is the authority on whether a turn
+      // is in flight. This gate exists only to avoid probing a session that
+      // cannot have one, so it lists the states where that is certain and
+      // treats everything else — including any status vocabulary the server
+      // grows later — as worth asking about. Failing towards one extra HTTP
+      // request is the right direction; failing towards silence is not.
+      const terminal = resumed.status === 'error' || resumed.status === 'cancelled'
+      if (!terminal) {
         const status = await checkSessionStatus(sessionId)
         if (!status.reachable) {
           // We could not ask whether a turn is in flight. Say so rather than
