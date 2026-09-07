@@ -35,7 +35,21 @@ export const ConfigSchema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 
   // Agent defaults
-  DEFAULT_MODEL: z.string().default('claude-opus-4-5'),
+  //
+  // DEFAULT_MODEL is the model EVERY session runs on unless the session
+  // itself names one (`SessionConfig.Model` → the Runner sets DEFAULT_MODEL
+  // in the container env, go/runner.go:2750). There is no other default
+  // anywhere in the stack, and agentd's SessionEnv is a fixed map
+  // (go/cmd/agentd/modelproxy.go:142,156) — so a `DEFAULT_MODEL` set on the
+  // HOST does not reach a session container, and this line is the only
+  // operator-facing lever. Changing it changes what every session costs and
+  // how well it behaves; `config.test.ts` pins it so the change is never
+  // incidental.
+  //
+  // Bumped claude-opus-4-5 → claude-opus-5 on 2026-09-07 (owner decision):
+  // Agent Wolf's interviewer and daily researcher are the first real
+  // workload, and both are judgement-heavy.
+  DEFAULT_MODEL: z.string().default('claude-opus-5'),
   DEFAULT_MAX_TURNS: z.string().default('100').transform(Number),
   DEFAULT_THINKING_BUDGET_TOKENS: z.string().default('10000').transform(Number),
 });
