@@ -597,6 +597,55 @@ describe('agentEventReducer', () => {
     expect(q!.answered).toBe(false)
   })
 
+  it('tool_use_end with an OPEN ask_user (no options) yields an empty array, not undefined', () => {
+    // AskUserCard does `question.options.map(...)` with no guard, so an
+    // undefined here is not one missing card — it throws inside React and
+    // blanks the whole chat panel. `ask_user` can now be called with no
+    // options at all (an open question answered in the text box), so this
+    // is a shape the reducer really receives.
+    const askOutput = JSON.stringify({
+      content: [{ type: 'text', text: JSON.stringify({
+        __ask_user: true,
+        question: 'What price level would prove you wrong?',
+        allow_freetext: true,
+      })}],
+    })
+
+    let state = initialAgentEventState()
+    state = agentEventReducer(state, makeEvent('message_start', {
+      role: 'assistant', messageId: 'msg-1',
+    }))
+    state = agentEventReducer(state, makeEvent('tool_use_start', {
+      toolCallId: 'tc-1', toolName: 'mcp__ui__ask_user', input: {},
+    }))
+    state = agentEventReducer(state, makeEvent('tool_use_end', {
+      toolCallId: 'tc-1', isError: false, output: askOutput,
+    }))
+
+    const q = state.askedQuestions.get('tc-1')
+    expect(q).toBeDefined()
+    expect(q!.options).toEqual([])
+    // The thing the card would actually do:
+    expect(() => q!.options.map(o => o.value)).not.toThrow()
+    expect(q!.allowFreetext).toBe(true)
+  })
+
+  it('the ask_user SSE event with no options yields an empty array too', () => {
+    // The hook-emitted event path, which is a second, independent way the
+    // same card gets built.
+    let state = initialAgentEventState()
+    state = agentEventReducer(state, makeEvent('ask_user', {
+      toolCallId: 'tc-2',
+      question: 'How many days?',
+      allowFreetext: true,
+    }))
+
+    const q = state.askedQuestions.get('tc-2')
+    expect(q).toBeDefined()
+    expect(q!.options).toEqual([])
+    expect(() => q!.options.map(o => o.value)).not.toThrow()
+  })
+
   it('tool_use_end with error skips rendered content parsing', () => {
     const tableOutput = JSON.stringify({
       content: [{ type: 'text', text: JSON.stringify({
