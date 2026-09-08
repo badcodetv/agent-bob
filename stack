@@ -43,7 +43,9 @@
 #     [mock]                 ... with the free mock model instead
 #     [--cron EXPR]          researcher cron (default: Wolf's daily 06:00 UTC)
 #     [--gcs]                snapshots to real GCS under your own prefix
-#     [--test-login]         also mount the password fallback login
+#     [--test-login]         mount POST /api/auth/dev-login for the Playwright rig.
+#                            NO login form is shown — the sign-in page is Google-only
+#                            since 2026-09-08; this is the API route alone.
 #     [--skip-image]         reuse the published session image as-is
 #     [--no-tmux]            don't open the log wall at the end (also: NO_TMUX=1)
 #   ./stack wolf down      stop both stacks
@@ -900,7 +902,8 @@ wolf_up() {
   96 billable agent sessions a day, per live hypothesis."
   fi
   if [[ -n "${WOLF_TEST_LOGIN:-}" ]]; then
-    login_line="  --test-login is ON: the password fallback at /api/auth/dev-login is mounted."
+    login_line="  --test-login is ON: POST /api/auth/dev-login is mounted for the Playwright
+  rig. The sign-in PAGE is Google-only and shows no form — nothing to click here."
   else
     login_line=""
   fi
