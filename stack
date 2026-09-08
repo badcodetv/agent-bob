@@ -7,12 +7,13 @@
 # `docker compose logs -f` across five services is unreadable in one pane.
 #
 #   ./stack build          build the images
-#   ./stack start          REAL model + tmux panes, sessions PULL their base
-#                          image from Artifact Registry  (BILLABLE; production's
-#                          path). Needs ./stack publish-base first.
+#   ./stack start          REAL model + the tmux log wall, sessions PULL their
+#                          base image from Artifact Registry  (BILLABLE;
+#                          production's path). Needs ./stack publish-base first.
 #   ./stack start mock     the same, with the deterministic mock model (free)
 #   ./stack start local    build the harness into DinD instead of pulling —
 #                          the offline escape hatch, no GCP credentials needed
+#     [--no-tmux]            ... and don't open the log wall (also: NO_TMUX=1)
 #   ./stack publish-base [tag]    build + push session-base/session-core to
 #                          Artifact Registry (default tag: dev; never moves :latest)
 #   ./stack stop           tear it down and kill the tmux session
@@ -26,6 +27,12 @@
 #   ./stack testdb [up|down]  throwaway Postgres for the live-PG Go suite
 #   ./stack test-go [args]    go test with live Postgres wired up correctly
 #
+# Both `start` and `wolf up` finish by opening a tmux session (default name
+# "agent-orange", override with TMUX_SESSION) holding one `docker compose logs
+# -f` pane per group of services plus two empty panes to type in. Detaching
+# (C-b d) leaves the stack running; `stop` / `wolf down` kill the session too.
+# Re-running either command while the session exists just re-attaches to it.
+#
 # ── Agent Wolf: the joint development workflow ───────────────────────────────
 # Stands up BOTH stacks against the REAL providers (real model, real Artifact
 # Registry, real Google sign-in), because that is the only way local resembles
@@ -38,6 +45,7 @@
 #     [--gcs]                snapshots to real GCS under your own prefix
 #     [--test-login]         also mount the password fallback login
 #     [--skip-image]         reuse the published session image as-is
+#     [--no-tmux]            don't open the log wall at the end (also: NO_TMUX=1)
 #   ./stack wolf down      stop both stacks
 #   ./stack wolf status    both stacks, the model, the image, session count
 #   ./stack wolf logs      follow Wolf's logs
@@ -175,6 +183,96 @@ have_key() {
   [[ -n "$k$t" ]]
 }
 
+# ── The tmux log wall ────────────────────────────────────────────────────────
+# `docker compose logs -f` across five (or seven) services in one pane is
+# unreadable, so both `start` and `wolf up` end by opening a tmux session with
+# one pane per group of services and a couple of empty panes at the bottom to
+# type in. Same idea as Platinum's `./stack start`.
+#
+# Takes one argument per pane, top to bottom. Each is either:
+#   'cmd'          a command to run in that pane
+#   'ROWS|cmd'     the same, but force the pane to ROWS lines high
+#   ''             leave the pane empty (a shell prompt, cwd = the repo)
+#
+# Panes are addressed by tmux PANE ID (%3), never by index: `send-keys -t 0`
+# resolves the index against tmux's *current* session, which is not necessarily
+# ours when we create the session detached — and a user with pane-base-index 1
+# would have every command land one pane off.
+tmux_wall() {
+  local specs=("$@") n=$# i
+
+  if [[ -n "${NO_TMUX:-}" ]]; then
+    echo "NO_TMUX is set — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "tmux is not installed — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+  if ! [[ -t 0 && -t 1 ]]; then
+    echo "Not a terminal — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+
+  # Running from INSIDE tmux is the normal case here, not an error — but
+  # `attach` would then nest a session inside itself, which tmux refuses and
+  # which leaves the terminal looking hung. Switch the existing client instead.
+  local enter=(-2 attach-session -t "$TMUX_SESSION")
+  [[ -n "${TMUX:-}" ]] && enter=(switch-client -t "$TMUX_SESSION")
+
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    echo "tmux session $TMUX_SESSION already exists. Attaching…"
+    sleep 1
+    exec tmux "${enter[@]}"
+  fi
+
+  echo "Creating tmux session $TMUX_SESSION with $n panes…"
+  local size w h
+  # Inside tmux, `stty size` reports the PANE, not the whole terminal, and the
+  # wall would be built for a window half the height it is about to occupy.
+  if [[ -n "${TMUX:-}" ]]; then
+    size="$(tmux display-message -p '#{client_height} #{client_width}' 2>/dev/null || true)"
+  fi
+  [[ -n "${size:-}" ]] || size=$(stty size 2>/dev/null || echo "50 200")
+  h=$(echo -n "$size" | awk '{print $1}'); w=$(echo -n "$size" | awk '{print $2}')
+  tmux -2 new-session -d -s "$TMUX_SESSION" -c "$DIR" -x "${w:-200}" -y "$(( ${h:-50} - 1 ))"
+
+  # Create every pane FIRST, then fill them. A split that fails for want of rows
+  # must not silently shift the remaining commands up into the wrong panes.
+  local made=1
+  for (( i = 1; i < n; i++ )); do
+    tmux split-window -v -t "$TMUX_SESSION" -c "$DIR" 2>/dev/null || break
+    tmux select-layout -t "$TMUX_SESSION" even-vertical >/dev/null 2>&1 || true
+    made=$(( made + 1 ))
+  done
+  if [[ "$made" -lt "$n" ]]; then
+    echo "note: this terminal only fits $made of the $n panes — the last $(( n - made )) were dropped."
+    echo "      Make the window taller and re-run, or open them by hand."
+  fi
+
+  local ids=() line
+  while IFS= read -r line; do ids+=("$line"); done \
+    < <(tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}')
+
+  local spec cmd rows landing=""
+  for (( i = 0; i < made && i < ${#ids[@]}; i++ )); do
+    spec="${specs[$i]}"; rows=""; cmd="$spec"
+    if [[ "$spec" == [0-9]*"|"* ]]; then rows="${spec%%|*}"; cmd="${spec#*|}"; fi
+    if [[ -z "$cmd" ]]; then
+      # First empty pane is where you land on attach, so you can type at once.
+      [[ -z "$landing" ]] && landing="${ids[$i]}"
+      continue
+    fi
+    tmux send-keys -t "${ids[$i]}" "$cmd" C-m
+    # Resized after every split, because select-layout even-vertical undoes it.
+    [[ -n "$rows" ]] && tmux resize-pane -t "${ids[$i]}" -y "$rows" 2>/dev/null || true
+  done
+
+  [[ -n "$landing" ]] && tmux select-pane -t "$landing" 2>/dev/null || true
+
+  tmux "${enter[@]}"
+}
+
 # ── Commands ─────────────────────────────────────────────────────────────────
 
 build() {
@@ -197,13 +295,18 @@ start() {
     case "$arg" in
       real|mock)     mode="$arg" ;;
       local|registry) images="$arg" ;;
-      *) echo "usage: ./stack start [real|mock] [registry|local]" >&2; exit 1 ;;
+      --no-tmux)     export NO_TMUX=1 ;;
+      *) echo "usage: ./stack start [real|mock] [registry|local] [--no-tmux]" >&2; exit 1 ;;
     esac
   done
 
-  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+  # An existing session means the stack is already up in some mode; re-attach
+  # rather than reconfiguring agentd out from under it. (tmux_wall would attach
+  # too, but only after a `compose up` that could swap real credentials for mock.)
+  if [[ -z "${NO_TMUX:-}" ]] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "Session $TMUX_SESSION already exists. Attaching…"
-    exec tmux -2 attach -t "$TMUX_SESSION"
+    if [[ -n "${TMUX:-}" ]]; then exec tmux switch-client -t "$TMUX_SESSION"
+    else exec tmux -2 attach -t "$TMUX_SESSION"; fi
   fi
 
   if [[ "$images" == "registry" ]]; then registry_backends; else local_backends; fi
@@ -228,26 +331,16 @@ start() {
 
   compose up -d
 
-  echo "Creating tmux session $TMUX_SESSION…"
-  local size w h
-  size=$(stty size 2>/dev/null || echo "50 200")
-  h=$(echo -n "$size" | awk '{print $1}'); w=$(echo -n "$size" | awk '{print $2}')
-  tmux -2 new-session -d -s "$TMUX_SESSION" -x "${w:-200}" -y "$(( ${h:-50} - 1 ))"
-  for _ in 1 2 3; do
-    tmux split-window -v -t "$TMUX_SESSION"
-    tmux select-layout -t "$TMUX_SESSION" even-vertical
-  done
-
-  tmux send-keys -t 0 './stack logs agentd' C-m
-  tmux send-keys -t 1 './stack logs dind init-sandbox' C-m
-  tmux send-keys -t 2 './stack logs web postgres' C-m
-  # The status pane answers the question you actually have on attach: which
+  # One pane per group of services, a status pane, then two empty panes to work
+  # in. The status pane answers the question you actually have on attach: which
   # model am I talking to, and how many ports have I burned?
-  tmux send-keys -t 3 'clear; ./stack status' C-m
-  tmux resize-pane -t 3 -y 14 2>/dev/null || true
-  tmux select-pane -t 3 2>/dev/null || true
-
-  tmux -2 attach-session -t "$TMUX_SESSION"
+  tmux_wall \
+    './stack logs agentd' \
+    './stack logs dind init-sandbox' \
+    './stack logs web postgres' \
+    '14|clear; ./stack status' \
+    '' \
+    ''
 }
 
 stop() {
@@ -718,7 +811,8 @@ wolf_up() {
       --gcs)         export AGENTKIT_BLOB_BACKEND=gcs
                      export GCS_PREFIX="${GCS_PREFIX:-dev-${USER:-local}}" ;;
       --test-login)  export WOLF_TEST_LOGIN="${WOLF_TEST_LOGIN:-dev@localhost:devpassword}" ;;
-      *) echo "usage: ./stack wolf up [real|mock] [--cron EXPR] [--gcs] [--test-login] [--skip-image]" >&2; exit 1 ;;
+      --no-tmux)     export NO_TMUX=1 ;;
+      *) echo "usage: ./stack wolf up [real|mock] [--cron EXPR] [--gcs] [--test-login] [--skip-image] [--no-tmux]" >&2; exit 1 ;;
     esac
   done
 
@@ -831,6 +925,21 @@ wolf_up() {
   echo "  Config    ./stack wolf env"
   echo "  Stop      ./stack wolf down"
   echo
+  echo "  Opening the log wall (tmux session '$TMUX_SESSION'). Detach with C-b d —"
+  echo "  detaching leaves BOTH stacks running; './stack wolf down' is what stops them."
+  echo
+
+  # Both stacks' logs, one pane each, then two empty panes to work in. There is
+  # no status pane here on purpose: this summary is on the terminal underneath,
+  # and tmux restores it the moment you detach.
+  tmux_wall \
+    './stack logs agentd' \
+    './stack logs dind init-sandbox' \
+    './stack logs web postgres' \
+    './stack wolf logs wolf-api' \
+    './stack wolf logs wolf-web' \
+    '' \
+    ''
 }
 
 wolf_down() {
