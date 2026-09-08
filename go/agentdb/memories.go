@@ -98,6 +98,16 @@ type MemorySearchQuery struct {
 	// Until is an inclusive upper bound on created_at, unix MILLISECONDS.
 	// Zero means unbounded.
 	Until int64
+	// CreatedByWorker restricts results to memories stamped with this exact
+	// worker name (§ Decision B3). It is a HARD filter — ANDed into the same
+	// `filtered` CTE as the project, selector, since/until and retraction
+	// predicates — so it applies BEFORE LatestPer and before both ranking legs,
+	// exactly like every other narrowing above. The "self" sentinel is a
+	// property of the MCP tool layer, not of the store: by the time a query
+	// reaches here it must already be a real worker name, resolved
+	// server-side from the caller's session — never taken from a model
+	// argument, or any worker could read any other worker's memories by name.
+	CreatedByWorker string
 	// LatestPer is a label KEY. When set, the candidate set is reduced to the
 	// newest memory per distinct value of that label BEFORE ranking, and rows
 	// that do not carry the key are excluded. Empty means no reduction.
@@ -481,6 +491,16 @@ func (s *Store) SearchMemories(ctx context.Context, q *MemorySearchQuery) ([]*Me
 	if q.Until > 0 {
 		where += " AND f.created_at <= ?"
 		whereArgs = append(whereArgs, q.Until)
+	}
+
+	// CreatedByWorker joins the same hard filter, for the same reason as
+	// Since/Until above: it must exclude a row before LatestPer picks the
+	// "current" one and before either ranking leg sees it, or a provenance
+	// filter would answer "the newest state of x" differently depending on
+	// who wrote the winning row.
+	if strings.TrimSpace(q.CreatedByWorker) != "" {
+		where += " AND f.created_by_worker = ?"
+		whereArgs = append(whereArgs, strings.TrimSpace(q.CreatedByWorker))
 	}
 
 	// LatestPer reduces the candidate set to the newest row per distinct value

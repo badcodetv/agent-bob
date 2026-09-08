@@ -145,6 +145,16 @@ describe('coerceProjectSettings', () => {
     expect(coerceProjectSettings({ mcp_config: [1, 2] }).mcp_config).toEqual({})
   })
 
+  it('defaults briefing to an empty list and filters out non-string entries', () => {
+    expect(coerceProjectSettings({ base_image: 'core:1' }, 'acme').briefing).toEqual([])
+    const s = coerceProjectSettings({ briefing: ['name=label-registry', 3, null] }, 'acme')
+    expect(s.briefing).toEqual(['name=label-registry'])
+  })
+
+  it('drops a briefing that is not an array', () => {
+    expect(coerceProjectSettings({ briefing: 'name=x' }, 'acme').briefing).toEqual([])
+  })
+
   it('survives a null/garbage response', () => {
     expect(coerceProjectSettings(null, 'acme').project).toBe('acme')
     expect(coerceProjectSettings('nope', 'acme').project).toBe('acme')
@@ -166,5 +176,10 @@ describe('projectSettingsBody', () => {
     })
     expect(projectSettingsBody(settings)).not.toHaveProperty('rationale')
     expect(projectSettingsBody(settings, '   ')).not.toHaveProperty('rationale')
+  })
+
+  it('carries briefing through to the PUT body', () => {
+    const settings = { ...defaultProjectSettings('acme'), briefing: ['name=label-registry'] }
+    expect(projectSettingsBody(settings).briefing).toEqual(['name=label-registry'])
   })
 })

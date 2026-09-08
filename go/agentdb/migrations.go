@@ -1087,6 +1087,16 @@ var agentMigrations = []migration{
 			CREATE INDEX IF NOT EXISTS datasets_labels ON datasets USING GIN (labels);
 		`,
 	},
+	{
+		// The project-wide briefing (design/2026-09-08-memory-coordinated-
+		// organisation.md, decision B1): a selector list unioned into every
+		// worker's own briefing at composition time, so "the whole project
+		// should always see X" is one field, not a copy-paste into every
+		// worker row. Same NULL-preserving JSONB shape as workers.briefing
+		// (migration 021) and the same nil-vs-empty-list distinction.
+		Name: "046_project_briefing",
+		SQL:  `ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS briefing JSONB DEFAULT NULL;`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

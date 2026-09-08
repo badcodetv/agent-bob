@@ -753,7 +753,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - [ ] done
 - Notes:
 
-### T2: project-wide briefing   [Status: pending | Model: sonnet]
+### T2: project-wide briefing   [Status: done | Model: sonnet]
 - **Scope:** `ProjectSettings.Briefing SelectorList` + migration
   `046_project_briefing`; union it into the selector list in
   `BuildBriefingSections` (`go/compose.go:239-254`), after the built-in default
@@ -785,10 +785,10 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **Validation:** `./stack test-go` (repo root; it appends `./...` itself — do
   not pass package paths) and `(cd web && npm ci && npm test)`
 - **Depends on:** —
-- [ ] done
+- [x] done
 - Notes:
 
-### T3: memory provenance filter   [Status: pending | Model: sonnet]
+### T3: memory provenance filter   [Status: done | Model: sonnet]
 - **Scope:** `MemorySearchQuery.CreatedByWorker` filtered in `SearchMemories`
   (`go/agentdb/memories.go`), exposed as `created_by_worker` on `memory_search`
   (`go/cmd/agentd/mcp_memory.go:230-250`), with the sentinel `"self"` resolved
@@ -806,10 +806,20 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go`
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: Implemented — `MemorySearchQuery.CreatedByWorker` (`go/agentdb/memories.go`)
+  joins the hard `where` string right after Since/Until and before the
+  LatestPer block, so it lands in the `filtered` CTE ahead of `latest_per` and
+  both RRF legs, same as every other narrowing. `created_by_worker` arg added
+  to `memory_search` (`go/cmd/agentd/mcp_memory.go`); `"self"` is resolved from
+  `caller.Worker` inside the handler, never from the argument, and refused
+  with an explanatory error (not an empty list) when `caller.Worker == ""`.
+  Store-level tests in new `go/agentdb/memories_provenance_live_test.go`
+  (live Postgres); MCP-level tests in `go/cmd/agentd/mcp_memory_test.go`
+  (`TestMemoryToolsSearchCreatedByWorker`). All four acceptance criteria
+  covered; full targeted run green against an isolated Postgres.
 
-### T4: the dead default briefing   [Status: pending | Model: sonnet]
+### T4: the dead default briefing   [Status: done | Model: sonnet]
 - **Scope:** `RollingSummarySelector` (`go/compose.go:185-190`) selects
   `kind=rolling-summary,worker=<name>`. The shipped archivist policy
   (`go/topology/architectarchivist.go:84-88`) writes `kind=summary,
@@ -836,8 +846,45 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go` and `(cd web && npm test)`
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: Chose the archivist-writes side, not the selector side (rev2's (a),
+  not (b)): `RollingSummarySelector` (`go/compose.go:185-190`) is unchanged and
+  correct — it's tested against the actual worker-briefing wiring in
+  `go/compose_briefing_test.go` and mirrored verbatim (already, not newly) in
+  `web/src/memories.ts:402` (`rollingSummarySelector`) and pinned by both
+  `web/src/memories.test.ts:238-239` and
+  `web/src/components/BriefingPreview.test.tsx:32,72` — so the console was
+  never the mismatched side and needed no change. The bug was entirely that
+  `archivistPrompt` (`go/topology/architectarchivist.go`) never told the model
+  to write under `kind=rolling-summary,worker=<name>` at all. Added one
+  mechanics bullet to `archivistPrompt` (after the label-conventions bullet)
+  instructing it to ALSO write a `kind=rolling-summary, worker=<name>` memory
+  alongside its policy-driven `kind=summary`, naming the subject worker from
+  the "From worker: " line `renderFirstMessage` (`go/compose.go:564-566`)
+  stamps at the top of the triggering `worker.finished` event — that's how the
+  archivist learns *which* worker a finished conversation was for. Also
+  documented the new label in `labelRegistrySeed` (marked "do not write it
+  yourself" for other workers, since it's mechanical, not part of the schema
+  they design). New test file
+  `go/topology/architectarchivist_briefing_test.go`:
+  `TestArchivistPromptInstructsRollingSummary` asserts the rendered archivist
+  prompt names `rolling-summary`, `worker=` and `From worker` — confirmed
+  failing against the pre-fix prompt (ran it before the edit; it failed with
+  "archivist prompt does not mention rolling-summary at all"), passing after.
+  `TestArchivistRollingSummaryReachesSubjectWorkersBriefing` is the end-to-end
+  wiring check: seeds `architect-archivist@v1`, writes a fake memory under
+  `agentkit.RollingSummarySelector(architect.Name)`, and asserts
+  `BuildBriefingSections` returns it as the worker's default section (it also
+  asserts an old-shaped `kind=summary,name=<slug>` memory, with no `worker=`,
+  matches nothing — the historical failure, still true, just no longer what
+  the archivist writes). `./stack test-go` full suite green (topology 0.068s);
+  `cd web && npm test` — 1410 passed, 2 unrelated failures in
+  `ProjectSettingsPage.test.tsx` (K2 reason-field timing/pointer-events, no
+  connection to memories/briefings, no files of mine touch that component) that
+  pass individually in isolation — pre-existing flakiness under full-suite
+  load, not caused by this ticket. Did not touch `go/compose.go`,
+  `web/src/memories.ts` or `BriefingPreview.tsx`: nothing on the selector side
+  needed to change.
 
 ### T5: `orgprompts` leaf package + the three prompts   [Status: pending | Model: opus]
 - **Scope:** Create `go/orgprompts`, importing **nothing** from this module,
@@ -1357,3 +1404,38 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 ## Discovered Issues Log
 
 (appended by executors during implementation)
+
+### DI1 (wave 1, orchestrator) — the live-Postgres suite leaked a connection pool per test
+
+`agentdb.Store` had **no `Close` method at all**, and `Open` builds a pool.
+Production opens one Store and keeps it for the process's life, so nothing ever
+needed to hand a pool back — but a test binary opens one per test, and each held
+its idle connections until the binary exited. The `agentdb` package alone drifted
+past Postgres's default `max_connections` of 100 and then failed at CONNECT with
+`FATAL: sorry, too many clients already (SQLSTATE 53300)`.
+
+Two properties made it read as a flake rather than a bug: the failure landed on
+whichever test opened next (`TestApplyTopology_LivePG`, `TestWorkersLivePG_SchemaDefaults`
+— neither of which leaks anything), and re-running that test alone always passed.
+It was **pre-existing**, not caused by T2/T3: reproduced against a freshly
+restarted database with 6 connections, running `./agentdb/...` on its own.
+T2's and T3's new live-PG tests are simply what pushed it over the line.
+
+Fixed (orchestrator, outside any ticket's scope, because it blocks every ticket's
+validation gate):
+- `go/agentdb/store.go` — new `Store.Close()`, documenting why it never existed
+  and the `NewStore` caveat (there the caller owns the `*gorm.DB`).
+- `t.Cleanup(func() { _ = store.Close() })` at 20 test sites across `agentdb`,
+  `httpapi` and `cmd/agentd`, registered immediately after the open so it runs
+  LAST (`t.Cleanup` is LIFO) and the data cleanups below it still have a pool.
+- `go/agentdb/pool_leak_test.go` — two guards. `TestStoreCloseReleasesThePool`
+  opens 8 stores, warms them, closes them and watches the server's own
+  `pg_stat_activity` count return to baseline (polled: the server lags a client
+  disconnect by milliseconds; the probe's pool is pinned to one connection so it
+  cannot drift the count itself). `TestEveryTestThatOpensAStoreClosesIt` scans
+  the module's 18 test files that open a Store and fails any that never closes
+  one, naming the fix. `agentdb/store_test.go` is exempt with its reason stated:
+  it asserts `Open` FAILS on a bad DSN, so no pool exists.
+
+Also noted, not fixed (pre-existing, untouched by this session):
+`go/cmd/agentd/timearg_test.go` is not `gofmt`-clean.

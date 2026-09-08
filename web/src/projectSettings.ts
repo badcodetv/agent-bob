@@ -38,6 +38,11 @@ export interface ProjectSettings {
   daily_tokens_hard: number
   briefing_max_bytes: number
   snapshot_ttl_days: number
+  /** Project-wide briefing selectors (engine: ProjectSettings.Briefing,
+   *  design B1) — unioned into every worker's own briefing at composition
+   *  time, so a worker with none of its own still receives these. Each entry
+   *  must parse as a label selector; the server is authoritative on that. */
+  briefing: string[]
   updated_at: number
 }
 
@@ -55,6 +60,7 @@ export function defaultProjectSettings(project = ''): ProjectSettings {
     daily_tokens_hard: 0,
     briefing_max_bytes: DEFAULT_BRIEFING_MAX_BYTES,
     snapshot_ttl_days: DEFAULT_SNAPSHOT_TTL_DAYS,
+    briefing: [],
     updated_at: 0,
   }
 }
@@ -73,6 +79,8 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     r[k] && typeof r[k] === 'object' && !Array.isArray(r[k])
       ? (r[k] as Record<string, unknown>)
       : {}
+  const strArray = (k: keyof ProjectSettings) =>
+    Array.isArray(r[k]) ? (r[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []
   return {
     project: str('project', base.project),
     base_image: str('base_image', base.base_image),
@@ -84,6 +92,7 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     daily_tokens_hard: num('daily_tokens_hard', base.daily_tokens_hard),
     briefing_max_bytes: num('briefing_max_bytes', base.briefing_max_bytes),
     snapshot_ttl_days: num('snapshot_ttl_days', base.snapshot_ttl_days),
+    briefing: strArray('briefing'),
     updated_at: num('updated_at', 0),
   }
 }

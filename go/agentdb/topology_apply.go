@@ -147,6 +147,15 @@ func TopologySettingsOverlay(current, patch *ProjectSettings) (*ProjectSettings,
 		merged.SnapshotTTLDays = patch.SnapshotTTLDays
 		fields = append(fields, "snapshot_ttl_days")
 	}
+	// len(...) > 0, not != nil: a SelectorList marshals nil and an empty list
+	// identically (see SelectorList's doc comment), so "clear the project
+	// briefing via a topology patch" is deliberately not expressible here —
+	// the same zero-means-keep limit the file comment above already states
+	// for daily_tokens_*/snapshot_ttl_days.
+	if len(patch.Briefing) > 0 {
+		merged.Briefing = patch.Briefing
+		fields = append(fields, "briefing")
+	}
 	return &merged, fields
 }
 

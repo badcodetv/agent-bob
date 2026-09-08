@@ -15,6 +15,7 @@
     "ProjectSettings": [
       "attention_channel",
       "base_image",
+      "briefing",
       "briefing_max_bytes",
       "daily_tokens_hard",
       "daily_tokens_soft",

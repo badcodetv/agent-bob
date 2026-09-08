@@ -154,6 +154,28 @@ func TestProjectSettingsPutRoundTrip(t *testing.T) {
 	}
 }
 
+// The project-wide briefing (B1) rides the same whole-object PUT/GET as every
+// other field — no separate route, because ProjectSettings is embedded wholesale
+// in the wire body (project_settings.go's projectSettingsBody).
+func TestProjectSettingsBriefingRoundTrip(t *testing.T) {
+	store := newFakeProjectSettings()
+	h := newProjectSettingsHandlers(t, store, identityFor("acme"))
+
+	rec := doProjectSettings(h, "PUT", `{"briefing": ["name=label-registry", "kind=house-style"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+	}
+	got := decodeProjectSettings(t, rec)
+	if len(got.Briefing) != 2 || got.Briefing[0] != "name=label-registry" || got.Briefing[1] != "kind=house-style" {
+		t.Fatalf("briefing = %#v", got.Briefing)
+	}
+
+	rec = doProjectSettings(h, "GET", "")
+	if back := decodeProjectSettings(t, rec); len(back.Briefing) != 2 {
+		t.Fatalf("GET after PUT: briefing = %#v", back.Briefing)
+	}
+}
+
 // The caller may not choose its own project: a body-supplied `project` (or an
 // updated_at) is overwritten by the JWT-derived scope before the store sees it.
 func TestProjectSettingsPutIgnoresBodyProject(t *testing.T) {

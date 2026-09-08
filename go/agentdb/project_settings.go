@@ -47,7 +47,15 @@ type ProjectSettings struct {
 	DailyTokensHard   int64   `json:"daily_tokens_hard"` // 0 = off
 	BriefingMaxBytes  int     `json:"briefing_max_bytes"`
 	SnapshotTTLDays   int     `json:"snapshot_ttl_days"` // 0 = never reap
-	UpdatedAt         int64   `json:"updated_at" gorm:"autoUpdateTime"`
+	// Briefing is the project-wide briefing selector list (design B1,
+	// 2026-09-08-memory-coordinated-organisation.md): unioned into every
+	// worker's own `Briefing` inside BuildBriefingSections, after the
+	// built-in default selector and before the worker's own entries, so a
+	// worker with none of its own still receives it. Same NULL-preserving
+	// SelectorList as Worker.Briefing, and the same "entry must parse as a
+	// label selector" rule normalize() applies to it.
+	Briefing  SelectorList `json:"briefing,omitempty" gorm:"type:jsonb"`
+	UpdatedAt int64        `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (ProjectSettings) TableName() string { return "project_settings" }
@@ -89,6 +97,15 @@ func (ps *ProjectSettings) normalize() error {
 	} {
 		if f.v < 0 {
 			return fmt.Errorf("%w: %s must not be negative (got %d)", ErrInvalidProjectSettings, f.name, f.v)
+		}
+	}
+	for i, sel := range ps.Briefing {
+		trimmed := strings.TrimSpace(sel)
+		if trimmed == "" {
+			return fmt.Errorf("%w: briefing selector %d is empty", ErrInvalidProjectSettings, i)
+		}
+		if _, err := ParseLabelSelector(trimmed); err != nil {
+			return fmt.Errorf("%w: briefing selector %d (%q) does not parse: %v", ErrInvalidProjectSettings, i, sel, err)
 		}
 	}
 	if ps.MaxConcurrentJobs == 0 {
@@ -156,6 +173,7 @@ func (s *Store) PutProjectSettings(ctx context.Context, ps *ProjectSettings, cw 
 		existing.DailyTokensHard = next.DailyTokensHard
 		existing.BriefingMaxBytes = next.BriefingMaxBytes
 		existing.SnapshotTTLDays = next.SnapshotTTLDays
+		existing.Briefing = next.Briefing
 		if _, err := s.WithConfigEvent(ctx, ConfigChange{
 			Project: existing.Project,
 			Action:  ActionProjectSettingsPut,

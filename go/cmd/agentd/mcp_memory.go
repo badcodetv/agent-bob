@@ -178,6 +178,12 @@ Narrowing, all optional and all ANDed with the filters above:
 	`value of that label, so latest_per "name" over kind=status gives you the ` +
 	`current status of every campaign in one call. Memories without that key are ` +
 	`omitted. This is memory_current generalised from one name to all of them.
+  created_by_worker — restrict to memories written by one worker. Pass "self" ` +
+	`for your own past work (resolved from who you are, not from anything you ` +
+	`type — it cannot be spoofed), or a specific worker name to read another ` +
+	`role's memory. Only available to a caller with a worker identity: a plain ` +
+	`human chat session has none, and "self" there is refused rather than ` +
+	`silently returning nothing.
 
 Results are snippets. Use memory_get to read one in full — including after ` +
 	`latest_per, which answers WHICH memories are current but still returns them ` +
@@ -245,6 +251,10 @@ func (m *memoryTools) tools() []*mcpTool {
 				"latest_per": map[string]any{
 					"type":        "string",
 					"description": "A label key. Returns only the newest memory for each distinct value of that label; memories without the key are omitted.",
+				},
+				"created_by_worker": map[string]any{
+					"type":        "string",
+					"description": "Restrict to memories written by one worker. \"self\" means your own past work, resolved server-side — it cannot be spoofed by passing another worker's name here or anywhere else.",
 				},
 			}, nil),
 			Handler: m.search,
@@ -342,13 +352,20 @@ func (m *memoryTools) create(ctx context.Context, caller mcpCaller, raw json.Raw
 }
 
 type memorySearchArgs struct {
-	LabelSelector string    `json:"label_selector"`
-	Query         string    `json:"query"`
-	Limit         int       `json:"limit"`
-	Since         msTimeArg `json:"since"`
-	Until         msTimeArg `json:"until"`
-	LatestPer     string    `json:"latest_per"`
+	LabelSelector   string    `json:"label_selector"`
+	Query           string    `json:"query"`
+	Limit           int       `json:"limit"`
+	Since           msTimeArg `json:"since"`
+	Until           msTimeArg `json:"until"`
+	LatestPer       string    `json:"latest_per"`
+	CreatedByWorker string    `json:"created_by_worker"`
 }
+
+// memorySearchSelfSentinel is the "my own past work" value. It is resolved
+// server-side from caller.Worker — the argument is never trusted for this
+// value, or any worker could read any other worker's memories by passing
+// "self" alongside a forged identity elsewhere. See Decision B3.
+const memorySearchSelfSentinel = "self"
 
 func (m *memoryTools) search(ctx context.Context, caller mcpCaller, raw json.RawMessage) (any, error) {
 	var args memorySearchArgs
@@ -370,15 +387,32 @@ func (m *memoryTools) search(ctx context.Context, caller mcpCaller, raw json.Raw
 		return nil, err
 	}
 
+	// createdByWorker resolves the "self" sentinel to caller.Worker — set by
+	// the MCP server from the SESSION ROW (mcpserver.go), never from this
+	// argument or any other one the model controls. A worker-attached chat
+	// session carries an identity too, so "self" works there (Decision B3,
+	// [rev2]). Only a caller with no worker identity at all — a plain human
+	// chat — is refused, and it is refused loudly rather than silently
+	// returning an empty result list, which would look like "you have no
+	// memories" instead of "this question does not make sense here".
+	createdByWorker := strings.TrimSpace(args.CreatedByWorker)
+	if createdByWorker == memorySearchSelfSentinel {
+		if caller.Worker == "" {
+			return nil, fmt.Errorf("created_by_worker \"self\" has no meaning here: this session has no worker identity (it is a plain chat, not a worker run)")
+		}
+		createdByWorker = caller.Worker
+	}
+
 	hits, err := m.store.SearchMemories(ctx, &agentdb.MemorySearchQuery{
-		Project:        caller.Project, // in code, always — never an argument
-		LabelSelector:  args.LabelSelector,
-		Query:          args.Query,
-		QueryEmbedding: queryVec,
-		Limit:          args.Limit,
-		Since:          args.Since.MS,
-		Until:          args.Until.MS,
-		LatestPer:      strings.TrimSpace(args.LatestPer),
+		Project:         caller.Project, // in code, always — never an argument
+		LabelSelector:   args.LabelSelector,
+		Query:           args.Query,
+		QueryEmbedding:  queryVec,
+		Limit:           args.Limit,
+		Since:           args.Since.MS,
+		Until:           args.Until.MS,
+		LatestPer:       strings.TrimSpace(args.LatestPer),
+		CreatedByWorker: createdByWorker,
 	})
 	if err != nil {
 		return nil, err

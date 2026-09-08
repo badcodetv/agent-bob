@@ -35,6 +35,9 @@ func openLiveStore(t *testing.T) *agentdb.Store {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

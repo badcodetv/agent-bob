@@ -259,6 +259,7 @@ func TestTopologySettingsOverlay(t *testing.T) {
 	merged, fields := TopologySettingsOverlay(current, &ProjectSettings{
 		BaseImage:         "toolbox:2",
 		MaxConcurrentJobs: 9,
+		Briefing:          SelectorList{"name=label-registry"},
 	})
 	if merged.BaseImage != "toolbox:2" || merged.MaxConcurrentJobs != 9 {
 		t.Fatalf("overlay missed a field: %+v", merged)
@@ -266,13 +267,62 @@ func TestTopologySettingsOverlay(t *testing.T) {
 	if merged.SystemPrompt != "keep me" || merged.DailyTokensSoft != 100 {
 		t.Fatalf("overlay clobbered a kept field: %+v", merged)
 	}
-	if len(fields) != 2 || fields[0] != "base_image" || fields[1] != "max_concurrent_jobs" {
+	// This is the field TopologySettingsOverlay's original nine-field switch
+	// silently dropped (design's rev2 blocker): a tenth field with no case in
+	// the switch never reaches merged, no error, tests green, feature does
+	// nothing. Asserting it here is what would have caught that.
+	if len(merged.Briefing) != 1 || merged.Briefing[0] != "name=label-registry" {
+		t.Fatalf("overlay dropped Briefing: %+v", merged.Briefing)
+	}
+	if len(fields) != 3 || fields[0] != "base_image" || fields[1] != "max_concurrent_jobs" || fields[2] != "briefing" {
 		t.Fatalf("fields = %v", fields)
 	}
 	// A nil patch is a clean copy.
 	merged, fields = TopologySettingsOverlay(current, nil)
 	if merged.SystemPrompt != "keep me" || len(fields) != 0 {
 		t.Fatalf("nil patch: %+v, %v", merged, fields)
+	}
+	// len(...) > 0, not != nil: a SelectorList marshals nil and empty
+	// identically, so "clear the briefing via a patch" is deliberately not
+	// expressible — an empty (non-nil) patch.Briefing must not overwrite a
+	// current, populated one.
+	current.Briefing = SelectorList{"kind=keep"}
+	merged, fields = TopologySettingsOverlay(current, &ProjectSettings{Briefing: SelectorList{}})
+	if len(merged.Briefing) != 1 || merged.Briefing[0] != "kind=keep" {
+		t.Fatalf("empty patch.Briefing must not clear the current briefing: %+v", merged.Briefing)
+	}
+	if len(fields) != 0 {
+		t.Fatalf("fields = %v, want none changed", fields)
+	}
+}
+
+// TestApplyTopology_SettingsPatchBriefingSurvivesOverlayAndLands is the design
+// doc's rev2 blocker, asserted end-to-end through the real write path
+// (GetProjectSettings -> TopologySettingsOverlay -> PutProjectSettings) rather
+// than through TopologySettingsOverlay alone: a `Briefing` case in the overlay
+// switch that compiles but is never reached by ApplyTopology would still pass
+// TestTopologySettingsOverlay while shipping nothing. This asserts the STORED
+// row, read back through a fresh GetProjectSettings, not merely that the apply
+// returned without error.
+func TestApplyTopology_SettingsPatchBriefingSurvivesOverlayAndLands(t *testing.T) {
+	s := newConfigLogTestStore(t)
+	ctx := context.Background()
+
+	app := applyFixture()
+	app.SettingsPatch = &ProjectSettings{
+		Project:  "topo-project",
+		Briefing: SelectorList{"name=label-registry", "kind=house-style"},
+	}
+	if _, err := s.ApplyTopology(ctx, app, ConfigWrite{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	ps, err := s.GetProjectSettings(ctx, "topo-project")
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if len(ps.Briefing) != 2 || ps.Briefing[0] != "name=label-registry" || ps.Briefing[1] != "kind=house-style" {
+		t.Fatalf("briefing did not survive the apply: %+v", ps.Briefing)
 	}
 }
 

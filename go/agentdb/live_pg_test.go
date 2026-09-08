@@ -27,6 +27,12 @@ func openLivePG(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Hand the pool back when the test ends. Without this every live-Postgres
+	// test in the package held its pool for the whole binary's life, and the
+	// package drifted into Postgres's default 100-connection ceiling — after
+	// which the NEXT test to open a store failed at connect with "sorry, too
+	// many clients already", blaming a test that had leaked nothing.
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

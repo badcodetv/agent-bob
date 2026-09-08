@@ -234,10 +234,15 @@ func BuildBriefingSections(ctx context.Context, src BriefingMemorySource, projec
 		maxBytes = settings.BriefingMaxBytes
 	}
 
-	// The default selector first, then the worker's own, deduplicated: a worker
-	// that lists the rolling summary explicitly gets one section, not two.
-	selectors := make([]string, 0, 1+len(worker.Briefing))
-	headings := make([]string, 0, 1+len(worker.Briefing))
+	// The default selector first, then the project-wide briefing (B1), then
+	// the worker's own, deduplicated: a worker that lists a selector already
+	// covered by the default or by the project gets one section, not two.
+	var projectBriefing agentdb.SelectorList
+	if settings != nil {
+		projectBriefing = settings.Briefing
+	}
+	selectors := make([]string, 0, 1+len(projectBriefing)+len(worker.Briefing))
+	headings := make([]string, 0, 1+len(projectBriefing)+len(worker.Briefing))
 	seen := map[string]bool{}
 	add := func(selector, heading string) {
 		if selector == "" || seen[selector] {
@@ -248,6 +253,10 @@ func BuildBriefingSections(ctx context.Context, src BriefingMemorySource, projec
 		headings = append(headings, heading)
 	}
 	add(RollingSummarySelector(worker.Name), DefaultBriefingHeading)
+	for _, sel := range projectBriefing {
+		sel = strings.TrimSpace(sel)
+		add(sel, briefingHeadingPrefix+sel)
+	}
 	for _, sel := range worker.Briefing {
 		sel = strings.TrimSpace(sel)
 		add(sel, briefingHeadingPrefix+sel)

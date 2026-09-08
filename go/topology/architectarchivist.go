@@ -183,6 +183,7 @@ func archivistPrompt(policy, name string) string {
 		"Mechanics you need to know:",
 		"- A conversation that is picked up again and goes quiet again will wake you a SECOND time, with the whole thread including what you already archived. Search memory first (memory_search on this thread's labels) and write only what is new. Duplicating is the failure mode of this role.",
 		"- Follow the project's label conventions — read them with memory_current(\"label-registry\"). If you invent a label nobody selects on, you have written into a void.",
+		"- ALWAYS ALSO write one memory labelled kind=rolling-summary, worker=<name> — the same name given on the \"From worker: \" line at the top of the event that woke you — with a short version of your kind=summary content. That exact label is the one briefing section every worker gets automatically, with no configuration; skip it and your summary only reaches the worker it is about if that worker happens to memory_search for it.",
 		"- Prefer the `[tool]` lines over the prose when the two disagree. What a worker did is evidence; what it said it did is a claim.",
 		"- If you got something wrong, retract it: write a memory labelled retracts=<memory-id> saying why. That withdraws it from briefings and searches without deleting anything.",
 		"",
@@ -204,6 +205,7 @@ func labelRegistrySeed(hasArchivist bool) string {
 	b.WriteString("kind=retraction — withdraws another memory, via retracts=<id>. Say why.\n")
 	if hasArchivist {
 		b.WriteString("\nkind=summary, kind=lesson and kind=fact are written by the archivist from conversations. Any worker may also write them directly when it learns something mid-job.\n")
+		b.WriteString("kind=rolling-summary, worker=<name> — the archivist's mechanical duplicate of its kind=summary for <name>. This is the ONE briefing section every worker is given automatically with no configuration; do not write it yourself, and do not select on it — it is not part of the schema you design.\n")
 	}
 	b.WriteString("\nname=<x> means \"the current value of x\": the newest memory carrying that label wins, and older ones remain as history.\n")
 	return b.String()
