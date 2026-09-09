@@ -4,7 +4,10 @@ import { projectClient, uniqueProject, type ProjectClient } from '../helpers/api
 
 // Browser e2e for onboarding: a project is created with a goal, an interviewer
 // runs in a real container and writes a charter through the core tools, a human
-// approves it, and an architect exists with its daily schedule OFF.
+// approves it, and an architect exists with its daily schedule ON (T25 — a
+// charter that produced a switched-off architect would be a charter that did
+// nothing until somebody found the schedule editor). The assertions below
+// already said ON; this line had not caught up.
 //
 // ── What the mock model can and cannot do here ────────────────────────────
 //
@@ -195,9 +198,21 @@ async function waitForOnboardSession(client: ProjectClient): Promise<OnboardSess
         row = (await res.json()) as OnboardSession
         return row.status ?? 'unknown'
       },
-      { timeout: 180_000, message: 'the interview session never left `creating`' },
+      {
+        timeout: 180_000,
+        message: 'the interview session never appeared, or never left `creating`',
+      },
     )
-    .not.toBe('creating')
+    // BOTH waiting states have to be excluded, not just one.
+    //
+    // This read `.not.toBe('creating')`, and `'absent'` is not `'creating'` —
+    // so the poll was satisfied by the very first request, made before the
+    // shell had even asked for the session. It then fell through to the null
+    // check below and failed the whole spec in 3.2s with a bare "no onboard
+    // session", which reads like the engine refusing to start an interview
+    // rather than like a test that did not wait. A poll whose success
+    // condition is "not the one bad value" accepts every other bad value.
+    .not.toMatch(/^(absent|creating)$/)
   if (row === null) throw new Error('no onboard session')
   return row
 }
