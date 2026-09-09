@@ -552,11 +552,13 @@ describe('the node toggles (OC4)', () => {
       mcp_config: {},
       image: '',
       max_instances: 2,
-      // [] rather than null: this worker has no briefing, and since T27 a null
-      // on the wire means "leave the stored briefing alone" rather than "there
-      // is none". Sending it would make this freeze silently depend on what
-      // the server already held.
-      briefing: [],
+      // null, because this worker never had a briefing and this freeze is not
+      // touching it. Since T27 that is exactly what null says on the wire —
+      // "leave the stored briefing alone". Sending [] instead would mean
+      // "clear it", the row would count as changed, and the config log would
+      // record `worker_update` rather than `worker_freeze`, because it picks
+      // the narrow action only when every other field is byte-identical.
+      briefing: null,
       enabled: true,
       frozen: true,
       rationale: 'measurement instrument',

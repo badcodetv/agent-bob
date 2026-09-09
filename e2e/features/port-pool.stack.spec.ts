@@ -173,11 +173,33 @@ test.describe('a deleted session leaves nothing behind', () => {
     // created yet, so "no container" is true and meaningless. The orphan was
     // measured arriving ~14s after the delete, so wait well past that and let
     // the create reach its checkpoints.
-    await new Promise((r) => setTimeout(r, 45_000))
+    //
+    // The row half is a POLL rather than part of the fixed sleep. A flat 45s
+    // then one read made this the flakiest test in the suite on a slow box —
+    // it failed with the row still `creating` at 45s while the same sequence
+    // by hand on the same machine had it gone by 50 (plan DI10, and re-checked
+    // 2026-09-09). The engine was never the problem; 45 seconds simply is not
+    // always enough here. Polling removes the flake WITHOUT weakening
+    // anything: "gone" is a positive fact, so waiting longer for it can only
+    // ever make this test harder to pass, never easier. The container
+    // assertions below still get their full elapsed wait, because for THOSE
+    // absence is the claim and early is meaningless.
+    const started = Date.now()
+    await expect
+      .poll(
+        async () => (await client.listAllSessions()).some((s) => s.id === id),
+        {
+          timeout: 90_000,
+          intervals: [1_000],
+          message: 'the session row should be gone',
+        },
+      )
+      .toBe(false)
 
-    // The session is gone from the API's point of view…
-    const rows = await client.listAllSessions()
-    expect(rows.find((s) => s.id === id), 'the session row should be gone').toBeUndefined()
+    // Whatever the poll did not already spend, so the create has had at least
+    // 45 seconds to reach its checkpoints before absence is claimed below.
+    const remaining = 45_000 - (Date.now() - started)
+    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining))
 
     // …and the container is gone with it. Asserted twice, fifteen seconds
     // apart, for the same reason the leak detector takes two readings: a single

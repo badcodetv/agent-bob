@@ -120,8 +120,13 @@ test.describe('project settings + workers + config log', () => {
       max_instances: 2,
     })
     expect(updated.description).toBe('answers inbound customer email')
-    // PUT replaces: the briefing the create set is gone because this body omitted it.
-    expect(updated.briefing ?? null).toBeNull()
+    // T27 turned this assertion round. It used to read "PUT replaces: the
+    // briefing the create set is gone because this body omitted it", which was
+    // a faithful description of the defect rather than of anything intended:
+    // sending {"system_prompt": …} erased description, mcp_config, image and
+    // briefing too, silently, with a 200 and an echo that looked right. An
+    // omitted briefing now KEEPS the stored one; sending [] is how you clear it.
+    expect(updated.briefing).toEqual(['kind=house-style'])
 
     // ── disable: the same row with one field flipped ────────────────────────
     const disabled = await client.toggleWorkerEnabled('email-answerer', false)

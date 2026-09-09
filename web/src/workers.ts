@@ -237,7 +237,7 @@ export function workerBody(w: WorkerDraft, rationale = ''): {
   mcp_config: Record<string, unknown>
   image: string
   max_instances: number
-  briefing: string[]
+  briefing: string[] | null
   enabled: boolean
   frozen: boolean
   rationale?: string
@@ -248,12 +248,16 @@ export function workerBody(w: WorkerDraft, rationale = ''): {
     mcp_config: w.mcp_config ?? {},
     image: w.image.trim(),
     max_instances: w.max_instances,
-    // `null` on the wire means KEEP, not clear (T27): the server treats an
-    // absent or null briefing as "leave the stored one alone". The draft uses
-    // null for "no selectors" — removing the last row sets it — so it has to
-    // become an explicit empty list here or clearing a briefing through the
-    // console would silently do nothing.
-    briefing: w.briefing ?? [],
+    // Sent verbatim, and the null/[] distinction is load-bearing since T27.
+    //
+    // null means "leave the stored briefing alone" and [] means "clear it", so
+    // this cannot coerce either way. Coercing null → [] makes an ordinary
+    // freeze look like a briefing change, and the config log then records
+    // `worker_update` instead of `worker_freeze` — it picks the narrow action
+    // only when every other field is byte-identical. Coercing [] → null makes
+    // "remove every selector, save" a silent no-op. The draft is what keeps
+    // them apart: null is a row that never had one, [] is a human emptying it.
+    briefing: w.briefing,
     enabled: w.enabled,
     // Always sent explicitly: PUT is create-or-replace, and an omitted frozen
     // reads as false server-side — an accidental unfreeze, silently.

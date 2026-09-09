@@ -134,8 +134,12 @@ describe('workerBody', () => {
   // The draft still uses null for "no selectors" (removing the last row sets
   // it), so the body has to turn that into the explicit empty list that clears.
   // Sending null instead would make "remove every selector, save" a no-op.
-  it('sends an empty briefing as [], because null now means keep (T27)', () => {
-    expect(workerBody({ ...newWorkerDraft(), name: 'w' }).briefing).toEqual([])
+  it('sends briefing verbatim — null and [] mean different things (T27)', () => {
+    // null = "leave the stored briefing alone", [] = "clear it". Coercing
+    // either way breaks something real: null → [] makes a freeze look like a
+    // briefing change and costs the config log its `worker_freeze` action,
+    // and [] → null makes "remove every selector, save" a silent no-op.
+    expect(workerBody({ ...newWorkerDraft(), name: 'w' }).briefing).toBeNull()
     expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: [] }).briefing).toEqual([])
     expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: ['kind=x'] }).briefing).toEqual([
       'kind=x',

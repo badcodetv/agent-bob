@@ -419,6 +419,16 @@ test.describe('operator console', () => {
     const api = await projectClient(request, project)
 
     await api.putWorker(CRITIC, { system_prompt: 'You score answers.', description: 'the judge' })
+    // TWO workers, and the second one is load-bearing rather than scenery.
+    // Chart is revealed by `subscriptions > 0 || workers >= 2` — one worker
+    // with nothing wired to it has no shape worth drawing — so this test with
+    // a single worker was waiting for a tab that could not appear, and burned
+    // its full 300s doing it. It had never actually run to find out: it sits
+    // after the topology test in a serial describe, and that one failed first
+    // for a different reason (DI12), so this was reported "did not run" on
+    // every previous attempt. The same UNRUN note at the top of this file
+    // (DI8) covers it.
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'the scribe' })
 
     await gotoView(page, 'chart')
     await openNodeMenu(page, CRITIC)
