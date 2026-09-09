@@ -222,6 +222,11 @@ export function validateWorker(w: WorkerDraft): WorkerFieldErrors {
  * suggest the body could change them (it cannot). The image is trimmed —
  * trailing whitespace in an image pointer is a silent resolution failure.
  *
+ * Every field is sent explicitly, which is correct whatever the route's
+ * absent-field rule happens to be. Since T27 that rule is split — five fields
+ * keep on absent, three replace on absent — and a client that always sends the
+ * whole row never has to know which is which.
+ *
  * `rationale` is the operator's one-line reason, threaded into the config event
  * (design B3 / K2). Omitted when empty rather than sent blank, so an absent
  * reason reads as absent — the same contract `scheduleBody` has.
@@ -232,7 +237,7 @@ export function workerBody(w: WorkerDraft, rationale = ''): {
   mcp_config: Record<string, unknown>
   image: string
   max_instances: number
-  briefing: string[] | null
+  briefing: string[]
   enabled: boolean
   frozen: boolean
   rationale?: string
@@ -243,7 +248,12 @@ export function workerBody(w: WorkerDraft, rationale = ''): {
     mcp_config: w.mcp_config ?? {},
     image: w.image.trim(),
     max_instances: w.max_instances,
-    briefing: w.briefing,
+    // `null` on the wire means KEEP, not clear (T27): the server treats an
+    // absent or null briefing as "leave the stored one alone". The draft uses
+    // null for "no selectors" — removing the last row sets it — so it has to
+    // become an explicit empty list here or clearing a briefing through the
+    // console would silently do nothing.
+    briefing: w.briefing ?? [],
     enabled: w.enabled,
     // Always sent explicitly: PUT is create-or-replace, and an omitted frozen
     // reads as false server-side — an accidental unfreeze, silently.

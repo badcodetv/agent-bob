@@ -344,7 +344,15 @@ describe('worker editor', () => {
     expect(screen.getByRole('button', { name: /save worker/i })).toBeDisabled()
   })
 
-  it('collapses an emptied briefing list back to null, not []', async () => {
+  // Was: "collapses an emptied briefing list back to null, not []".
+  //
+  // The DRAFT still collapses to null — that is how the form says "no
+  // selectors". What changed is what null means ON THE WIRE. Since T27 the
+  // route reads an absent or null briefing as KEEP THE STORED ONE, so sending
+  // null here would turn "remove every selector, save" into a silent no-op:
+  // the very gesture this test exists to protect. `workerBody` therefore sends
+  // the explicit empty list, which is what clears it.
+  it('sends an emptied briefing list as [], which is what clears it (T27)', async () => {
     renderPage()
     await userEvent.click(await screen.findByText('email-answerer'))
     await screen.findByLabelText(/system prompt/i)
@@ -358,7 +366,7 @@ describe('worker editor', () => {
     await explain()
     await userEvent.click(screen.getByRole('button', { name: /save worker/i }))
     await waitFor(() => expect(puts()).toHaveLength(1))
-    expect((puts()[0]!.body as Record<string, unknown>).briefing).toBeNull()
+    expect((puts()[0]!.body as Record<string, unknown>).briefing).toEqual([])
   })
 
   it('re-seeds the form when a different worker is selected', async () => {

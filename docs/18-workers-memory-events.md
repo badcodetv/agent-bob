@@ -122,10 +122,18 @@ misconfigured credential never silently authenticates as anonymous.
 | `briefing` | list of label selectors injected as briefing sections (§7.4) |
 | `enabled` | disabled workers ignore subscriptions; manual chat still allowed |
 
-**`PUT` is create-or-replace, not patch.** An absent field takes its default rather than keeping
-the stored value, so a UI or script that toggles `enabled` must read-modify-write the whole row —
-otherwise it blanks `mcp_config` and the change is logged as `worker_update` rather than
-`worker_disable`.
+**`PUT` has two absent-field rules, so send the whole row.** `description`, `system_prompt`,
+`mcp_config`, `image` and `briefing` are **keep-on-absent**: leaving one out changes nothing about
+it, and an explicit `""`, `{}` or `[]` clears it. `max_instances`, `enabled` and `frozen` are
+still **replace-on-absent**: leaving one out writes the default (`1`, `true`, `false`). So a script
+that toggles `enabled` and sends nothing else will silently reset `max_instances` and thaw a frozen
+worker. Read-modify-write the whole row — it is correct under either rule — and note that such a
+change is logged as `worker_update` rather than `worker_disable`.
+
+> The five used to replace on absent too, which meant a caller sending one field erased the other
+> four with a 200 and a read-back echo that looked correct. That is how the architect lost its
+> briefing during the design's first live run. The split above is the fix landing on five of the
+> eight fields; whether the remaining three should follow is an open decision, not an oversight.
 
 ### What a job's prompt is made of (§6.2)
 

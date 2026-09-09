@@ -552,7 +552,11 @@ describe('the node toggles (OC4)', () => {
       mcp_config: {},
       image: '',
       max_instances: 2,
-      briefing: null,
+      // [] rather than null: this worker has no briefing, and since T27 a null
+      // on the wire means "leave the stored briefing alone" rather than "there
+      // is none". Sending it would make this freeze silently depend on what
+      // the server already held.
+      briefing: [],
       enabled: true,
       frozen: true,
       rationale: 'measurement instrument',

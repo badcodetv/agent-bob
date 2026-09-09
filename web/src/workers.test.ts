@@ -127,9 +127,19 @@ describe('workerBody', () => {
     expect('frozen' in workerBody({ ...newWorkerDraft(), name: 'w' })).toBe(true)
   })
 
-  it('preserves null vs [] on briefing — the engine keeps them distinct', () => {
-    expect(workerBody({ ...newWorkerDraft(), name: 'w' }).briefing).toBeNull()
+  // Was: "preserves null vs [] on briefing — the engine keeps them distinct".
+  // T27 changed what those two mean ON THE WIRE. The route now reads an absent
+  // or null briefing as KEEP THE STORED ONE, so a null reaching the server is
+  // no longer a way to say "no selectors" — it is a way to say nothing at all.
+  // The draft still uses null for "no selectors" (removing the last row sets
+  // it), so the body has to turn that into the explicit empty list that clears.
+  // Sending null instead would make "remove every selector, save" a no-op.
+  it('sends an empty briefing as [], because null now means keep (T27)', () => {
+    expect(workerBody({ ...newWorkerDraft(), name: 'w' }).briefing).toEqual([])
     expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: [] }).briefing).toEqual([])
+    expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: ['kind=x'] }).briefing).toEqual([
+      'kind=x',
+    ])
   })
 
   it('trims the image — a stray space is a silent resolution failure', () => {
