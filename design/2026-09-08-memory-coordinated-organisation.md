@@ -716,7 +716,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 
 ## Tickets
 
-### T1: Live architect probe — ZERO engine code   [Status: pending | Model: opus]
+### T1: Live architect probe — ZERO engine code   [Status: done | Model: opus]
 - **Scope:** Test the plan's central assumption before building anything.
   **Procedure** (rev1 gave none; this is followable as written):
   1. `NO_TMUX=1 ./stack start` — the **real** model, not mock. `./stack status`
@@ -750,8 +750,20 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **Validation:** `./stack status` showed real-model mode; `./stack sessions`
   is empty afterwards; the README exists and names the model used.
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **PASS (2026-09-08).** Findings, transcripts and the prompt as
+  installed: `docs/product/runs/2026-09-08-architect-probe/`. Run against the
+  real model in subscription mode. Two projects, not one: the ticket's
+  `architect-archivist@v1` always gives the architect a colleague, so STEP 0
+  could never fire — `archivist:false` gives an architect genuinely alone.
+  All six questions answered: no thrash on the no-signal run (zero config
+  changes, verified per `actor_session`), substantial correct action on the
+  bootstrap run, `config_history` read for its own last change, verdict
+  before action 3/3, one prompt rewrite per run, and
+  `request_human_attention` only when something changed. NOT proven: STEP 6's
+  three-no-signal escalation (run 4 was killed mid-flight — it was exactly the
+  run that should have escalated), and anything about behaviour over weeks.
+  T5 must fold in three prompt revisions listed in the run README.
 
 ### T2: project-wide briefing   [Status: done | Model: sonnet]
 - **Scope:** `ProjectSettings.Briefing SelectorList` + migration
@@ -949,7 +961,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - [ ] done
 - Notes:
 
-### T7: `charter` schema, parser and validator   [Status: pending | Model: sonnet]
+### T7: `charter` schema, parser and validator   [Status: done | Model: sonnet]
 - **Scope:** `go/charter` with the `Charter` and `Issue` types,
   `Parse(content) (*Charter, summary string, err error)` — line 1 a human
   summary, then one JSON object, unknown keys rejected — and `Validate`
@@ -966,8 +978,20 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go test ./charter/... -count=1 && go vet ./charter/...`
 - **Depends on:** T5
-- [ ] done
-- Notes:
+- [x] done
+- Notes: Implemented in `go/charter/charter.go` + `go/charter/charter_test.go`
+  (13 table-test cases, all pass; `go build ./...` and `go vet ./charter/...`
+  green). The stated T5 dependency did not hold in practice — `Parse` and
+  `Validate` touch no prompt text, only `Resolve` (T8) will need
+  `go/orgprompts`/`go/topology` — so this was built without T5 in place.
+  "Missing summary line" vs. "empty body" were split: an empty/whitespace-only
+  deposit, or a summary line with nothing (or only blank lines) after it, is
+  treated as "empty body"; a deposit whose line 1 is itself blank but has a
+  JSON body after it is "missing summary line". Unknown-field errors are
+  extracted from `encoding/json`'s fixed `unknown field "foo"` message via
+  regexp — safe because `Charter` is flat (no nested objects), so the field
+  name IS the JSON path; a nested schema would need a real path-tracking
+  decoder instead.
 
 ### T8: `charter.Resolve`   [Status: pending | Model: opus]
 - **Scope:** Charter → `*topology.Bundle`, pure, leaving `ID`/`Project`/
@@ -1439,3 +1463,36 @@ validation gate):
 
 Also noted, not fixed (pre-existing, untouched by this session):
 `go/cmd/agentd/timearg_test.go` is not `gofmt`-clean.
+
+### DI2 (T1 probe) — `PUT /agent/workers/{name}` silently wipes any omitted field
+
+`PutWorker` (`go/httpapi/workers.go:111-116`) builds a fresh `agentdb.NewWorker`
+and assigns `Description`, `SystemPrompt`, `MCPConfig`, `Image` and **`Briefing`**
+unconditionally from the request body. A PUT carrying only `{"system_prompt": …}`
+therefore **erases the worker's briefing** — the mechanism T2 exists to deliver.
+No error, nothing logged, the field is simply gone. Found live: installing the
+probe prompt wiped the architect's `name=label-registry` briefing in both probe
+projects.
+
+Defensible as PUT semantics, and T19 already carries the identical warning one
+level up for `PUT /agent/project-settings`. The worker-level twin is not
+documented anywhere, and the console's worker editor is where it will bite.
+**Wants a ticket** (not opened here, to avoid expanding scope mid-plan): either
+round-trip every field in the console editor, or make the route a merge.
+
+### DI3 (T1 probe) — a self-designed archivist does not write T4's label
+
+Both probe architects independently invented `kind=summary` **plus a
+`worker=<name>` label** for their archivists — convergent with T4 in spirit, but
+`RollingSummarySelector` reads `kind=rolling-summary`, so the default briefing
+section still matches nothing. T4 changed the shipped `archivistPrompt`; it
+cannot reach an archivist the architect authors itself, which A1 makes the
+normal case. Worth reconsidering whether the selector should follow the
+convention models reach for rather than the reverse.
+
+### DI4 (T1 probe) — the attention channel may reach nobody, and a worker noticed
+
+A probe archivist wrote `kind=lesson`: *"request_human_attention in this project
+may silently reach nobody."* Correct for a local stack with no attention webhook
+configured, so a config artifact rather than an engine bug — recorded because C3
+makes that channel the entire notification path for every architect change.
