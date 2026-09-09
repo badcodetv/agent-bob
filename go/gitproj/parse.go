@@ -10,9 +10,10 @@ import (
 // read but must NEVER come back in through the import door
 // (design/2026-09-09-git-projection.md §D, and DI3 of that document).
 //
-// These four fields say *which repository* a project projects itself into,
-// *which branch*, *which subfolder inside it*, and *which environment
-// variable holds the push credential*. Anyone with commit access to the
+// These five fields say *which repository* a project projects itself into,
+// *which branch*, *which subfolder inside it*, *which environment variable
+// holds the push credential*, and *which one holds the secret an inbound
+// webhook delivery must be signed with*. Anyone with commit access to the
 // mirror can edit a file in it — that is the entire point of the inbound
 // door — so if these were importable, a commit could point a project's
 // projection (and its push token) at a repository the committer controls.
@@ -29,6 +30,10 @@ var notImportable = map[string]bool{
 	"git_branch":    true,
 	"git_subfolder": true,
 	"git_token_env": true,
+	// G20: the webhook HMAC secret's variable name. Dropped for the same
+	// reason as the four above and one sharper one — a commit that could
+	// rewrite it would decide which secret verifies inbound deliveries.
+	"git_webhook_secret_env": true,
 }
 
 // NotImportableFields returns the frontmatter keys Parse always drops, in

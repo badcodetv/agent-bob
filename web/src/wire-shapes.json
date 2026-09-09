@@ -23,6 +23,7 @@
       "git_remote",
       "git_subfolder",
       "git_token_env",
+      "git_webhook_secret_env",
       "max_concurrent_jobs",
       "mcp_config",
       "project",

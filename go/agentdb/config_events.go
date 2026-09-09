@@ -893,6 +893,40 @@ var ConfigMutationExempt = map[string]string{
 		"guard installed (it never does: the guard is a test fixture)",
 	"ClearScheduleProvisionFailures": "the reset half of NoteScheduleProvisionFailure; same runtime-state " +
 		"reasoning, and a config event on every SUCCESSFUL firing would be worse still",
+	// The git projection's own bookkeeping (G22, gitprojection.go). All six
+	// are §15.3 rule 3 runtime state — the same class as
+	// MarkProjectEventDelivered and NoteScheduleEvaluated. They write ONE
+	// table, git_projection_state, which is not a projection of configuration
+	// and is not under the write guard: a watermark advancing, a lease being
+	// taken or a git failure being recorded is progress nobody decided, and
+	// logging it would append rows to the changelog on every render, push and
+	// poll forever.
+	"AcquireGitProjectionLease": "§15.3 rule 3: the projection's one-writer-per-clone lease (§F). Runtime " +
+		"coordination between agentd processes, taken and released around every render and push; nobody " +
+		"decided anything and there is no verb for it in §15.3's closed vocabulary",
+	"ReleaseGitProjectionLease": "§15.3 rule 3: the release half of AcquireGitProjectionLease",
+	"MarkGitProjectionRendered": "§15.3 rule 3: the OUTBOUND watermark — which config-log sequence the " +
+		"published tree reflects (§F). It is a record of how far a loop has got, exactly like " +
+		"MarkProjectEventDelivered, and the configuration change it followed is ALREADY in the log; that " +
+		"is what it points at",
+	"MarkGitProjectionPushed": "§15.3 rule 3: the same watermark, one step later — the commit that reached " +
+		"the remote",
+	"MarkGitProjectionImported": "§15.3 rule 3: the INBOUND watermark. The changes an import applies are " +
+		"each logged as their own config event by the store methods that apply them (that is the whole " +
+		"design: git writes nothing the store did not serialise); this column only records how far the " +
+		"importer has read",
+	"NoteGitProjectionFailure": "§15.3 rule 3: why the last publish failed — an unrenderable field, a " +
+		"diverged remote, an unreachable host — and which KIND of failure that was. An observation " +
+		"written by a loop that retries every interval, like NoteScheduleProvisionFailure, and a " +
+		"changelog entry per failed poll would bury the log it shares",
+	"PutGitProjectionNotes": "§15.3 rule 3: the per-file half of the same observation (G23) — which file " +
+		"quarantined the last inbound push, and which edits were understood and deliberately not " +
+		"applied. It writes git_projection_notes, a bounded operator's view of the MOST RECENT import " +
+		"run that is replaced wholesale on every pass; nobody decided anything and §15.3's closed " +
+		"vocabulary has no verb for it. The changes an import actually applied are each logged as their " +
+		"own config event by the store methods that apply them — that record is complete and is not " +
+		"this one",
+
 	"MarkCustomImageReaped": "storage GC, not curation: the snapshot_ttl_days reaper (§5, B4) deleted the bytes " +
 		"and stamps the catalogue row so resolution fails loudly instead of pointing at nothing (§13.7). " +
 		"No agent decided it and §15.3's closed vocabulary has no verb for it. Like DeleteCustomImage it " +

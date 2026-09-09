@@ -235,7 +235,7 @@ var projectSettingsRules = []Rule{
 	{Field: "Briefing", Key: "briefing", Decision: Render,
 		Reason: "project-wide briefing selectors: label expressions naming what workers read, not values."},
 
-	// The four git fields. §D: they render (they name a repo and the NAME of an
+	// The five git fields. §D: they render (they name a repo and the NAME of an
 	// environment variable, never a secret) but they are NOT IMPORTABLE — if a
 	// commit could rewrite them, anyone with push access to the mirror could
 	// point a project's projection, and its push credential, at a repo they
@@ -249,6 +249,8 @@ var projectSettingsRules = []Rule{
 		Reason: "one path segment Orange owns in the repo. NOT IMPORTABLE — an import that could move it could write outside the subfolder, including .github/workflows."},
 	{Field: "GitTokenEnv", Key: "git_token_env", Decision: Render, NotImportable: true,
 		Reason: "the NAME of an environment variable, never its value — the same api_key_env pattern as the project map. Safe to publish; the secret stays in agentd's environment. NOT IMPORTABLE."},
+	{Field: "GitWebhookSecretEnv", Key: "git_webhook_secret_env", Decision: Render, NotImportable: true,
+		Reason: "the NAME of the environment variable holding the webhook HMAC secret, never the secret. NOT IMPORTABLE, and the sharpest case of the five (G20): a commit that could rewrite it would point signature verification at a secret the committer chose, i.e. make forged deliveries verify."},
 
 	{Field: "UpdatedAt", Decision: Never,
 		Reason: "a wall-clock timestamp that changes on every write. Rendering it would put a diff in every commit whether or not anything about the project changed, and would break the 'render is a pure function, equal state means no commit' property the import loop's termination rests on. When a thing changed is git's own answer."},

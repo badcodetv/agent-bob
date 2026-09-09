@@ -53,17 +53,18 @@ func goldenState() ProjectState {
 				"url":     "${WOLF_ATTENTION_WEBHOOK}",
 				"headers": map[string]any{"Authorization": "${WOLF_ATTENTION_TOKEN}"},
 			},
-			MaxConcurrentJobs: 4,
-			DailyTokensSoft:   1000000,
-			DailyTokensHard:   0,
-			BriefingMaxBytes:  2048,
-			SnapshotTTLDays:   30,
-			Briefing:          agentdb.SelectorList{"kind=charter", "kind=label-registry"},
-			GitRemote:         "https://github.com/badcode/wolf-org",
-			GitBranch:         "",
-			GitSubfolder:      "",
-			GitTokenEnv:       "WOLF_GITHUB_TOKEN",
-			UpdatedAt:         1757000000,
+			MaxConcurrentJobs:   4,
+			DailyTokensSoft:     1000000,
+			DailyTokensHard:     0,
+			BriefingMaxBytes:    2048,
+			SnapshotTTLDays:     30,
+			Briefing:            agentdb.SelectorList{"kind=charter", "kind=label-registry"},
+			GitRemote:           "https://github.com/badcode/wolf-org",
+			GitBranch:           "",
+			GitSubfolder:        "",
+			GitTokenEnv:         "WOLF_GITHUB_TOKEN",
+			GitWebhookSecretEnv: "WOLF_WEBHOOK_SECRET",
+			UpdatedAt:           1757000000,
 		},
 		Workers: []*agentdb.Worker{
 			{
@@ -313,6 +314,7 @@ git_branch: main
 git_remote: https://github.com/badcode/wolf-org
 git_subfolder: orange
 git_token_env: WOLF_GITHUB_TOKEN
+git_webhook_secret_env: WOLF_WEBHOOK_SECRET
 max_concurrent_jobs: 4
 mcp_config:
   prices:

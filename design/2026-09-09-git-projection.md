@@ -547,7 +547,7 @@ Repo link, last-rendered seq, last-pushed SHA, push health, quarantine list with
 reasons, on the project settings page.
 **Validation:** `cd web && npm test && npm run typecheck`.
 
-### G17: docs   [Status: pending | Model: sonnet]
+### G17: docs   [Status: done | Model: sonnet]
 `docs/21-git-projection.md`; pointers from `CLAUDE.md` and `docs/18` §9.
 Must state plainly: what renders, what does not, that a literal secret refuses
 to render, that git configuration is not importable, and that git is never the
@@ -574,7 +574,7 @@ when a field is added, and delete the local lists from `render.go`.
 `agentdb.Subscription` and confirm the guard goes RED before removing it (say so
 in the report — an unfalsified guard is decoration).
 
-### G20: wire the webhook — the missing secret field, the resolver, and the mount   [Status: pending | Model: sonnet]
+### G20: wire the webhook — the missing secret field, the resolver, and the mount   [Status: done | Model: sonnet]
 Opened by G12. Three loose ends it correctly refused to reach outside its own
 files for:
 1. **There is no per-project webhook secret anywhere.** G7 added `GitTokenEnv`
@@ -607,7 +607,7 @@ append-only and a bootstrapped project has no history to inherit.
 **Validation:** `cd go && go test ./cmd/agentd/ -run 'GitImport|GitBootstrap'` —
 extend the round-trip so a non-default visibility survives export→bootstrap.
 
-### G23: persist quarantine and ignored, and give the state row an error KIND   [Status: pending | Model: opus]
+### G23: persist quarantine and ignored, and give the state row an error KIND   [Status: done | Model: opus]
 Opened by G16, and it is the largest remaining gap.
 1. 🔴 **Nothing persists quarantine or ignored results.** `gitImportResult`'s
    `Failures` and `Ignored` live in memory for one run and no caller stores them.
@@ -635,6 +635,32 @@ server refuses a name that is not a valid environment variable name, and
 `git_subfolder` must be a single path segment — surface both as field-level
 validation rather than a save failure.
 **Validation:** `cd web && npx vitest run src/components/ProjectSettingsPage.test.tsx && npm run typecheck`
+
+### G25: console input for `git_webhook_secret_env`   [Status: done | Model: sonnet]
+Opened by G20-G22. The fifth git field landed after G24 built the settings
+section, so there is no input for it and it can only be set through the API —
+which means the inbound half of the feature cannot be switched on from the
+console at all. Add it to the existing **Git repository** section in G24's idiom:
+a variable NAME, never a secret, with the same live validation
+(`^[A-Za-z_][A-Za-z0-9_]*$`) and an empty value presented as "inbound webhooks
+not configured", not as an error.
+**Validation:** `cd web && npx vitest run src/components/ProjectSettingsPage.test.tsx && npm run typecheck`
+
+### G26: bootstrap has no entry point   [Status: pending | Model: opus]
+Found while closing G23. `gitbootstrap.go` is built, tested and proven by a
+render→bootstrap→fold-equal round trip — and **nothing calls it**. There is no
+route, no CLI, no console action. "Project as code" works in tests and an
+operator cannot do it.
+Add an entry point: an authenticated route (`POST /agent/git-bootstrap`, project
+from the `customer` claim only, like every other project-scoped route) that runs
+it once against the project's configured remote and subfolder, refuses when the
+project already has configuration rather than merging into it, and returns the
+result including what was **ignored**.
+While there: wire the bootstrap's `Ignored` list into `PutGitProjectionNotes` the
+way `gitwebhookwiring.go` does for an ordinary import — G23 could not, because
+`gitbootstrap.go` was outside its file list, so a bootstrap's ignored edits are
+currently dropped.
+**Validation:** `cd go && go test ./cmd/agentd/ -run 'GitBootstrap|GitProjection' && go test ./httpapi/ && go build ./...`
 
 ## Discovered Issues Log
 
@@ -1160,6 +1186,102 @@ request ordering, and a duplicated 501 message. Fixed inside G16's own files: th
 settings load fires first, and a 404/501 is treated as *route not wired* so the
 panel **hides entirely** rather than reporting an error. That matters for the
 sqlite fallback, where the whole product layer is silently inert.
+
+---
+
+### DI18 (G20/G22) — three guards fired, and one of them caught data loss
+
+**Migration 048** carries both halves: `project_settings.git_webhook_secret_env`
+and the `git_projection_state` table. DI13's `AutoMigrate`-at-boot complaint is
+resolved, and `TestGitProjectionCreatesNoSchema` greps both `cmd/agentd` files
+for the call **so it cannot come back**.
+
+🔴 **`TestWireShapesMatchCapturedFile` caught a real data-loss path, not a
+formality.** The console `PUT`s project settings **whole**. Without the browser
+mirror knowing about the new field, the first human save from the settings screen
+would have **blanked it silently** — turning off a project's webhook
+verification, with no error and no way to notice. The mirror and the captured
+shape were both updated. This is the second time today that guard has caught a
+new settings field before it shipped.
+
+**Adding a fifth NOT-IMPORTABLE field is not one table entry.** Six places
+hard-code "four": `gitproj/parse.go`'s `notImportable` map, pinned lists in
+`allowlist_guard_test.go`, `parse_test.go` and `gitimport_test.go`, the README
+wording in `render.go`, and the golden fixture in `render_test.go`. All updated.
+**That pin exists to force exactly this decision** — a new field naming a
+credential or a repository must be a deliberate act, and the failing tests are
+the mechanism.
+
+**`TestMutationsAreLogged` flagged all seven new store methods.** Six are runtime
+state — the lease, three watermarks, the failure record — exempted under the
+§15.3 rule-3 exemption with reasons rather than routed through `WithConfigEvent`,
+which would have turned a heartbeat into a configuration change. **The seventh
+was a genuine smell** and was renamed to `ListProjectsWithGitRemote`, a read.
+
+**The resolver compares repositories properly:** both the payload's `clone_url`
+and `full_name`, and every `GitRemote`, reduce to a lowercase `(host,
+owner/repo)` — https, ssh, scp-like and `.git` all compare equal. An unknown
+repository matches nothing and **no secret is read at all** (a test asserts
+`getenv` was never called). Two projects claiming the same remote resolve to
+**nothing** rather than the resolver picking one.
+
+**`TriggerImport` resumes from `LastImportedSHA`**, falling back to
+`LastPushedSHA` on a first run so it does not replay the whole history as though
+it were human edits.
+
+---
+
+### DI19 — backfill ordering could not live in `main.go`, and the truncation guard now bites
+
+**DI16's fix does not fit where DI16 said to put it.** `Reconcile` is the **first
+thing `proj.Run` does**, and `installGitProjection` starts `Run` before it
+returns — so a `BackfillPending` call from `main.go` would **race** reconciliation
+rather than precede it, producing exactly the lumped-commit outcome DI16 warns
+about, intermittently. The sequencing lives inside `installGitProjection`
+(`go func(){ BackfillPending(ctx); Run(ctx) }()`), where the guarantee actually
+holds, and off the boot path so a slow clone cannot delay startup. The
+alternative — `installGitProjection` returning the loops for `main.go` to start —
+was offered and not taken; put the ordering where it is enforced, not where it
+reads nicely.
+
+**DI14's truncation bug now has a regression guard that bites.** The projector's
+fake `SearchMemories` truncates its snippet to **exactly 500 bytes, like the real
+query**, and a test renders a document larger than that and asserts it appears in
+full. Anyone who renders search results directly again turns it red immediately,
+rather than shipping truncated documents into a repository.
+
+**A skipped document does not fail a render.** Skips are recorded on the state row
+via `NoteFailure` **after** `MarkRendered` — which clears `last_error` — with
+wording that says the project *published* and names the documents that are not
+being published. That lets the console distinguish "this project is broken" from
+"this one document is not publishable", which are very different things for an
+operator to see.
+
+---
+
+### DI20 (G23) — quarantine health was unreachable, and bootstrap has no caller
+
+**Migration 049** adds `last_error_kind` to the state row and a
+`git_projection_notes` table, capped at **50 per kind per project** — larger than
+any hand-written push, far smaller than a machine-generated disaster. Health is
+now decided by the kind, set where the error is raised and its type is still in
+hand.
+
+🔴 **An inbound rejection was being reported as `failing` / `push_failing`.** The
+quarantined state was **unreachable** in the landed code: an operator whose push
+was rejected wholesale would have been told the *push* was failing — the opposite
+end of the pipe from the actual problem, and the one thing that would send them
+looking at the wrong system entirely.
+
+**The text matching can now be deleted but is deliberately kept as the fallback.**
+It still decides one thing: the 3-arg `NoteFailure` that `gitbackfill.go` calls
+re-derives a kind from text, because that file was outside G23's list. The
+sentinel test no longer guards correctness — only the quality of
+`unrenderable_field` after a reword. Worth simplifying later, not urgent.
+
+🔴 **`gitbootstrap.go` has no caller.** Not a route, not a CLI, not a console
+action — nothing anywhere invokes it. The round trip is proven and the feature is
+unreachable. **Ticket G26.** Its `Ignored` list is dropped for the same reason.
 
 ---
 

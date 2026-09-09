@@ -377,6 +377,15 @@ func main() {
 		// the same one artifacts and snapshots use — is handed over here, as
 		// the single-method reader httpapi declares.
 		DatasetBlobs: blobs,
+		// The console's git-projection status read (G16/G23). httpapi would
+		// auto-fill this seam from AgentDB, and that would work — but it would
+		// only ever answer the STATE half. The per-file quarantine and ignored
+		// lists are an optional second interface agentdb cannot implement
+		// (its methods would have to return an httpapi type, and httpapi
+		// already imports agentdb), so the adapter that implements both is
+		// handed over here. Nil store → nil seam, and the route answers
+		// state_available=false exactly as it does on the sqlite fallback.
+		GitProjection: newGitProjectionStatusSource(agentDB),
 	})
 	must(err)
 
@@ -394,6 +403,22 @@ func main() {
 	// E4's `request_human_attention` MCP tool: the §9 mechanics are implemented
 	// once, in attention.go, and the tool is a thin adapter onto this service.
 	var attention *attentionService
+
+	// gitWebhook is the inbound half of the git projection (G20). It is built
+	// inside the product-layer block below, alongside the projector it hands
+	// deliveries to, and mounted on the ROOT mux further down — outside
+	// apiAuthMiddleware, because GitHub cannot hold a console JWT. Nil means
+	// there is nothing to mount.
+	var gitWebhook *gitWebhookWiring
+
+	// The project map is loaded HERE, before the product-layer block, because
+	// the git projection needs its `github_token_env` half as the fallback for
+	// a project whose settings row names no push credential (DI3). Everything
+	// else it feeds — API keys, framing origins, login — is wired further down
+	// from the same value; it is read once, at boot, either way.
+	projectCfg, err := loadProjectSettingsOptional(os.Getenv)
+	must(err)
+
 	if agentDB != nil {
 		// The `config.changed` emitter (§15.4, §15.8 — J3). Installed FIRST and
 		// before anything can serve a request, because it is a post-commit hook
@@ -402,8 +427,23 @@ func main() {
 		// emissions lost to a crash between commit and append. See
 		// configchanged.go.
 		configChanges := newConfigChangeEmitter(agentDB, log.Printf)
-		agentDB.SetConfigEventHook(configChanges.Hook())
 		go configChanges.Run(ctx)
+
+		// The git projection (G8/G9/G10, design/2026-09-09-git-projection.md).
+		// installGitProjection replays the config log into one commit per event
+		// for any project that has never rendered (the backfill) BEFORE the
+		// render loop's boot reconciliation, which would otherwise lump that
+		// history into a single commit, irrecoverably. The
+		// store takes ONE post-commit hook, so the two consumers are fanned out
+		// here rather than each installing its own. The projection's half does
+		// nothing but mark a project dirty — no git, no IO — because this hook
+		// runs synchronously on the mutating goroutine, which for a worker
+		// rewriting a prompt is a model's blocking tool call. See
+		// gitprojection.go rule 1.
+		gitHook, gitProj := installGitProjection(ctx, agentDB,
+			gitTokenEnvFromProjectMap(projectCfg), log.Printf)
+		gitWebhook = newGitWebhookWiring(agentDB, gitProj, os.Getenv, log.Printf)
+		agentDB.SetConfigEventHook(fanOutConfigEvents(log.Printf, configChanges.Hook(), gitHook))
 
 		gate := newDispatcher(dispatcherConfig{
 			Store: agentDB,
@@ -514,12 +554,12 @@ func main() {
 	}
 	registerEmbedToken(apiMux, jwtSecret, sessionNames)
 
-	// The project map is loaded once, here, whether or not a login mode is on:
-	// its "projects" half carries per-project ops config (API key env var names,
-	// framing origins) that a login-less, embed-only deployment still needs. It
-	// stays optional — the zero-config demo mounts no map at all.
-	projectCfg, err := loadProjectSettingsOptional(os.Getenv)
-	must(err)
+	// The project map was loaded once, above the product-layer block (the git
+	// projection needs it): its "projects" half carries per-project ops config
+	// (API key env var names, framing origins, the git push token's variable
+	// name) that a login-less, embed-only deployment still needs. It stays
+	// optional — the zero-config demo mounts no map at all.
+	//
 	// Resolving env → key values is a boot-time act: a short key or one value
 	// granting two projects fails the process rather than degrading quietly.
 	apiKeys, err := newProjectKeys(projectConfigsOf(projectCfg), os.Getenv, log.Printf)
@@ -625,6 +665,21 @@ func main() {
 			strings.Join(sortedStrings(mcpSrv.toolNames()), ","))
 	} else {
 		log.Printf("[agentd] core mcp DISABLED (no DATABASE_URL): memory requires Postgres")
+	}
+
+	// ── The git projection's inbound door ────────────────────────────────────────
+	// POST /agent/git/webhook, mounted on the ROOT mux for the same reason the
+	// core MCP server is: it authenticates differently. GitHub holds no console
+	// JWT and no project API key; every delivery carries an HMAC-SHA256
+	// signature over its raw body, verified against the secret named by that
+	// project's git_webhook_secret_env. The payload chooses which project's
+	// secret is checked and NOTHING else — what gets imported is the tree diff
+	// against the remote tip, read from the repository itself. See
+	// gitwebhookwiring.go and httpapi/gitwebhook.go.
+	if gitWebhook != nil {
+		must(gitWebhook.mount(root, ctx))
+	} else {
+		log.Printf("[agentd] git webhook DISABLED: the git projection is not running")
 	}
 
 	// Everything else goes through auth: a project API key, or a bearer JWT.

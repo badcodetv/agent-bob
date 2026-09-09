@@ -147,7 +147,11 @@ func TestAllowlistRulesAreWellFormed(t *testing.T) {
 // If this list needs to change, that is a security decision about the importer,
 // not a tidy-up.
 func TestNotImportableFieldsArePinned(t *testing.T) {
-	want := []string{"GitBranch", "GitRemote", "GitSubfolder", "GitTokenEnv"}
+	// GitWebhookSecretEnv joined the set in G20 (the webhook's HMAC secret had
+	// nowhere to live, DI11). That was exactly the deliberate security decision
+	// this test asks for: a commit that could rewrite it would choose which
+	// secret makes an inbound delivery verify.
+	want := []string{"GitBranch", "GitRemote", "GitSubfolder", "GitTokenEnv", "GitWebhookSecretEnv"}
 
 	var got []string
 	for _, structName := range sortedKeys(guardedStructs) {

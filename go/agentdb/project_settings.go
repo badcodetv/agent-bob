@@ -81,10 +81,10 @@ type ProjectSettings struct {
 	// label selector" rule normalize() applies to it.
 	Briefing SelectorList `json:"briefing,omitempty" gorm:"type:jsonb"`
 
-	// The four fields below are git projection config
-	// (design/2026-09-09-git-projection.md, G7): which repo a project's
-	// configuration renders to, and which environment variable names the push
-	// token. NONE OF THEM ARE IMPORTABLE (§D): the git importer this design
+	// The five fields below are git projection config
+	// (design/2026-09-09-git-projection.md, G7 and G20): which repo a project's
+	// configuration renders to, and which environment variables name the push
+	// token and the inbound webhook secret. NONE OF THEM ARE IMPORTABLE (§D): the git importer this design
 	// also builds must never write these columns. If it could, anyone with
 	// commit access to the rendered repo could redirect a project's
 	// projection at a repository — and a credential — they control. They
@@ -110,6 +110,16 @@ type ProjectSettings struct {
 	// cmd/agentd/googleauth.go) — see the overlap note on
 	// github_token_env there. NOT IMPORTABLE.
 	GitTokenEnv string `json:"git_token_env" gorm:"type:text"`
+	// GitWebhookSecretEnv names the environment variable holding the shared
+	// secret GitHub signs this project's webhook deliveries with
+	// (X-Hub-Signature-256, HMAC-SHA256 over the raw body). As with
+	// GitTokenEnv it is a variable NAME, never the secret itself.
+	//
+	// NOT IMPORTABLE, and this one most sharply of the five: if a commit could
+	// rewrite it, then commit access to the mirror would be the power to point
+	// verification at a secret the committer chose — i.e. to make forged
+	// deliveries verify. Set through the console/API only.
+	GitWebhookSecretEnv string `json:"git_webhook_secret_env" gorm:"type:text"`
 
 	UpdatedAt int64 `json:"updated_at" gorm:"autoUpdateTime"`
 }
@@ -166,6 +176,15 @@ func (ps *ProjectSettings) normalize() error {
 	}
 	if ps.GitTokenEnv != "" && !gitTokenEnvPattern.MatchString(ps.GitTokenEnv) {
 		return fmt.Errorf("%w: git_token_env %q is not a valid environment variable name", ErrInvalidProjectSettings, ps.GitTokenEnv)
+	}
+	if ps.GitWebhookSecretEnv != "" && !gitTokenEnvPattern.MatchString(ps.GitWebhookSecretEnv) {
+		// The same rule as git_token_env, for the same reason: this field
+		// holds the NAME of an environment variable. It catches the shapes a
+		// pasted secret usually has — punctuation, spaces, a leading digit —
+		// before the secret ends up in a row the console displays and the
+		// renderer publishes. It cannot catch a secret that happens to look
+		// like an identifier, and does not pretend to.
+		return fmt.Errorf("%w: git_webhook_secret_env %q is not a valid environment variable name", ErrInvalidProjectSettings, ps.GitWebhookSecretEnv)
 	}
 	if ps.GitSubfolder != "" && !gitSubfolderPattern.MatchString(ps.GitSubfolder) {
 		// gitSubfolderPattern already rules out slashes, "..", and a leading
@@ -244,6 +263,7 @@ func (s *Store) PutProjectSettings(ctx context.Context, ps *ProjectSettings, cw 
 		existing.GitBranch = next.GitBranch
 		existing.GitSubfolder = next.GitSubfolder
 		existing.GitTokenEnv = next.GitTokenEnv
+		existing.GitWebhookSecretEnv = next.GitWebhookSecretEnv
 		if _, err := s.WithConfigEvent(ctx, ConfigChange{
 			Project: existing.Project,
 			Action:  ActionProjectSettingsPut,

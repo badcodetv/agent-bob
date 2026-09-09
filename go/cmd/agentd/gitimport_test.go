@@ -722,7 +722,7 @@ func TestGitImportGitConfigFieldsAreIgnored(t *testing.T) {
 		t.Fatalf("the operator was not told the git fields were ignored: %+v", res.Ignored)
 	}
 	// The list gitproj drops must stay exactly these four.
-	if want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
+	if want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
 		t.Fatalf("NotImportableFields = %v, want %v", gitproj.NotImportableFields(), want)
 	}
 }

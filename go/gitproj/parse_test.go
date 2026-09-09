@@ -242,27 +242,30 @@ func TestParseAgainstFormattingIsNotAChange(t *testing.T) {
 	}
 }
 
-// TestParseAgainstDropsGitFields is the DI3 rule: the four fields that say
-// which repo, which branch, which subfolder and which credential are
-// rendered for a human to read and are never importable. Anyone with commit
-// access could otherwise redirect a project's projection at a repo they
-// control.
+// TestParseAgainstDropsGitFields is the DI3 rule: the five fields that say
+// which repo, which branch, which subfolder, which push credential and which
+// webhook secret are rendered for a human to read and are never importable.
+// Anyone with commit access could otherwise redirect a project's projection at
+// a repo they control — or, with the webhook secret, decide which key their own
+// forged deliveries are verified against.
 func TestParseAgainstDropsGitFields(t *testing.T) {
 	oldValues := map[string]interface{}{
-		"base_image":    "example",
-		"git_remote":    "https://github.com/badcode/wolf",
-		"git_branch":    "main",
-		"git_subfolder": "orange",
-		"git_token_env": "WOLF_GITHUB_TOKEN",
+		"base_image":             "example",
+		"git_remote":             "https://github.com/badcode/wolf",
+		"git_branch":             "main",
+		"git_subfolder":          "orange",
+		"git_token_env":          "WOLF_GITHUB_TOKEN",
+		"git_webhook_secret_env": "WOLF_WEBHOOK_SECRET",
 	}
 	old := workerFile(t, oldValues, "Project prompt.\n")
 
 	nextValues := map[string]interface{}{
-		"base_image":    "other",
-		"git_remote":    "https://github.com/attacker/exfil",
-		"git_branch":    "steal",
-		"git_subfolder": "orange",
-		"git_token_env": "WOLF_GITHUB_TOKEN",
+		"base_image":             "other",
+		"git_remote":             "https://github.com/attacker/exfil",
+		"git_branch":             "steal",
+		"git_subfolder":          "orange",
+		"git_token_env":          "ATTACKER_TOKEN",
+		"git_webhook_secret_env": "ATTACKER_WEBHOOK_SECRET",
 	}
 	next := workerFile(t, nextValues, "Project prompt.\n")
 
@@ -288,7 +291,7 @@ func TestParseAgainstDropsGitFields(t *testing.T) {
 }
 
 func TestNotImportableFields(t *testing.T) {
-	want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env"}
+	want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}
 	if got := NotImportableFields(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("NotImportableFields() = %v, want %v", got, want)
 	}

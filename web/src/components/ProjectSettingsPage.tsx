@@ -431,6 +431,11 @@ function GitProjectionFields({
     draft.git_token_env.trim() !== '' && !GIT_TOKEN_ENV_PATTERN.test(draft.git_token_env)
       ? 'not a valid environment variable name (letters, digits, underscore; cannot start with a digit)'
       : null
+  const webhookSecretEnvError =
+    draft.git_webhook_secret_env.trim() !== '' &&
+    !GIT_TOKEN_ENV_PATTERN.test(draft.git_webhook_secret_env)
+      ? 'not a valid environment variable name (letters, digits, underscore; cannot start with a digit)'
+      : null
   const subfolderError =
     draft.git_subfolder.trim() !== '' && !GIT_SUBFOLDER_PATTERN.test(draft.git_subfolder)
       ? 'must be a single path segment: lowercase letters, digits and hyphens only — no slashes, no ".."'
@@ -511,6 +516,27 @@ function GitProjectionFields({
                 'agentd reads the push token from that variable at render time — do not paste a ' +
                 'credential into this field, it would be written to the database and then refused ' +
                 'at render rather than published.'}
+          </FormHelperText>
+        </Box>
+
+        <Box>
+          <TextField
+            label="Webhook secret — environment variable name"
+            fullWidth
+            size="small"
+            value={draft.git_webhook_secret_env}
+            placeholder="e.g. GIT_WEBHOOK_SECRET"
+            error={webhookSecretEnvError !== null}
+            onChange={(e) => onChange({ git_webhook_secret_env: e.target.value })}
+          />
+          <FormHelperText error={webhookSecretEnvError !== null}>
+            {webhookSecretEnvError ??
+              'Verifies that an inbound push notification really came from GitHub — without it, ' +
+                'inbound changes are not accepted. The NAME of an environment variable already set ' +
+                'on agentd, never the secret itself. Do not paste a credential into this field: it ' +
+                'would be written to the database and published nowhere useful, leaving the webhook ' +
+                'unverified while looking configured. Optional — empty means inbound webhooks are ' +
+                'not configured.'}
           </FormHelperText>
         </Box>
       </Stack>

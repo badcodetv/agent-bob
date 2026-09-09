@@ -335,7 +335,7 @@ func readme() string {
 	b.WriteString("serialise. If a file cannot be read, the whole push is rejected and nothing is\n")
 	b.WriteString("applied.\n")
 	b.WriteString("\n")
-	b.WriteString("**Four fields are informational only.** These are ignored on import and can\n")
+	b.WriteString("**The fields below are informational only.** They are ignored on import and can\n")
 	b.WriteString("only be changed in the console:\n")
 	b.WriteString("\n")
 	for _, f := range NotImportableFields() {
@@ -343,9 +343,10 @@ func readme() string {
 	}
 	b.WriteString("\n")
 	b.WriteString("They say which repository, branch and folder this project publishes to, and\n")
-	b.WriteString("which environment variable holds the push credential. If a commit could change\n")
-	b.WriteString("them, anyone who can push here could point the projection — and its token — at\n")
-	b.WriteString("a repository they control.\n")
+	b.WriteString("which environment variables hold the push credential and the webhook secret. If\n")
+	b.WriteString("a commit could change them, anyone who can push here could point the projection\n")
+	b.WriteString("— and its token — at a repository they control, or decide which secret has to\n")
+	b.WriteString("sign an inbound delivery for it to be believed.\n")
 	b.WriteString("\n")
 	b.WriteString("Do not hand-write files here that Agent Orange did not write: anything outside\n")
 	b.WriteString("the layout above is not read, and this file itself is regenerated.\n")

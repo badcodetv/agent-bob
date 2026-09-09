@@ -225,12 +225,33 @@ describe('git projection fields (G24)', () => {
     expect(await screen.findByText(/single path segment/i)).toBeInTheDocument()
   })
 
+  it('flags an invalid git_webhook_secret_env inline, without needing a save attempt', async () => {
+    render(<ProjectSettingsPage />)
+    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
+    fireEvent.change(webhookSecretEnv, { target: { value: '1-not-valid' } })
+    expect(await screen.findByText(/not a valid environment variable name/i)).toBeInTheDocument()
+  })
+
+  it('accepts a valid git_webhook_secret_env with no error', async () => {
+    render(<ProjectSettingsPage />)
+    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
+    fireEvent.change(webhookSecretEnv, { target: { value: 'GIT_WEBHOOK_SECRET' } })
+    expect(screen.queryByText(/not a valid environment variable name/i)).not.toBeInTheDocument()
+  })
+
+  it('presents an empty git_webhook_secret_env as inbound webhooks not being configured', async () => {
+    render(<ProjectSettingsPage />)
+    expect(await screen.findByText(/inbound webhooks are not configured/i)).toBeInTheDocument()
+  })
+
   it('sends the git fields on save, whole-object', async () => {
     render(<ProjectSettingsPage />)
     const remote = await screen.findByLabelText(/repository/i)
     await userEvent.type(remote, 'https://github.com/acme/orange')
     const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
     await userEvent.type(tokenEnv, 'GIT_PUSH_TOKEN')
+    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
+    await userEvent.type(webhookSecretEnv, 'GIT_WEBHOOK_SECRET')
     await explain()
     await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
@@ -238,6 +259,7 @@ describe('git projection fields (G24)', () => {
     expect(puts()[0]!.body).toMatchObject({
       git_remote: 'https://github.com/acme/orange',
       git_token_env: 'GIT_PUSH_TOKEN',
+      git_webhook_secret_env: 'GIT_WEBHOOK_SECRET',
     })
   })
 })

@@ -43,17 +43,20 @@ export interface ProjectSettings {
   daily_tokens_hard: number
   briefing_max_bytes: number
   snapshot_ttl_days: number
-  /** Git projection (design 2026-09-09 §D). These four say *which repo* and
-   *  *which credential*, and are deliberately NOT importable — the git
+  /** Git projection (design 2026-09-09 §D). These five say *which repo* and
+   *  *which credentials*, and are deliberately NOT importable — the git
    *  importer never writes them, or commit access to the repo would become the
-   *  power to redirect a project's projection. `git_token_env` is the NAME of
-   *  an environment variable, never a token. Empty `git_remote` = projection
-   *  off. Empty branch/subfolder mean the engine's defaults, applied at read
-   *  time, not stored. */
+   *  power to redirect a project's projection. `git_token_env` and
+   *  `git_webhook_secret_env` are the NAMES of environment variables, never a
+   *  token or a secret: the first holds the push credential, the second the
+   *  shared secret GitHub signs inbound webhook deliveries with (G20). Empty
+   *  `git_remote` = projection off. Empty branch/subfolder mean the engine's
+   *  defaults, applied at read time, not stored. */
   git_remote: string
   git_branch: string
   git_subfolder: string
   git_token_env: string
+  git_webhook_secret_env: string
   /** Project-wide briefing selectors (engine: ProjectSettings.Briefing,
    *  design B1) — unioned into every worker's own briefing at composition
    *  time, so a worker with none of its own still receives these. Each entry
@@ -80,6 +83,7 @@ export function defaultProjectSettings(project = ''): ProjectSettings {
     git_branch: '',
     git_subfolder: '',
     git_token_env: '',
+    git_webhook_secret_env: '',
     briefing: [],
     updated_at: 0,
   }
@@ -116,6 +120,7 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     git_branch: str('git_branch', base.git_branch),
     git_subfolder: str('git_subfolder', base.git_subfolder),
     git_token_env: str('git_token_env', base.git_token_env),
+    git_webhook_secret_env: str('git_webhook_secret_env', base.git_webhook_secret_env),
     briefing: strArray('briefing'),
     updated_at: num('updated_at', 0),
   }

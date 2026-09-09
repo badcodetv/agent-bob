@@ -97,12 +97,13 @@ func (f *backfillStore) SearchMemories(_ context.Context, q *agentdb.MemorySearc
 	return out, nil
 }
 
-func (f *backfillStore) NewestMemory(_ context.Context, project, selector string) (*agentdb.Memory, error) {
+// GetMemory re-reads one memory IN FULL — the half of §E's load that
+// SearchMemories cannot do, because its rows carry a 500-byte snippet.
+func (f *backfillStore) GetMemory(_ context.Context, project, id string) (*agentdb.Memory, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	want := strings.TrimPrefix(selector, agentdb.MemoryNameLabel+"=")
 	for _, m := range f.docs[project] {
-		if m.Labels[agentdb.MemoryNameLabel] == want {
+		if m.ID == id {
 			copied := *m
 			return &copied, nil
 		}
@@ -245,11 +246,21 @@ func (s *backfillState) MarkImported(_ context.Context, project, sha string) err
 	return nil
 }
 
-func (s *backfillState) NoteFailure(_ context.Context, project, reason string) error {
+func (s *backfillState) NoteFailure(ctx context.Context, project, reason string) error {
+	return s.NoteFailureKind(ctx, project, gitProjectionErrorKindFromText(reason), reason)
+}
+
+func (s *backfillState) NoteFailureKind(_ context.Context, project, kind, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r := s.row(project)
-	r.LastError, r.LastErrorAt = reason, time.Now().Unix()
+	r.LastError, r.LastErrorAt, r.LastErrorKind = reason, time.Now().Unix(), kind
+	return nil
+}
+
+// PutNotes: the backfill writes none — it replays the config log, it does not
+// import anything — but the seam it uses carries them (G23).
+func (s *backfillState) PutNotes(context.Context, string, string, []agentdb.GitProjectionNote) error {
 	return nil
 }
 
