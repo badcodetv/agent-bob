@@ -957,7 +957,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   `charter.Parse` and returns zero `charter.Validate` issues — T6 makes that
   a permanent assertion.
 
-### T6: the prompt/tool-schema assertions   [Status: pending | Model: sonnet]
+### T6: the prompt/tool-schema assertions   [Status: done | Model: sonnet]
 > ⚠️ **Worked OUT OF NUMERIC ORDER — after T10.** It asserts against the
 > registered core tool list, which does not contain `charter_validate` until
 > T10 registers it. The execution rules permit this: dependencies override
@@ -983,8 +983,36 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/... -count=1`
 - **Depends on:** T5, T10
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/orgprompts_test.go` (5 tests), worked after T10 as the
+  ticket's own warning instructs. The extractor takes any
+  `lowercase_with_underscores` token from a prompt line as a tool mention and
+  any parenthesised identifier list right after it as that tool's arguments,
+  then checks both against the list `main.go` registers.
+  **It found the bug it was written for on its first run** — and one more.
+  (a) `actor_worker`: named in prose in `architect.md` next to
+  `config_history`. Real argument, not a tool; added to the explicit
+  `promptSkipWords` list, which is deliberately a list and not a pattern so a
+  genuine typo cannot hide in it.
+  (b) `interviewer.md` named NO arguments in the parenthesised form, so its
+  half of the check was silently vacuous. Caught by the `checked == 0` guard
+  rather than by reading the output. Fixed in the prompt, which now writes
+  `ask_user (question, options, context)`, `charter_validate (charter)` and
+  `memory_create (content, labels)` — clearer for the model too.
+  Nested properties are **not** flattened: `briefing` must not resolve as a
+  top-level argument of `worker_update`, since flattening would have hidden
+  DI5 exactly. `TestPromptExtractorCatchesABadArgument` feeds the live
+  prompt's actual wrong line through the extractor and asserts it is caught,
+  so a broken extractor and a clean prompt cannot look alike.
+  The `ui` carve-out is `sandboxBuiltins`, a hand-written map of `ask_user`'s
+  four arguments taken from `sandbox/src/tools/builtin/ask_user.ts`, with a
+  comment saying that Go cannot read a Zod schema in TypeScript and that this
+  is therefore a carve-out written down rather than an omission.
+  The `mcp__<server>__<tool>` mapping is stated in the file header and the
+  extractor strips the prefix. `coreToolsForPromptAssertions` mirrors
+  `main.go:601-615` by hand — it cannot import a `func main()` — so
+  `TestPromptToolListMirrorsTheServer` pins a floor on the tool count and
+  spot-checks one tool per group.
 
 ### T7: `charter` schema, parser and validator   [Status: done | Model: sonnet]
 - **Scope:** `go/charter` with the `Charter` and `Issue` types,
@@ -1080,7 +1108,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   nothing anywhere asserts a count, checked. The prompt is asserted
   byte-identical to `orgprompts.Interviewer()`.
 
-### T10: MCP `charter_validate`   [Status: pending | Model: sonnet]
+### T10: MCP `charter_validate`   [Status: done | Model: sonnet]
 - **Scope:** One new file plus one `mcpSrv.register(...)` line in `main.go`
   inside the `if agentDB != nil` guard (`:601`) — Postgres-only like every core
   tool. Accepts the charter as a string (as deposited) or an object. **Returns
@@ -1096,8 +1124,26 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/... -count=1 && go build ./...`
 - **Depends on:** T8
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/mcp_charter.go` + `mcp_charter_test.go` (7 tests), and
+  one `mcpSrv.register(newCharterTools().tools()...)` line in `main.go` inside
+  the `if agentDB != nil` guard. `charterTools` is an **empty struct** — no
+  store, no runner, no seam of any kind. That is how "must not write" is
+  asserted: the acceptance criterion asked for an unchanged config-event count,
+  but a row count only proves that *one call* did not write, whereas a type
+  with no fields cannot write at all. The test states that reasoning.
+  A malformed or invalid charter comes back as `{valid:false, errors:[...]}`,
+  never as a tool error — the model is asking "is this right?", and a
+  transport-level error reads as "the tool is broken" and invites it to stop
+  calling. `Resolve` is run on a valid charter for its refusals only: a charter
+  that validates but cannot resolve must not be reported valid, or the human
+  presses Approve on something that fails.
+  The bare-object form goes through `charter.Parse` too, with a synthetic
+  summary line prepended and discarded, so there is exactly one decoder and one
+  unknown-field rule.
+  Reachability is tested over the real JSON-RPC path with a session row that
+  has **no worker identity**, because that is the only kind of session that
+  will ever call it (A7).
 
 ### T11: charter HTTP routes   [Status: pending | Model: sonnet]
 - **Scope:** `GET /agent/charter/current?session=` reads the newest memory

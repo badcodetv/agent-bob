@@ -605,6 +605,11 @@ func main() {
 		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks).tools()...)
 		mcpSrv.register(newConfigLogTools(agentDB, permalinks).tools()...)
 		mcpSrv.register(newSessionTools(agentDB, permalinks).tools()...)
+		// charter_validate takes no store — validation is pure — but it is
+		// registered here with the rest, because a project with no product
+		// layer has nothing to apply a charter to, and a tool that appeared
+		// on only some stacks would be worse than one that never appears.
+		mcpSrv.register(newCharterTools().tools()...)
 		// The dataset tools (O6b). They take the Runner for its exec seam
 		// (dataset_put pulls the named file out of the CALLING session's
 		// container), the process-wide BlobStore that httpapi.Config.DatasetBlobs
