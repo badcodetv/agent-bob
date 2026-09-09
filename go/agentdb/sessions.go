@@ -22,9 +22,22 @@ import (
 // Exactly one transport is configured per server: stdio (Command/Args/Env) or
 // http/sse (URL/Headers). Values in Env and Headers may be whole-value ${VAR}
 // references — the *name* of an environment variable of the session container,
-// resolved at MCP-process spawn time. They are never secret values, which is
-// precisely what makes persisting and displaying this config safe by
-// construction (§4.4).
+// resolved at MCP-process spawn time.
+//
+// CORRECTED 2026-09-09 (git-projection DI8). This comment previously read "They
+// are never secret values, which is precisely what makes persisting and
+// displaying this config safe by construction (§4.4)." **That was false.**
+// Validate below rejects only PARTIAL interpolation — a value containing "${"
+// that is not a whole-value reference. A plain literal (`xoxb-…`, a signed URL
+// with the token in its path) is perfectly valid stored config and always has
+// been. §4.4 describes the ${VAR} facility; it does not, and cannot, prevent
+// someone storing the secret itself.
+//
+// So this config is safe to persist in a PRIVATE database and is NOT safe to
+// publish. Anything that renders it outside the database must check each leaf
+// itself and refuse a value that is not a whole-value ${VAR} reference — see
+// go/gitproj/allowlist.go, which does exactly that. Do not rebuild that check
+// on the strength of the sentence this one replaced.
 //
 // The canonical definition lives here rather than in the root agentkit package
 // because agentkit imports agentdb (the reverse would be an import cycle);

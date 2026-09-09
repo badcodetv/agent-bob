@@ -413,7 +413,9 @@ type ProjectState struct {
 // Render is a pure function. Same state ⇒ byte-identical tree, always.
 // Returns ErrUnrenderable naming the field when a credential-bearing field
 // holds a literal (§D) — the tree is NOT partially returned.
-func Render(st ProjectState, subfolder string) (map[string][]byte, error)
+// [corrected by G4] Shipped as RenderTree — `Render` was already a Decision
+// const in allowlist.go.
+func RenderTree(st ProjectState, subfolder string) (map[string][]byte, error)
 
 // Parse is the inverse door. It returns a typed change, or an error naming the
 // file and the line. It never touches a store.
@@ -456,7 +458,7 @@ Deterministic frontmatter writer/reader and the path validator. No git.
 path tests that reject `../`, absolute paths, uppercase, empty segments, and
 anything resolving outside the subfolder.
 
-### G2: the secret allowlist and its guard test   [Status: pending | Model: opus]
+### G2: the secret allowlist and its guard test   [Status: done | Model: opus]
 `allowlist.go` + the reflection guard. Depends on G1.
 **Validation:** `go test ./gitproj/...`; add a throwaway field to
 `ProjectSettings` and confirm the guard test **fails**; remove it.
@@ -466,12 +468,12 @@ Mirror `resolveHeaders`. A literal URL keeps working (no migration) but is
 marked unrenderable by G2's allowlist.
 **Validation:** `go test ./cmd/agentd/ -run Attention`.
 
-### G4: `Render`   [Status: pending | Model: opus]
+### G4: `Render`   [Status: done | Model: opus]
 The pure function, all entity kinds. Depends on G1, G2.
 **Validation:** `go test ./gitproj/...` — golden-file tests; a determinism test
 that renders the same state 100× and asserts byte equality.
 
-### G5: `Parse` and the DI2 field-merge rule   [Status: pending | Model: opus]
+### G5: `Parse` and the DI2 field-merge rule   [Status: done | Model: opus]
 Inverse of G4. `Change.Fields` carries **only** what the file changed.
 **Validation:** `go test ./gitproj/...` — a test that a worker file edited to
 change only `enabled` produces a Change that does not mention `briefing`.
@@ -504,7 +506,7 @@ One-shot: replay `config_events` from seq 1 via `FoldConfig`, one commit each.
 **Validation:** a test that a project with N config events backfills to N
 commits whose subjects and trailers match the log in order.
 
-### G11: the importer   [Status: pending | Model: opus]
+### G11: the importer   [Status: done | Model: opus]
 Tree diff from the watermark, skip `Orange-Seq:` commits, parse-all-then-apply,
 apply through the existing store methods with empty actor and the commit message
 as rationale, quarantine on any failure. Depends on G5, G6.
@@ -556,6 +558,17 @@ rationale; a malformed file quarantines and writes nothing.
 **Validation:** `./e2e/run-stack-e2e.sh` with the new spec.
 
 ---
+
+### G19: bring Subscription, Schedule and CustomImage under the allowlist guard   [Status: done | Model: sonnet]
+Opened by G4. `allowlist.go`'s reflection guard covers `ProjectSettings`,
+`Worker` and `Skill` only. G4 had to render subscriptions, schedules and images
+against **deny-by-default field lists living in `render.go`**, outside the guard.
+Nothing there can hold a credential today — that is exactly the assumption that
+rots. Move those three into `allowlist.go`'s tables so the guard fails the build
+when a field is added, and delete the local lists from `render.go`.
+**Validation:** `cd go && go test ./gitproj/...`; then add a dummy field to
+`agentdb.Subscription` and confirm the guard goes RED before removing it (say so
+in the report — an unfalsified guard is decoration).
 
 ## Discovered Issues Log
 
@@ -709,6 +722,134 @@ concurrency.
 **Also:** `go/cmd/agentd/mcp_memory_test.go` was edited outside G13's file list —
 `fakeMemoryStore` had to implement the new interface method. Necessary and
 minimal.
+
+---
+
+### DI7 (G5) — the `Parse` sketch in Interfaces was unimplementable; four rules now fixed
+
+The Interfaces sketch could not be built as written and the shipped shape differs.
+**Follow the code, not the sketch.** Binding on G11 (importer) and G14 (documents):
+
+- **Signature.** `ParseAgainst(subfolder, path string, old, next []byte) (Change, error)`,
+  with `Parse(...)` the create case (`old == nil`) and an explicit
+  `ParseDelete(subfolder, path)`. `subfolder` is required because G1's
+  `ParsePath` needs it; empty means `orange` (DI3's read-time default), so a
+  root-level path is refused rather than accepted. The old bytes are required
+  because "what changed" cannot be answered without them — which is the whole
+  DI2 defence.
+- **`Change` carries the body.** The sketch had none, which makes the `BodyOnly`
+  path physically uncallable: the importer needs the body to call
+  `SetWorkerPrompt`. Shipped: `Body`, `BodyChanged`, `Path`, `DroppedFields`,
+  `HasChange()`. `BodyOnly` is exactly `BodyChanged && len(Fields) == 0`.
+- **The kind is `KindMemory`, not `document`.** §C's table says "document";
+  `paths.go` ships `KindMemory`. The code wins.
+- **A removed frontmatter key means CLEAR that field.** The design said nothing,
+  and it is a real thing a human does. The alternative — ignoring the removal —
+  means a human can never clear a field through git and their edit vanishes
+  silently. **G11 must not assume otherwise.**
+
+Two more decisions, documented in code: scalars compare by textual form, so
+requoting `enabled: "true"` is not a change; and a malformed *previous* version
+is an error rather than a degradation to "create", because that degradation is
+precisely the DI2 wipe wearing a different hat.
+
+**The DI2 regression test was falsified**, not merely written: with the
+same-value skip removed it fails with all six fields present, then passes again
+when restored.
+
+---
+
+### DI8 (G2) — a FALSE safety claim in the codebase, now corrected; and the allowlist's calls
+
+**The claim.** `agentdb.MCPServerConfig`'s doc comment asserted that Env and
+Headers values "are never secret values, which is precisely what makes
+persisting and displaying this config safe by construction". That sentence was
+**false**: `Validate` rejects only *partial* interpolation (a value containing
+`${` that is not a whole-value reference). A plain literal token has always been
+valid stored config. This is DI1's twin, and worse — DI1 was a gap between a
+comment and its code, this was an explicit invitation for the next agent to skip
+a check. **Corrected in place** in `go/agentdb/sessions.go`, naming what is
+actually true and pointing at the allowlist.
+
+**Decisions G2 made that are worth knowing:**
+
+- **`Project` and `UpdatedAt` render as `Never`.** `UpdatedAt` is the sharp one:
+  a rendered timestamp changes on every write, so "equal state ⇒ no commit"
+  would never hold and the loop would commit forever. Rendering a clock into a
+  pure function is the bug that would have been hardest to find.
+- **Skill `OwnerEmail` and `PromotedBy` are `Never` — PII.** A repo has forks
+  and permanent history.
+- **`Manifest` is `Never`** on the "unsure means Never" rule: unschema'd jsonb.
+- **MCP server `url` is env-ref-only, going beyond the ticket. UPHELD.** Hosted
+  MCP endpoints routinely carry the secret in the URL path (Zapier
+  `…/mcp/s/<secret>/mcp`, Composio, Smithery) — the same "the URL *is* the
+  token" shape as a Slack webhook. The cost is real: a project with a plain
+  non-secret MCP URL must move it into an env var before it can render. That is
+  a loud, one-edit error against a permanent leak, and §D's doctrine is refusal
+  by default.
+- **Empty/nil passes as "not set"** and the renderer omits the key rather than
+  writing `url: ""`. Refusing it would make every project without an attention
+  channel unrenderable.
+- **`" ${VAR}"` with whitespace is refused**, because `resolveHeaders` trims
+  before matching and `MCPServerConfig.Validate` does not — so its safety would
+  depend on which reader picked it up.
+- **`UnrenderableError` never quotes the offending value**, only its dotted
+  path, because the error travels to logs and the console. A test asserts no
+  secret substring reaches the message.
+
+**The guard was falsified four ways**, each restored: a new secret-looking field
+on `Worker`; a renamed field; a stale table entry; and downgrading `OwnerEmail`
+from `Never` to `Render`. All four go red.
+
+---
+
+### DI9 (G4) — six things, one of them a landmine for the importer
+
+1. **`Render` could not compile.** The name was already a `Decision` const in
+   `allowlist.go`. Shipped as **`RenderTree`**, which reads well beside
+   `Repo.WriteTree`. Interfaces sketch corrected above.
+2. 🔴 **`ParsePath` rejects `orange/README.md`** — the renderer's own generated
+   file is not an entity shape. **The importer MUST skip it explicitly.** Without
+   that, every push touching the README quarantines the whole project, and the
+   renderer rewrites the README, so the project would be permanently stuck. G11
+   was messaged mid-flight. A test pins the rejection.
+3. **Three structs are outside the guard.** `Subscription`, `Schedule` and
+   `CustomImage` have no allowlist table, so G4 used deny-by-default lists in
+   `render.go`. Nothing there can hold a credential *today* — precisely the
+   assumption that rots silently. **Ticket G19 opened above.**
+4. **Timestamps and runtime state are never rendered** — `updated_at`,
+   `last_evaluated`, `provision_failures`. They change without anyone deciding
+   anything, so rendering them would commit once a minute forever. Same reasoning
+   as DI8's `UpdatedAt`.
+5. **G1's frontmatter cannot express a JSON null or a non-integer number.** Both
+   are refused with a named error rather than dropped or rounded — a silent
+   round would corrupt configuration. Consequence: a jsonb null inside
+   `mcp_config` makes a project unrenderable until a human fixes it. Acceptable,
+   but it is a real way a project can stop projecting.
+6. **Zero values: strings and containers omit when empty; numbers and bools
+   always render.** `enabled: false`, `daily_tokens_soft: 0` and
+   `max_firings_per_hour: 0` are *configuration*, and omitting them would publish
+   a file that reads as "take the default" — which is a different setting.
+
+**Five load-bearing tests were falsified**, each restored byte-identical:
+breaking newest-per-name, skipping `CheckRenderable`, dropping subfolder
+validation, omitting false bools, and dropping body-newline normalisation.
+
+---
+
+### DI10 (G11) — five things the importer had to decide, and one store weakness
+
+**Trailers, hardened beyond DI4.** Read with `git log --format=%(trailers:key=Orange-Seq,valueonly,only)` — git's own parser, last paragraph only, no grep anywhere. A commit counts as ours only with **both** `Orange-Seq` and `Orange-Event` trailers **and** the fixed author email. It errs toward *importing* an ambiguous commit, which is the safe direction: importing our own render is a no-op, skipping a human's edit loses their work.
+
+🔴 **`GetSubscription` and `GetSchedule` have no not-found sentinel** — they return a bare `fmt.Errorf("subscription not found")`, indistinguishable from a database outage. Guessing wrong there turns an outage into a **create**. G11 routed around it via `ListSubscriptions`/`ListSchedules` and id matching. The stores should grow real sentinels (`ErrSubscriptionNotFound`, `ErrScheduleNotFound`) like `ErrMemoryNotFound` already has. Not fixed here — logged for a follow-up.
+
+**A mixed push re-imports our own values.** One of our commits plus one human's in the same push means the tree diff spans both, and the `Orange-Seq` skip cannot help — the diff is of trees, not commits. Closed with a **same-value suppression pass**: the parsed result is compared against the stored row and nothing is written when they already agree. This also strengthens loop termination from the inbound side.
+
+**A partial apply is not a quarantine, and is not pretended to be.** If a store call fails mid-plan, the earlier writes are real config events and cannot be unwritten. G11 returns the error with the watermark unmoved and lets same-value suppression make the retry a no-op. Claiming atomicity across a sequence of independent config events would be a lie in the log.
+
+**The importer targets the REMOTE tip and does not move the local branch** — see the note sent to G8, who owns fast-forwarding it in boot reconciliation. Without that the branches diverge on the first human push and G9's fast-forward-only push refuses forever.
+
+**Three things a human can do in git that have no effect**, reported in `result.Ignored` rather than dropped silently so G16 can tell the operator: images are not importable (nothing in frontmatter reconstructs a content-addressed blob), and deleting a skill or a memory file removes nothing (both are append-only).
 
 ---
 
