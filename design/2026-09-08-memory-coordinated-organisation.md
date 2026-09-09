@@ -1786,8 +1786,65 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   a stale `yarn.lock` that npm dirties — run the checkout from inside
   `sandbox/` so the pathspec is `yarn.lock`.
 - **Depends on:** T25
-- [ ] done
-- Notes:
+- [x] done
+- Notes: All five steps observed on 2026-09-09 against the mock stack.
+
+  **Steps 1 and the whole approve path** are `e2e/features/onboarding.stack.spec.ts`,
+  run with its mock script and green in 11.6s — but only after fixing a poll
+  that had never waited (DI15 below). It proves the interview runs in a real
+  container, deposits through the core tools, the panel shows the rules whole
+  and says the loop starts, and approving yields: the architect and no roster;
+  the interviewer disabled with its prompt intact; ONE enabled daily schedule;
+  the `architect.run` subscription; `project_settings.briefing` =
+  `["name=label-registry"]`; the project prompt carrying the goal; both memory
+  seeds.
+
+  **Step 2** by hand over HTTP (`scratchpad/walk.py`): deposit → validate →
+  apply → post an `architect.run` EVENT → read the woken session's
+  `composed_prompt`. 13,384 bytes, and it carries the registry as a real
+  briefing section, not merely the selector name:
+
+  ```
+  --- Your memory briefing: name=label-registry [efaaaf3e] ---
+  The label conventions for this project. Read this before writing a memory.
+  …
+  [… briefing section truncated at 2048 bytes]
+  ```
+
+  Two things a reader should know. The job IS a session — `composed_prompt`
+  lives on the session row and there is no `/agent/jobs` route; the console
+  derives jobs from `/agent/deliveries`, which is what names the session id.
+  And a finished mock job's session does not linger, so the read has to be
+  prompt: poll deliveries fast and fetch immediately, or you find the delivery
+  and a 404 behind it.
+
+  **Steps 3 and 4** by hand (`scratchpad/revert.py`). A non-newest revert is
+  refused with 409 and this body, which is the readable reason the ticket asks
+  for:
+
+  > agentdb: revert refused: worker_update (seq 2) is not the newest change to
+  > worker:answerer — worker_update (seq 3) came after it. Payloads are whole
+  > rows, so putting this one back would erase that one too. Revert the newest
+  > change first
+
+  Reverting the newest one returns 200, the worker reads `v2` again, and the
+  history goes from 3 records to 4 — a forward compensating write, nothing
+  erased. The same run also demonstrated T27 in passing: two prompt-only PUTs
+  left `description` intact.
+
+  **Step 5** `./e2e/run-stack-e2e.sh clean`, then `docker ps -a --filter
+  name=sandbox-` inside DinD: **0 containers**, 0/100 ports in use.
+  (`./stack sessions` targets the ORDINARY compose stack, which is not the one
+  these tests run against — it answers "postgres is not running". The e2e
+  runner's own accounting is the right instrument here.)
+
+  **Gates.** `go build ./... && go vet ./... && go test ./...` green;
+  `./stack test-go` green with live Postgres (agentdb ran 226s, so the
+  pgvector/jsonb paths actually executed rather than skipping); web 1500 tests,
+  typecheck and build green; `verify-package.sh` green after being unblocked
+  from an upstream npm crash; sandbox 180 tests green; `examples/web`
+  typechecks and builds. Browser suite: **73 passed, 0 failed**, run in two
+  batches — this machine cannot finish it in one process (DI16).
 
 ### T27: `PUT /agent/workers/{name}` must stop wiping omitted fields   [Status: pending | Model: sonnet]
 > Opened out of the original 26 by the orchestrator, from **DI2**, found live
@@ -1836,8 +1893,34 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **Validation:** `cd go && go build ./... && go test ./httpapi/... -count=1`
   and, for the console half, `cd web && npm test`
 - **Depends on:** nothing
-- [ ] done
-- Notes:
+- [x] done
+- Notes: Written test-first — the omitted-`briefing` case failed against the
+  old handler on all five fields before anything was written.
+
+  The five are keep-on-absent now: the handler seeds them from the stored row,
+  so absent or `null` keeps and an explicit `""`/`{}`/`[]` clears. A store
+  error that is not "no such row" fails the request rather than falling
+  through to the defaults, because falling through is the same wipe arriving
+  intermittently. Only the three strings needed pointers — `encoding/json`
+  already distinguishes absent/`null` (nil) from `[]`/`{}` (non-nil empty) for
+  a slice or map, which IS the distinction, and a `*agentdb.SelectorList`
+  would buy nothing.
+
+  **The ticket's premise was wrong** and the result is two rules, not one:
+  `MaxInstances`/`Enabled`/`Frozen` are NOT keep-on-absent and never were —
+  `TestWorkersHTTP_FreezeAndUnfreezeRoundTrip` pins the opposite in as many
+  words. Unifying them is a decision about what an omitted `frozen` should
+  mean for a human-only safety flag, which is not an executor's to take. The
+  handler and `docs/18` now state both rules instead of implying one. **DI11.**
+
+  Acceptance criteria all met, asserted against the store and never the echo.
+  Client audit: `workerBody`, `OrgChartPage` and `examples/web`'s
+  `enableInterviewer` all already send whole rows, correct under either rule.
+  One needed changing, and getting it wrong caused a live regression the stack
+  caught — **DI14**, worth reading.
+
+  Also confirmed in the T26 walkthrough: two prompt-only PUTs left
+  `description` intact.
 
 ---
 
@@ -2179,3 +2262,92 @@ Two things worth knowing if this is touched again:
 `console.stack.spec.ts` needed no change for this — its `gotoView(page,
 'chart')` is a Playwright auto-waiting click, so a reveal that arrives one poll
 later still satisfies it.
+
+### DI13 (T26) — `console.stack.spec.ts` is now at EIGHT defects, and each fix uncovers the next
+
+DI8 recorded five, found by reading. DI12 was the sixth. Fixing DI12 let the
+file get further than it ever had, and the seventh and eighth appeared
+immediately:
+
+- **Seventh** — `config-and-workers.stack.spec.ts`'s worker CRUD test asserted
+  that a briefing was *gone* after a PUT that omitted it, commenting that this
+  was PUT's replace semantics. It was describing DI2, not a decision. T27
+  inverted it. The three tests after it in the same serial describe had been
+  skipped ever since and had therefore never run either; they pass.
+- **Eighth** — `console.stack.spec.ts`'s freeze-from-the-chart test creates ONE
+  worker and then waits for the Chart tab, which is revealed by
+  `subscriptions > 0 || workers >= 2`. It could never have passed. It never ran
+  to find out: it sits behind the topology test, which failed first on DI12, so
+  every previous attempt reported it "did not run".
+
+**The pattern is the finding.** `test.describe.configure({ mode: 'serial' })`
+means the first failure in a file skips every test after it, so a never-run
+file cannot be assessed by running it once — you learn about exactly one defect
+per run, and only after fixing the previous one. Three full-suite runs said "2
+failed" and each time the two were different. Anyone auditing a suite for
+whether it has ever actually executed should count "did not run" as a much
+louder signal than a failure.
+
+### DI14 (T27) — fixing a silent no-op created a silent mislabelling, and the config log caught it
+
+Recorded because the fix is a nice illustration of what the config log is for.
+
+T27 made an absent briefing keep the stored value. The console's editor
+collapsed its draft to null when the last selector was removed, so under the
+new rule "remove every selector, save" would have done nothing at all. The
+obvious client-side patch — always send `[]` — fixed that and broke something
+else: freezing a worker from the chart began recording `worker_update` instead
+of `worker_freeze`, because §15.3 picks the narrow action only when every other
+field is byte-identical, and null → `[]` is a change.
+
+Both failure modes are silent to the operator. The second is the worse one: a
+change log that records the wrong reason is less use than one that records
+none, and this system's entire safety story for the architect is *revert is the
+control* — which is only as good as the log's account of what happened.
+
+The fix keeps the distinction where the human makes it: emptying the list
+leaves `[]` ("clear it"), a row that never had one stays null ("leave it
+alone"), and every layer passes it through untouched. No coercion in either
+direction, at any layer.
+
+**Neither `npm test` nor the Go suite could have caught it** — the coerced body
+was internally consistent and every unit test agreed with it. It took the live
+stack, asserting on which action the config log chose. That is worth
+remembering the next time a browser suite looks like an expensive way to
+re-test what unit tests already cover.
+
+### DI15 (T26) — a poll whose success condition is "not the one bad value"
+
+`onboarding.stack.spec.ts`'s `waitForOnboardSession` polled
+`/agent/sessions/by-name/onboard`, returned the string `'absent'` when the row
+was not there yet, and asserted `.not.toBe('creating')`. `'absent'` is not
+`'creating'`, so the poll was satisfied by its own first request — sent before
+the shell had even asked for the session. It fell through to a null guard and
+failed the entire spec in **3.2 seconds** with the message `no onboard
+session`, which reads like the engine refusing to start an interview.
+
+The shape is worth naming because it is invisible in review: a poll that
+excludes ONE bad value accepts every other one, including the "nothing is here
+yet" value that is the whole reason for polling. Excluding both states makes
+the spec pass in 11.6s.
+
+This one had also never run — it is gated behind `--mock-script`, so it sits
+out every ordinary suite run. Gated specs need running deliberately; nothing
+else will notice them.
+
+### DI16 (T26) — this machine cannot finish the browser suite in one process
+
+Two consecutive full runs were killed by the OS for memory, at roughly the
+same point. Not a test failure and nothing partial to show for the first one,
+because the command piped through `tail` and printed only at the end.
+
+Run to a log file instead, and split: seven spec files, then the remaining
+nine. **73 passed, 0 failed**, no other change. The suite is fine; the box is
+the constraint — 23 GB shared with Docker, a 1 GB language server, several
+agent sessions, and a second developer's e2e runs landing in the same stack
+(`e2e-gitproj-*` projects appeared in agentd's log mid-run).
+
+Together with DI10 that is three separate occasions in one day where load,
+not code, produced a red result. Anyone reading a red run on this hardware
+should establish which kind it is before changing anything: the cheap test is
+to re-run the failing file alone.
