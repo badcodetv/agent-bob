@@ -417,6 +417,18 @@ type Endpoints struct {
 	GetWorker    string // "GET /agent/workers/{name}"
 	PutWorker    string // "PUT /agent/workers/{name}"
 	DeleteWorker string // "DELETE /agent/workers/{name}"
+
+	// GitWebhook is git projection's inbound door
+	// (design/2026-09-09-git-projection.md §C, ticket G12, gitwebhook.go).
+	// It authenticates itself — GitHub cannot hold a console JWT — by
+	// verifying an HMAC-SHA256 signature, so it MUST be mounted OUTSIDE
+	// apiAuthMiddleware, directly on the host's root mux, the same way
+	// cmd/agentd/main.go mounts the core MCP server
+	// (root.Handle(coreMCPPath, mcpSrv), never through h.Mux()). The pattern
+	// is named here only so every route this package defines is recorded in
+	// one place; Mux() does NOT register it — NewGitWebhookHandler
+	// (gitwebhook.go) builds the http.Handler the host mounts by hand.
+	GitWebhook string // "POST /agent/git/webhook"
 }
 
 // DefaultEndpoints is the canonical route layout.
@@ -483,6 +495,8 @@ var DefaultEndpoints = Endpoints{
 	ApplyCharter:    "POST /agent/charter/apply",
 	ListImages:      "GET /agent/images",
 	ListSkills:      "GET /agent/skills",
+	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
+	GitWebhook: "POST /agent/git/webhook",
 }
 
 // Mux registers every handler on a fresh *http.ServeMux. Mount it under your

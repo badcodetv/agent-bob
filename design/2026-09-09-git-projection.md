@@ -514,7 +514,7 @@ as rationale, quarantine on any failure. Depends on G5, G6.
 termination test (import → render produces no second commit) and a quarantine
 test proving nothing was written.
 
-### G12: webhook route + poll fallback   [Status: pending | Model: sonnet]
+### G12: webhook route + poll fallback   [Status: done | Model: sonnet]
 `POST /agent/git/webhook` with signature verification, outside the JWT
 middleware; a slow poll that does the same work.
 **Validation:** `go test ./httpapi/ -run GitWebhook` — a bad signature is 401
@@ -569,6 +569,26 @@ when a field is added, and delete the local lists from `render.go`.
 **Validation:** `cd go && go test ./gitproj/...`; then add a dummy field to
 `agentdb.Subscription` and confirm the guard goes RED before removing it (say so
 in the report — an unfalsified guard is decoration).
+
+### G20: wire the webhook — the missing secret field, the resolver, and the mount   [Status: pending | Model: sonnet]
+Opened by G12. Three loose ends it correctly refused to reach outside its own
+files for:
+1. **There is no per-project webhook secret anywhere.** G7 added `GitTokenEnv`
+   (push, settings) and `GitHubTokenEnv` (push, project map). Neither is a
+   webhook secret, and HMAC verification needs one. Add
+   `git_webhook_secret_env` — a variable NAME, never a value, same rule as its
+   two neighbours — and mark it NOT IMPORTABLE alongside them (DI3), or commit
+   access becomes the power to accept forged webhooks.
+2. **Implement `GitWebhookProjectResolver`** against `ProjectSettings.GitRemote`:
+   payload repo identity → project + secret. The payload is used for ROUTING
+   ONLY and must never reach what is imported.
+3. **Mount the route on the root mux**, outside `apiAuthMiddleware`, the way
+   `mcpSrv` is mounted — GitHub cannot hold a console JWT. `Endpoints.GitWebhook`
+   is already declared; `Mux()` deliberately does not wire it.
+Also read `AGENTKIT_GIT_WEBHOOK_POLL_INTERVAL` (`time.ParseDuration`, house style
+per `gc.go`'s `AGENTKIT_SESSION_IDLE_TIMEOUT`, default 5m) and pass it as the
+poll's `Interval`. `httpapi` reads no env vars itself and that must stay true.
+**Validation:** `cd go && go test ./httpapi/ -run GitWebhook -race && go test ./cmd/agentd/ -run GitWebhook && go build ./...`
 
 ## Discovered Issues Log
 
@@ -850,6 +870,33 @@ validation, omitting false bools, and dropping body-newline normalisation.
 **The importer targets the REMOTE tip and does not move the local branch** — see the note sent to G8, who owns fast-forwarding it in boot reconciliation. Without that the branches diverge on the first human push and G9's fast-forward-only push refuses forever.
 
 **Three things a human can do in git that have no effect**, reported in `result.Ignored` rather than dropped silently so G16 can tell the operator: images are not importable (nothing in frontmatter reconstructs a content-addressed blob), and deleting a skill or a memory file removes nothing (both are append-only).
+
+---
+
+### DI11 (G12) — the webhook has no secret to verify against
+
+🔴 **Nothing in the system holds a webhook secret.** `ProjectSettings` and the
+project map's `projectConfig` were both checked, along with migration 047: G7
+added `GitTokenEnv` and `GitHubTokenEnv`, and **both are push credentials**.
+HMAC verification needs a different secret entirely. G12 designed
+`GitWebhookProjectResolver` as the seam rather than inventing a field outside its
+three files, which was right. **Ticket G20 closes it.**
+
+**The design doc understated the webhook's danger, and G12 got it right anyway.**
+The payload is attacker-influenced input even when signed — a repository's own
+collaborators can push anything. G12's interface therefore carries **no ref,
+commit list or file list at all**, only a project name: the payload has no
+channel to influence what gets imported *even in principle*, rather than merely
+being ignored by convention. What is imported still comes from the repository
+itself via the tree diff. There is a test proving a forged ref inside a validly
+signed payload changes nothing.
+
+Other decisions: `hmac.Equal`, never a string compare; the body is bounded by
+`http.MaxBytesReader` at 1 MiB **before** JSON parsing, resolution or hashing, so
+an unauthenticated route cannot be made to buffer or hash arbitrary bytes;
+non-push events get a quiet 2xx because GitHub hammers a non-2xx; and the route
+is deliberately **not** in `Mux()` because it must sit outside the JWT
+middleware — mounting is `main.go`'s job (G20).
 
 ---
 
