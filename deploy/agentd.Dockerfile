@@ -7,7 +7,9 @@ COPY . .
 RUN CGO_ENABLED=0 go build -o /out/agentd ./cmd/agentd
 
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
+# git is required by the git projection driver (go/gitproj/repo.go), which shells
+# out to the binary rather than linking a Go git library.
+RUN apk add --no-cache ca-certificates git
 COPY --from=build /out/agentd /usr/local/bin/agentd
 ENV ADDR=:8099
 EXPOSE 8099

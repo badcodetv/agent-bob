@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"strconv"
 	"strings"
@@ -64,6 +65,47 @@ var ErrMemoryEmbeddingUnstorable = errors.New(
 // ErrMemoryNotFound is returned by GetMemory for an unknown id — or for an id
 // that exists in another project (no existence leak across projects).
 var ErrMemoryNotFound = errors.New("agentdb: memory not found")
+
+// MemoryNameLabel is the label key of the `name=` singleton convention (§7.1):
+// a memory labelled name=<x> is a version of "the current value of x", and the
+// current value is the newest such memory. Named as a constant because the
+// compare-and-swap below is defined against exactly this key and a second
+// spelling of it would be a second, silently different definition of "current".
+const MemoryNameLabel = "name"
+
+// ErrMemoryNotCurrent is returned by CreateMemoryIfCurrent when the memory the
+// caller believed was current is not the newest one carrying its `name=` label
+// any more. NOTHING was written.
+//
+// It is a struct rather than a sentinel, exactly like ErrDatasetVersionConflict,
+// because the losing caller needs the id that actually won: the only useful
+// response to losing this race is to re-read that memory, fold your work into
+// what it now says, and try again. An error that only said "conflict" would
+// leave the caller — often a model — guessing, and guessing here means writing
+// over somebody's edit.
+//
+// Current is empty when nothing (or nothing unretracted) carries the name at
+// all: the value the caller named has since been retracted, or never existed.
+type ErrMemoryNotCurrent struct {
+	// Name is the value of the `name=` label the comparison was made against.
+	Name string
+	// IfCurrent is the id the caller passed — what it believed was current.
+	IfCurrent string
+	// Current is the id that actually is current, or "" when no unretracted
+	// memory carries this name.
+	Current string
+}
+
+func (e ErrMemoryNotCurrent) Error() string {
+	if e.Current == "" {
+		return fmt.Sprintf(
+			"agentdb: memory %q is not current: no unretracted memory carries name=%s (if_current was %s)",
+			e.IfCurrent, e.Name, e.IfCurrent)
+	}
+	return fmt.Sprintf(
+		"agentdb: memory %q is not current for name=%s: %s is (nothing was written)",
+		e.IfCurrent, e.Name, e.Current)
+}
 
 // Memory is one append-only memory row.
 type Memory struct {
@@ -191,6 +233,74 @@ type MemoryRetraction struct {
 // matches the write path's existing fail-hard-on-embedder-error decision — a
 // caller that would rather have a keyword-only memory can pass nil and say so.
 func (s *Store) CreateMemory(ctx context.Context, m *Memory, embedding []float32) (*Memory, bool, error) {
+	return s.createMemory(ctx, m, embedding, "")
+}
+
+// CreateMemoryIfCurrent appends a memory under COMPARE-AND-SWAP: the row lands
+// only if the newest unretracted memory carrying this memory's `name=` label is
+// still exactly ifCurrent. Otherwise nothing is written and the caller gets
+// ErrMemoryNotCurrent naming the id that won, so it can re-read and retry.
+//
+// # The gap this closes
+//
+// "The current value of x" is a convention, not a column: the newest memory
+// labelled name=x (§7.1, NewestMemory, memory_current). That answers reads
+// perfectly and has no answer at all for writes. Two workers that both read the
+// message board, both rewrite it and both append are BOTH told they succeeded,
+// and the loser never learns its work was buried a millisecond later. This is a
+// WHERE clause on that insert, not a new atom and not mutability: the losing
+// write simply does not happen, and the winner's row is untouched.
+//
+// # Why it is a second method and not a variadic option on CreateMemory
+//
+// It would read better as CreateMemory(ctx, m, vec, WithIfCurrent(id)) and the
+// call sites would not change — but four INTERFACES in this repo declare
+// CreateMemory with its exact non-variadic signature (cmd/agentd's memoryStore
+// and managementStore, httpapi's memoryStore, and their fakes), and a variadic
+// concrete method does not satisfy a non-variadic interface method. Widening the
+// signature would therefore mean editing every one of them for a feature none of
+// them uses. A separate entry point costs one extra name and leaves every
+// existing caller and every existing seam byte-for-byte as it was.
+//
+// # Why the check cannot be a read followed by a write
+//
+// Under Read Committed two callers can both read the same current id and both
+// insert: neither statement sees the other's uncommitted row, so both pass the
+// comparison and the bug is exactly back. Datasets get their backstop from a
+// unique index on (project, name, version); memories have no such index — the
+// name is a jsonb label and "newest" is an ORDER BY, not a constraint — and
+// inventing one would need a migration and would break the append-only model.
+//
+// So the serialisation is a transaction-scoped ADVISORY LOCK keyed on
+// (project, name): every compare-and-swap writer for one name queues behind the
+// one in front, so the loser's comparison runs on a snapshot that already
+// contains the winner's row. The guard is ALSO written into the INSERT itself
+// (INSERT … SELECT … WHERE newest = ?), which is what makes the failure a
+// zero-row insert rather than a decision taken in Go between two statements.
+//
+// # What it does NOT protect against
+//
+// An ordinary CreateMemory with the same name label takes no lock and always
+// lands — by definition: a caller that passes no ifCurrent has said it does not
+// care what it is overwriting. Compare-and-swap is a pact between the writers
+// who opt into it. There is likewise no "must not exist yet" form (dataset's
+// if_version: 0): two workers racing to create the FIRST value of a name can
+// still both win. Both are known limits, not oversights.
+func (s *Store) CreateMemoryIfCurrent(ctx context.Context, m *Memory, embedding []float32, ifCurrent string) (*Memory, bool, error) {
+	if strings.TrimSpace(ifCurrent) == "" {
+		// A caller reached for compare-and-swap and handed over nothing to
+		// compare against. Silently degrading to an unconditional append is the
+		// one outcome that must never happen: it is the very race the caller was
+		// trying to avoid, performed in its name.
+		return nil, false, fmt.Errorf("agentdb: if_current must be a memory id (pass no if_current for an unconditional append)")
+	}
+	return s.createMemory(ctx, m, embedding, strings.TrimSpace(ifCurrent))
+}
+
+// createMemory is the one write path. ifCurrent empty means the unconditional
+// append every existing caller performs, and that path is unchanged: no
+// transaction, no lock, the same single INSERT it always ran.
+func (s *Store) createMemory(ctx context.Context, m *Memory, embedding []float32, ifCurrent string) (*Memory, bool, error) {
 	if err := s.requirePostgres(); err != nil {
 		return nil, false, err
 	}
@@ -214,6 +324,20 @@ func (s *Store) CreateMemory(ctx context.Context, m *Memory, embedding []float32
 	}
 	if err := ValidateLabels(m.Labels); err != nil {
 		return nil, false, fmt.Errorf("agentdb: memory labels: %w", err)
+	}
+	// Compare-and-swap is defined against the `name=` convention and nothing
+	// else — "current" has no meaning for a memory that is not a version of a
+	// named value. A caller that asks to swap without naming what it is swapping
+	// has a bug, and answering it with a silent unconditional append would hide
+	// exactly the race it was guarding against.
+	name := ""
+	if ifCurrent != "" {
+		name = m.Labels[MemoryNameLabel]
+		if name == "" {
+			return nil, false, fmt.Errorf(
+				"agentdb: if_current needs a %s= label: compare-and-swap is defined against the newest memory of a NAMED value (§7.1), and this memory carries no name",
+				MemoryNameLabel)
+		}
 	}
 	if embedding != nil && len(embedding) != MemoryEmbeddingDim {
 		return nil, false, fmt.Errorf("agentdb: memory embedding must have %d dimensions, got %d", MemoryEmbeddingDim, len(embedding))
@@ -254,9 +378,13 @@ func (s *Store) CreateMemory(ctx context.Context, m *Memory, embedding []float32
 		args = append(args, FormatVector(embedding))
 	}
 
-	sql := "INSERT INTO memories (" + cols + ") VALUES (" + vals + ")"
-	if err := s.gdb.WithContext(ctx).Exec(sql, args...).Error; err != nil {
-		return nil, false, fmt.Errorf("agentdb: create memory: %w", err)
+	if ifCurrent == "" {
+		sql := "INSERT INTO memories (" + cols + ") VALUES (" + vals + ")"
+		if err := s.gdb.WithContext(ctx).Exec(sql, args...).Error; err != nil {
+			return nil, false, fmt.Errorf("agentdb: create memory: %w", err)
+		}
+	} else if err := s.insertIfCurrent(ctx, m.Project, name, ifCurrent, cols, vals, args); err != nil {
+		return nil, false, err
 	}
 
 	// What the store actually WROTE, asked of the store. Not `embedding != nil`:
@@ -278,6 +406,98 @@ func (s *Store) CreateMemory(ctx context.Context, m *Memory, embedding []float32
 		return nil, false, err
 	}
 	return stored, embedded, nil
+}
+
+// insertIfCurrent performs the guarded insert described on CreateMemoryIfCurrent:
+// one transaction holding an advisory lock on (project, name), inside which the
+// INSERT carries its own WHERE-the-newest-is-still-ifCurrent guard.
+//
+// Two layers, and both are load-bearing:
+//
+//   - the WHERE makes the comparison and the write ONE statement, so no decision
+//     is ever taken in Go between reading "current" and writing over it;
+//   - the lock makes that one statement's snapshot trustworthy, because a
+//     snapshot taken while a peer's insert is in flight would not contain it and
+//     both writers would pass a guard that is individually correct.
+//
+// The zero-row case is then unambiguous — the guard refused — and the winner is
+// re-read INSIDE the same transaction, which still holds the lock, so the id
+// reported to the loser cannot itself be stale by the time it is returned.
+func (s *Store) insertIfCurrent(ctx context.Context, project, name, ifCurrent, cols, vals string, args []any) error {
+	return s.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Transaction-scoped: released at COMMIT or ROLLBACK by Postgres itself,
+		// so there is no unlock to forget on an error path (contrast the
+		// session-level lock migrations.go takes, which must span transactions).
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", memoryNameLockKey(project, name)).Error; err != nil {
+			return fmt.Errorf("agentdb: create memory: lock name=%s: %w", name, err)
+		}
+
+		// `= ?` rather than `IS NOT DISTINCT FROM ?`: when nothing carries the
+		// name the subquery is NULL, NULL = <id> is NULL, and the WHERE inserts
+		// nothing — which is the right answer. A caller naming an id as current
+		// when no unretracted memory holds the name has lost the comparison just
+		// as surely as one naming the wrong id.
+		guarded := "INSERT INTO memories (" + cols + ") SELECT " + vals +
+			" WHERE (" + newestNamedIDSQL + ") = ?"
+		guardedArgs := append(append([]any{}, args...), project, name, ifCurrent)
+
+		res := tx.Exec(guarded, guardedArgs...)
+		if res.Error != nil {
+			return fmt.Errorf("agentdb: create memory: %w", res.Error)
+		}
+		if res.RowsAffected > 0 {
+			return nil
+		}
+
+		// Refused. Say who won, on the same connection still holding the lock.
+		var current *string
+		if err := tx.Raw(newestNamedIDSQL, project, name).Scan(&current).Error; err != nil {
+			return fmt.Errorf("agentdb: create memory: read current name=%s: %w", name, err)
+		}
+		conflict := ErrMemoryNotCurrent{Name: name, IfCurrent: ifCurrent}
+		if current != nil {
+			conflict.Current = *current
+		}
+		return conflict
+	})
+}
+
+// newestNamedIDSQL is the id of the newest unretracted memory carrying
+// name=<name> in one project, or NULL. It binds (project, name) in that order.
+//
+// The ordering is `created_at DESC, id DESC` in MILLISECONDS, which is not a
+// stylistic choice: it is character-for-character the ordering NewestMemory and
+// the §7.6.2 bare-selector rule use. A compare-and-swap that disagreed with the
+// reader about which row is newest would refuse writes that should land, and —
+// worse — accept ones that should not.
+//
+// notRetractedSQL is applied for the same reason NewestMemory applies it: a
+// withdrawn memory is not the current value of anything, so it must not be able
+// to win the comparison, and a caller must not be forced to name a retracted row
+// to get its write through.
+var newestNamedIDSQL = `SELECT m.id FROM memories m
+	WHERE m.project = ? AND m.labels->>'` + MemoryNameLabel + `' = ?
+	  AND ` + notRetractedSQL("m") + `
+	ORDER BY m.created_at DESC, m.id DESC
+	LIMIT 1`
+
+// memoryNameLockKey is the advisory-lock key for one (project, name) pair.
+//
+// Derived, never hand-picked, and derived the same way migrations.go derives
+// its own (FNV-64a, masked to 63 bits so the key is positive and its halves read
+// straightforwardly in pg_locks). Advisory-lock keys share ONE namespace across
+// the whole database, so the prefix is part of the input: without it a memory
+// name could collide with some unrelated subsystem's key and the two would
+// block each other for no reason anybody could ever diagnose.
+//
+// A collision BETWEEN two names is harmless — two unrelated names would
+// serialise against each other, costing a little concurrency and no
+// correctness — which is why a 63-bit hash is enough and a lock table is not
+// needed.
+func memoryNameLockKey(project, name string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte("agentdb:memory-name-cas\x00" + project + "\x00" + name))
+	return int64(h.Sum64() & 0x7fffffffffffffff)
 }
 
 // Size ceilings. Neither is a storage limit in the ordinary sense — `content`

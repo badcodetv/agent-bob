@@ -46,6 +46,11 @@ type fakeMemoryStore struct {
 	// independent of the vector it was handed. RD3 is precisely the gap
 	// between those two numbers, so the test needs to be able to open it.
 	reportsEmbedded *bool
+
+	// ifCurrent records every compare-and-swap id the tools passed through, and
+	// casConflict, when set, is the conflict CreateMemoryIfCurrent returns.
+	ifCurrent   []string
+	casConflict *agentdb.ErrMemoryNotCurrent
 }
 
 func newFakeMemoryStore() *fakeMemoryStore {
@@ -72,6 +77,17 @@ func (f *fakeMemoryStore) CreateMemory(_ context.Context, m *agentdb.Memory, emb
 	f.createdV = append(f.createdV, emb)
 	f.byID[stored.Project+"|"+stored.ID] = &stored
 	return &stored, embedded, nil
+}
+
+// CreateMemoryIfCurrent records the compare-and-swap argument and, when
+// casConflict is set, loses the race — the tools' whole job on that path is the
+// sentence it hands back to the model.
+func (f *fakeMemoryStore) CreateMemoryIfCurrent(ctx context.Context, m *agentdb.Memory, emb []float32, ifCurrent string) (*agentdb.Memory, bool, error) {
+	f.ifCurrent = append(f.ifCurrent, ifCurrent)
+	if f.casConflict != nil {
+		return nil, false, *f.casConflict
+	}
+	return f.CreateMemory(ctx, m, emb)
 }
 
 func (f *fakeMemoryStore) GetMemory(_ context.Context, project, id string) (*agentdb.Memory, error) {

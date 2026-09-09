@@ -1097,6 +1097,29 @@ var agentMigrations = []migration{
 		Name: "046_project_briefing",
 		SQL:  `ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS briefing JSONB DEFAULT NULL;`,
 	},
+	{
+		// Git projection config (design/2026-09-09-git-projection.md, G7): which
+		// repo a project renders to, and which environment variable names the
+		// push token. Four columns, all optional — an empty git_remote means
+		// projection is off for this project.
+		//
+		// NOT IMPORTABLE (§D of the design doc): git_remote, git_branch,
+		// git_subfolder and git_token_env say *which repo* and *which
+		// credential* a project's configuration renders to and is read back
+		// from. If the importer were allowed to write them, anyone with commit
+		// access to the rendered repo could redirect a project's projection at
+		// a repository — and a token — they control. They render as
+		// informational only and change exclusively through the console/API
+		// (PutProjectSettings), never through the git importer. See the field
+		// comments below and the importer's own docs when it is built.
+		Name: "047_project_git_projection",
+		SQL: `
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_remote TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_branch TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_subfolder TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_token_env TEXT NOT NULL DEFAULT '';
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

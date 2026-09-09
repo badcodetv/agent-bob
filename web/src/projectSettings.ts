@@ -43,6 +43,17 @@ export interface ProjectSettings {
   daily_tokens_hard: number
   briefing_max_bytes: number
   snapshot_ttl_days: number
+  /** Git projection (design 2026-09-09 §D). These four say *which repo* and
+   *  *which credential*, and are deliberately NOT importable — the git
+   *  importer never writes them, or commit access to the repo would become the
+   *  power to redirect a project's projection. `git_token_env` is the NAME of
+   *  an environment variable, never a token. Empty `git_remote` = projection
+   *  off. Empty branch/subfolder mean the engine's defaults, applied at read
+   *  time, not stored. */
+  git_remote: string
+  git_branch: string
+  git_subfolder: string
+  git_token_env: string
   /** Project-wide briefing selectors (engine: ProjectSettings.Briefing,
    *  design B1) — unioned into every worker's own briefing at composition
    *  time, so a worker with none of its own still receives these. Each entry
@@ -65,6 +76,10 @@ export function defaultProjectSettings(project = ''): ProjectSettings {
     daily_tokens_hard: 0,
     briefing_max_bytes: DEFAULT_BRIEFING_MAX_BYTES,
     snapshot_ttl_days: DEFAULT_SNAPSHOT_TTL_DAYS,
+    git_remote: '',
+    git_branch: '',
+    git_subfolder: '',
+    git_token_env: '',
     briefing: [],
     updated_at: 0,
   }
@@ -97,6 +112,10 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     daily_tokens_hard: num('daily_tokens_hard', base.daily_tokens_hard),
     briefing_max_bytes: num('briefing_max_bytes', base.briefing_max_bytes),
     snapshot_ttl_days: num('snapshot_ttl_days', base.snapshot_ttl_days),
+    git_remote: str('git_remote', base.git_remote),
+    git_branch: str('git_branch', base.git_branch),
+    git_subfolder: str('git_subfolder', base.git_subfolder),
+    git_token_env: str('git_token_env', base.git_token_env),
     briefing: strArray('briefing'),
     updated_at: num('updated_at', 0),
   }

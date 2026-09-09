@@ -18,6 +18,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.274.0
+	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 	modernc.org/sqlite v1.34.4

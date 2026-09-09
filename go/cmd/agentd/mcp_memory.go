@@ -46,6 +46,11 @@ import (
 // invariant survives the seam (§7.1).
 type memoryStore interface {
 	CreateMemory(ctx context.Context, m *agentdb.Memory, embedding []float32) (*agentdb.Memory, bool, error)
+	// CreateMemoryIfCurrent is the same append under compare-and-swap, used only
+	// when the model passes if_current. It is a second method rather than an
+	// option on the first because three other interfaces in this repo declare
+	// CreateMemory's exact signature — see the store's own comment.
+	CreateMemoryIfCurrent(ctx context.Context, m *agentdb.Memory, embedding []float32, ifCurrent string) (*agentdb.Memory, bool, error)
 	GetMemory(ctx context.Context, project, id string) (*agentdb.Memory, error)
 	SearchMemories(ctx context.Context, q *agentdb.MemorySearchQuery) ([]*agentdb.MemorySearchResult, error)
 	NewestMemory(ctx context.Context, project, selector string) (*agentdb.Memory, error)
@@ -146,7 +151,15 @@ To WITHDRAW something the project got wrong, write a memory labelled ` +
 	`covering up becomes current again — but nothing is deleted: both it and your ` +
 	`retraction stay readable by id, so the correction is part of the record ` +
 	`rather than a gap in it. Use this for a fact that turned out to be false, ` +
-	`not for one that has merely changed (for that, write the new value).`
+	`not for one that has merely changed (for that, write the new value).
+
+If you are REWRITING the current value of a name= memory that you just read, pass ` +
+	"`if_current`" + `: the id of the memory you read. Your write then lands only if ` +
+	`nothing else has written that name in the meantime; if something has, nothing is ` +
+	`stored and you are told which memory won, so you can re-read it and fold your work ` +
+	`into what it now says. Without it, two workers editing the same document at the same ` +
+	`time both succeed and the slower one's work is silently buried. Do not pass it when ` +
+	`you are writing something new rather than replacing a value you read.`
 
 const memorySearchDescription = `Search this project's memory store. Search before ` +
 	`making decisions that earlier work might inform — that is what it is for.
@@ -227,6 +240,12 @@ func (m *memoryTools) tools() []*mcpTool {
 					"type":        "boolean",
 					"description": "Index this memory for meaning-based search (default true). Pass false for a document over 24KB: it stores whole and stays findable by label and by keyword, but not by meaning.",
 				},
+				"if_current": map[string]any{
+					"type": "string",
+					"description": "Compare-and-swap, for replacing the current value of a name= memory. " +
+						"The id of the memory you read and are rewriting: the write lands only if that is still the newest memory with this name. " +
+						"If someone else wrote first, nothing is stored and the error names the memory that won. Requires a name label. Omit for an ordinary append.",
+				},
 			}, []string{"content"}),
 			Handler: m.create,
 		},
@@ -289,6 +308,9 @@ type memoryCreateArgs struct {
 	// default is true, and a caller that says nothing must keep today's
 	// behaviour exactly.
 	Embed *bool `json:"embed"`
+	// IfCurrent is compare-and-swap over the `name=` convention. Absent (the
+	// empty string) is an unconditional append — today's behaviour, exactly.
+	IfCurrent string `json:"if_current"`
 }
 
 func (m *memoryTools) create(ctx context.Context, caller mcpCaller, raw json.RawMessage) (any, error) {
@@ -305,6 +327,15 @@ func (m *memoryTools) create(ctx context.Context, caller mcpCaller, raw json.Raw
 	// INSERT was going to reject anyway.
 	if err := agentdb.ValidateLabels(args.Labels); err != nil {
 		return nil, fmt.Errorf("labels: %w", err)
+	}
+	// Checked BEFORE the embedding provider is called, like the size ceiling
+	// below and for the same reason: a create that cannot possibly succeed must
+	// cost nothing and must come back with the instruction that fixes it.
+	ifCurrent := strings.TrimSpace(args.IfCurrent)
+	if ifCurrent != "" && args.Labels[agentdb.MemoryNameLabel] == "" {
+		return nil, fmt.Errorf(
+			"nothing was written: if_current replaces the current value of a NAMED memory, but no %s label was given — add labels: {%q: \"<the name>\"}, or drop if_current if this is a new memory rather than a replacement",
+			agentdb.MemoryNameLabel, agentdb.MemoryNameLabel)
 	}
 
 	// WRITE path: strict. A configured provider that fails fails the create.
@@ -329,14 +360,38 @@ func (m *memoryTools) create(ctx context.Context, caller mcpCaller, raw json.Raw
 		}
 	}
 
-	stored, embedded, err := m.store.CreateMemory(ctx, &agentdb.Memory{
+	row := &agentdb.Memory{
 		Project:          caller.Project,
 		Labels:           agentdb.LabelSet(args.Labels),
 		Content:          args.Content,
 		CreatedByWorker:  caller.Worker,
 		CreatedBySession: caller.SessionID,
-	}, vec)
+	}
+	var stored *agentdb.Memory
+	var embedded bool
+	if ifCurrent == "" {
+		stored, embedded, err = m.store.CreateMemory(ctx, row, vec)
+	} else {
+		stored, embedded, err = m.store.CreateMemoryIfCurrent(ctx, row, vec, ifCurrent)
+	}
 	if err != nil {
+		// The loser of a compare-and-swap is usually a model mid-task, and what
+		// it does next is decided entirely by this sentence. So it is an
+		// instruction, not a diagnosis: nothing was written, here is who won,
+		// here is the call that gets you unstuck.
+		var conflict agentdb.ErrMemoryNotCurrent
+		if errors.As(err, &conflict) {
+			if conflict.Current == "" {
+				return nil, fmt.Errorf(
+					"nothing was written: no current memory is named %q any more (the one you passed as if_current, %s, has been retracted or never carried that name). "+
+						"Read it with memory_current(name: %q) — if the answer is found:false, this name has no value and you may write it with no if_current",
+					conflict.Name, conflict.IfCurrent, conflict.Name)
+			}
+			return nil, fmt.Errorf(
+				"nothing was written: someone else rewrote %q while you were working. Memory %s is current now, not the %s you passed. "+
+					"Read the winner with memory_get(id: %q), fold your change into what it says, and write again with if_current: %q",
+				conflict.Name, conflict.Current, conflict.IfCurrent, conflict.Current, conflict.Current)
+		}
 		return nil, err
 	}
 	// §9 read-back: CreateMemory returns the row as the database holds it, and

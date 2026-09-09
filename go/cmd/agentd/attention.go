@@ -19,15 +19,19 @@ package main
 //
 //	{}                                          unset → log-only fallback
 //	{"kind":"webhook","url":"https://…"}        POST {message, session_url}
+//	{"kind":"webhook","url":"${SLACK_WEBHOOK_URL}"}
 //	{"kind":"webhook","url":"…","headers":{"Authorization":"${SLACK_TOKEN}"}}
 //
 // `kind` is the discriminator and `webhook` is the only one in v1; an unknown
 // kind is reported loudly (in the log and in the tool result) but never fails
-// the worker's turn. Header VALUES may be whole-value `${VAR}` references
-// resolved from agentd's own environment — the §4.4 rule, applied here so a
-// channel credential never lands in a settings row that the UI displays. An
-// unset variable is a delivery failure, not a header sent with a literal
-// `${VAR}` in it.
+// the worker's turn. Header VALUES, and the `url` itself, may be whole-value
+// `${VAR}` references resolved from agentd's own environment — the §4.4 rule,
+// applied here so a channel credential (a Slack/Discord webhook URL *is* a
+// bearer token — whoever holds it can post as the integration) never lands in
+// a settings row that the UI displays, or that a later ticket renders into a
+// git repo pushed to GitHub. An unset variable is a delivery failure, not a
+// request sent with a literal `${VAR}` in it, and partial interpolation
+// (`https://hooks.slack.com/${TOKEN}`) is refused outright, for both fields.
 //
 // # Surfaces
 //
@@ -99,7 +103,19 @@ func parseAttentionChannel(raw agentdb.JSONMap) (attentionChannel, error) {
 	if ch.URL == "" {
 		return ch, fmt.Errorf("attention_channel: a webhook needs a url")
 	}
-	if !strings.HasPrefix(ch.URL, "http://") && !strings.HasPrefix(ch.URL, "https://") {
+	switch {
+	case envRefRe.MatchString(ch.URL):
+		// A whole-value ${VAR} reference — a webhook URL is a bearer token
+		// (anyone holding it can post as the integration), so it is never
+		// stored as a literal that a later git-projection ticket would publish.
+		// Resolved from agentd's own environment at send time (resolveURL);
+		// the http(s) check applies to the RESOLVED value there, not this text.
+	case strings.Contains(ch.URL, "${"):
+		// Partial interpolation ("https://hooks.slack.com/${TOKEN}") is refused,
+		// same as headers: a secret embedded in a sentence is exactly what the
+		// whole-value rule exists to prevent.
+		return ch, fmt.Errorf("attention_channel: url %q must be a literal URL or a whole ${VAR} reference, not a mix", ch.URL)
+	case !strings.HasPrefix(ch.URL, "http://") && !strings.HasPrefix(ch.URL, "https://"):
 		return ch, fmt.Errorf("attention_channel: url %q must be http(s)", ch.URL)
 	}
 	return ch, nil
@@ -134,6 +150,27 @@ func (c attentionChannel) resolveHeaders(env func(string) string) (map[string]st
 		out[name] = resolved
 	}
 	return out, nil
+}
+
+// resolveURL substitutes a whole-value ${VAR} reference from env, exactly as
+// resolveHeaders does for headers — a webhook URL is itself a bearer token, so
+// the same "fail loudly, never send the literal ${VAR} text" rule applies. A
+// literal URL (already validated as http(s) by parseAttentionChannel) is
+// returned unchanged. The http(s) check applies here to the RESOLVED value,
+// since parseAttentionChannel could not see it.
+func (c attentionChannel) resolveURL(env func(string) string) (string, error) {
+	m := envRefRe.FindStringSubmatch(c.URL)
+	if m == nil {
+		return c.URL, nil
+	}
+	resolved := env(m[1])
+	if strings.TrimSpace(resolved) == "" {
+		return "", fmt.Errorf("attention_channel url references ${%s}, which is unset in agentd's environment", m[1])
+	}
+	if !strings.HasPrefix(resolved, "http://") && !strings.HasPrefix(resolved, "https://") {
+		return "", fmt.Errorf("attention_channel: url %q must be http(s)", resolved)
+	}
+	return resolved, nil
 }
 
 // ── The service ─────────────────────────────────────────────────────────────
@@ -264,7 +301,15 @@ func (a *attentionService) Request(ctx context.Context, in attentionRequestInput
 			a.logf("[attention] %s: %v", in.Project, herr)
 			break
 		}
-		if perr := a.post(ctx, ch, headers, attentionPayload{Message: message, SessionURL: sessionURL}); perr != nil {
+		resolvedURL, uerr := ch.resolveURL(a.env)
+		if uerr != nil {
+			deliveryErr = uerr.Error()
+			a.logf("[attention] %s: %v", in.Project, uerr)
+			break
+		}
+		sendCh := ch
+		sendCh.URL = resolvedURL
+		if perr := a.post(ctx, sendCh, headers, attentionPayload{Message: message, SessionURL: sessionURL}); perr != nil {
 			deliveryErr = perr.Error()
 			a.logf("[attention] %s: webhook delivery failed: %v", in.Project, perr)
 			break

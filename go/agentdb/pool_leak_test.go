@@ -94,9 +94,17 @@ func TestStoreCloseReleasesThePool(t *testing.T) {
 	}
 }
 
-// openInTestRe matches a test-side `x, err := [agentdb.]Open(` — the shape that
-// takes ownership of a pool.
-var openInTestRe = regexp.MustCompile(`\w+, err :?= (?:agentdb\.)?Open\(`)
+// openQualifiedRe matches a test-side `x, err := agentdb.Open(` — the shape
+// that takes ownership of a pool, seen from another package.
+var openQualifiedRe = regexp.MustCompile(`\w+, err :?= agentdb\.Open\(`)
+
+// openBareRe matches the same call UNQUALIFIED, which only means agentdb.Open
+// inside package agentdb itself. It must never be applied to another package:
+// `Open` is an ordinary constructor name and other packages have their own
+// (gitproj.Open returns a git working clone, and holds no pool). Matching it
+// everywhere reported those as leaks, which is a false positive that would
+// recur for every package added to this module.
+var openBareRe = regexp.MustCompile(`\w+, err :?= Open\(`)
 
 // poolCloseExemptTestFiles are files where the Open above cannot leak, with the
 // reason. Keep this list SHORT: an entry is a promise, not a silencer.
@@ -133,14 +141,17 @@ func TestEveryTestThatOpensAStoreClosesIt(t *testing.T) {
 			return err
 		}
 		src := string(body)
-		if !openInTestRe.MatchString(src) {
-			return nil
-		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
+		// A bare `Open(` is only agentdb's own inside package agentdb; anywhere
+		// else it belongs to that package and is none of this test's business.
+		inAgentdb := filepath.Dir(rel) == "agentdb"
+		if !openQualifiedRe.MatchString(src) && !(inAgentdb && openBareRe.MatchString(src)) {
+			return nil
+		}
 		if _, exempt := poolCloseExemptTestFiles[rel]; exempt {
 			return nil
 		}

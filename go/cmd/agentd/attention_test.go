@@ -270,6 +270,17 @@ func TestRequestHumanAttentionSurvivesABrokenChannel(t *testing.T) {
 			wantErr: "unset in agentd's environment",
 		},
 		{
+			name:    "url is a ${VAR} reference to an unset variable",
+			channel: agentdb.JSONMap{"kind": "webhook", "url": "${MISSING_WEBHOOK_URL}"},
+			wantErr: "unset in agentd's environment",
+		},
+		{
+			name:    "url is a ${VAR} reference that resolves to a non-http value",
+			channel: agentdb.JSONMap{"kind": "webhook", "url": "${BAD_WEBHOOK_URL}"},
+			env:     map[string]string{"BAD_WEBHOOK_URL": "ftp://nope"},
+			wantErr: "must be http(s)",
+		},
+		{
 			name:    "post failed",
 			channel: agentdb.JSONMap{"kind": "webhook", "url": "https://x"},
 			post:    fmt.Errorf("connection refused"),
@@ -545,6 +556,11 @@ func TestAttentionChannelParsing(t *testing.T) {
 		{"webhook without url", agentdb.JSONMap{"kind": "webhook"}, attentionChannelWebhook, "needs a url"},
 		{"non-http url", agentdb.JSONMap{"kind": "webhook", "url": "ftp://x"}, attentionChannelWebhook, "must be http(s)"},
 		{"wrong shape", agentdb.JSONMap{"kind": 42}, "", "not an object"},
+		// G3: a whole-value ${VAR} reference is accepted at parse time — the
+		// http(s) check is deferred to resolveURL, which is the only place that
+		// can see the resolved value.
+		{"url is a whole ${VAR} reference", agentdb.JSONMap{"kind": "webhook", "url": "${SLACK_WEBHOOK_URL}"}, attentionChannelWebhook, ""},
+		{"url with partial interpolation is refused", agentdb.JSONMap{"kind": "webhook", "url": "https://hooks.slack.com/${TOKEN}"}, attentionChannelWebhook, "whole ${VAR} reference"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -589,6 +605,65 @@ func TestAttentionChannelHeaderResolution(t *testing.T) {
 	if _, err := ch.resolveHeaders(func(string) string { return "" }); err == nil ||
 		!strings.Contains(err.Error(), "unset") {
 		t.Fatalf("want an unset-variable error, got %v", err)
+	}
+}
+
+// TestAttentionChannelURLResolution: the url mirrors header resolution — a
+// whole ${VAR} reference resolves from env, an unset variable fails loudly
+// rather than sending the literal "${VAR}" text, and a literal url passes
+// through unchanged.
+func TestAttentionChannelURLResolution(t *testing.T) {
+	env := func(k string) string {
+		if k == "WEBHOOK_URL" {
+			return "https://hooks.example.com/real"
+		}
+		return ""
+	}
+
+	ch := attentionChannel{URL: "https://hooks.example.com/literal"}
+	if got, err := ch.resolveURL(env); err != nil || got != "https://hooks.example.com/literal" {
+		t.Fatalf("literal url: got %q, err %v", got, err)
+	}
+
+	ch = attentionChannel{URL: "${WEBHOOK_URL}"}
+	if got, err := ch.resolveURL(env); err != nil || got != "https://hooks.example.com/real" {
+		t.Fatalf("resolved url: got %q, err %v", got, err)
+	}
+
+	ch = attentionChannel{URL: "${MISSING}"}
+	if _, err := ch.resolveURL(env); err == nil || !strings.Contains(err.Error(), "unset") {
+		t.Fatalf("want an unset-variable error, got %v", err)
+	}
+}
+
+// TestRequestHumanAttentionResolvesURLFromEnv proves the full §9 path: a
+// project's attention_channel.url stored as "${VAR}" is never in the
+// database as a literal, and delivery still reaches the real webhook.
+func TestRequestHumanAttentionResolvesURLFromEnv(t *testing.T) {
+	store := newFakeAttentionStore()
+	store.addSession("s-1", "acme", "tweet-author")
+	settings := agentdb.DefaultProjectSettings("acme")
+	settings.AttentionChannel = agentdb.JSONMap{"kind": "webhook", "url": "${SLACK_WEBHOOK_URL}"}
+	store.settings["acme"] = settings
+
+	var gotURL string
+	svc, _, _ := newTestAttentionService(store, map[string]string{"SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/real"})
+	svc.post = func(_ context.Context, ch attentionChannel, _ map[string]string, _ attentionPayload) error {
+		gotURL = ch.URL
+		return nil
+	}
+
+	res, err := svc.Request(context.Background(), attentionRequestInput{
+		Project: "acme", SessionID: "s-1", Message: "sign off on this",
+	})
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if !res.Delivered {
+		t.Fatalf("expected delivery: %+v", res)
+	}
+	if gotURL != "https://hooks.slack.com/services/real" {
+		t.Fatalf("the resolved url must be what is posted to, got %q", gotURL)
 	}
 }
 

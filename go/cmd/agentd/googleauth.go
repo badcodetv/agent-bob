@@ -46,6 +46,24 @@ type projectConfig struct {
 	// page. It drives Content-Security-Policy: frame-ancestors — not CORS; no
 	// browser ever makes a cross-origin request to agentd by design.
 	AllowedOrigins []string `json:"allowed_origins"`
+	// GitHubTokenEnv names the environment variable holding this project's
+	// git-projection push token (design/2026-09-09-git-projection.md, G7).
+	// Same shape as APIKeyEnv: the map names the variable, never the secret.
+	//
+	// Overlap with agentdb.ProjectSettings.GitTokenEnv: that column is the
+	// one the console/API write and the renderer actually reads — it is the
+	// live, per-project source of truth and it is NOT importable (§D). This
+	// field is the boot-time convenience for the same shape of value, useful
+	// for a deployment that provisions projects from its project map rather
+	// than through the console. Decision: when both are set, GitTokenEnv
+	// (the database column) wins, because it is the one a human can change
+	// at runtime without a redeploy and the one the git-projection renderer
+	// is documented to read; this field is consulted only as a fallback for
+	// a project whose settings row has never set GitTokenEnv. Whichever
+	// component resolves the effective token-env name is responsible for
+	// applying that precedence — this file only validates and stores the
+	// map's own value.
+	GitHubTokenEnv string `json:"github_token_env"`
 }
 
 // projectSettings is the whole parsed map file: who may log in, and per-project
@@ -136,6 +154,9 @@ func parseProjectSettingsObjectForm(probe map[string]json.RawMessage) (*projectS
 			}
 			if cfg.APIKeyEnv != "" && !envVarName.MatchString(cfg.APIKeyEnv) {
 				return nil, fmt.Errorf("project map: project %q: api_key_env %q is not a valid environment variable name", id, cfg.APIKeyEnv)
+			}
+			if cfg.GitHubTokenEnv != "" && !envVarName.MatchString(cfg.GitHubTokenEnv) {
+				return nil, fmt.Errorf("project map: project %q: github_token_env %q is not a valid environment variable name", id, cfg.GitHubTokenEnv)
 			}
 			for _, origin := range cfg.AllowedOrigins {
 				if err := validateOrigin(origin); err != nil {
