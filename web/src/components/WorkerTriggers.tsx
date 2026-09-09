@@ -21,6 +21,7 @@ import { describeSubscriptionTarget, type SubscriptionDraft } from '../subscript
 import { describeCron, type ScheduleDraft } from '../schedules.js'
 import SubscriptionEditor from './SubscriptionEditor.js'
 import ScheduleEditor from './ScheduleEditor.js'
+import RunArchitectControl, { ARCHITECT_RUN_EVENT } from './RunArchitectControl.js'
 
 /** Sentinel for "the create form is open" — not a legal id. */
 const NEW_ROW = '#new'
@@ -242,6 +243,18 @@ export function WokenBy({
   const mySchedules = scheds.schedules.filter((s) => s.worker === workerName)
   const nothing = mySubs.length === 0 && mySchedules.length === 0
 
+  // "Run the architect now" belongs exactly here, and only here: this is the
+  // one place that already knows how a worker is woken, and the answer for an
+  // architect is "an architect.run event" — which is also the only correct way
+  // to start one by hand. Opening a chat with it instead would silently
+  // deprive it of the label registry, because briefings are built on the
+  // dispatch path and never for a chat (design B1/C5). The control is offered
+  // on the strength of the subscription rather than the worker's name, so a
+  // project that called its architect something else still gets it.
+  const wokenByArchitectRun = mySubs.some(
+    (s) => s.event_type === ARCHITECT_RUN_EVENT && s.enabled,
+  )
+
   return (
     <Box sx={{ mt: 2 }} data-testid="woken-by">
       <Typography variant="overline" color="text.secondary">
@@ -264,6 +277,11 @@ export function WokenBy({
             </Typography>
           ))}
         </Stack>
+      )}
+      {wokenByArchitectRun && (
+        <Box sx={{ mt: 1 }}>
+          <RunArchitectControl architectName={workerName} {...apiOptions} />
+        </Box>
       )}
       {onEditTriggers !== undefined && (
         <Button

@@ -9,6 +9,7 @@ import {
   DeskPage,
   MemoryBrowserPage,
   NAV_LABELS,
+  OnboardingPage,
   OrgChartPage,
   ProjectSettingsPage,
   WorkersPage,
@@ -23,10 +24,37 @@ import {
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
+import { useOnboardingSession } from "./onboarding";
 import Sidebar from "./Sidebar";
 import { darkTheme, lightTheme } from "./theme";
 
 const API = import.meta.env.VITE_API ?? ""; // "" → same origin (nginx proxy)
+
+// Where an unfinished onboarding is remembered across a reload. Storage can
+// throw (a private window, storage disabled), and an onboarding screen is not
+// worth failing the whole shell over, so both sides swallow.
+const PENDING_ONBOARDING_KEY = "agentkit.onboarding.pending";
+
+function loadPendingOnboarding(): { project: string; goal: string } | null {
+  try {
+    const raw = window.localStorage.getItem(PENDING_ONBOARDING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { project?: unknown; goal?: unknown };
+    if (typeof parsed.project !== "string" || parsed.project === "") return null;
+    return { project: parsed.project, goal: typeof parsed.goal === "string" ? parsed.goal : "" };
+  } catch {
+    return null;
+  }
+}
+
+function savePendingOnboarding(value: { project: string; goal: string } | null): void {
+  try {
+    if (value === null) window.localStorage.removeItem(PENDING_ONBOARDING_KEY);
+    else window.localStorage.setItem(PENDING_ONBOARDING_KEY, JSON.stringify(value));
+  } catch {
+    // ignore
+  }
+}
 
 // What a project view can show. Deliberately a state machine and not a router:
 // the library must not impose react-router on hosts, and the permalink hook
@@ -98,10 +126,23 @@ export default function App() {
   // Wildcard users can mint a token for a brand-new project id — this is how
   // a project is "created" (it has no row anywhere; the first session in it
   // makes it real).
-  const createProject = useCallback(async (projectID: string) => {
+  // The goal of a project that was created and has not finished onboarding.
+  //
+  // Held here rather than in the workspace because the workspace is remounted
+  // (keyed by project) the moment the new project is selected, and state
+  // inside it would not survive that — and PERSISTED, because an interview
+  // takes minutes and a reload in the middle of one would otherwise drop the
+  // human on the Desk with a live interview they can no longer see. Re-entry
+  // is safe: startOnboarding rejoins the existing `onboard` session rather
+  // than creating a second one.
+  const [pendingOnboarding, setPendingOnboarding] = useState<{ project: string; goal: string } | null>(loadPendingOnboarding);
+  useEffect(() => savePendingOnboarding(pendingOnboarding), [pendingOnboarding]);
+
+  const createProject = useCallback(async (projectID: string, goal: string) => {
     const loginToken = auth?.loginToken;
     if (!loginToken) throw new Error("no wildcard login token");
     const minted = await mintProjectToken(API, loginToken, projectID);
+    setPendingOnboarding({ project: minted.id, goal });
     setAuth((prev) => {
       if (!prev) return prev;
       const projects = prev.projects.some((p) => p.id === minted.id)
@@ -207,6 +248,8 @@ export default function App() {
           auth={auth}
           credentialMode={credentialMode}
           project={project}
+          onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
+          onOnboardingDone={() => setPendingOnboarding(null)}
           onSwitchProject={selectProject}
           onCreateProject={createProject}
           onSignOut={signOut}
@@ -228,6 +271,8 @@ function ProjectWorkspace({
   auth,
   credentialMode,
   project,
+  onboardingGoal,
+  onOnboardingDone,
   onSwitchProject,
   onCreateProject,
   onSignOut,
@@ -237,10 +282,16 @@ function ProjectWorkspace({
   credentialMode: string | null;
   project: string;
   onSwitchProject: (projectID: string) => void;
-  onCreateProject: (projectID: string) => Promise<void>;
+  onboardingGoal: string | null;
+  onOnboardingDone: () => void;
+  onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
-  const [view, setView] = useState<View>("desk");
+  // "onboarding" is a shell-owned TRANSIENT view, deliberately not a NavEntry:
+  // the nav is progressive and its entries are earned by what a project
+  // contains (K9), whereas onboarding is a thing you are doing right now and
+  // never come back to from a nav bar.
+  const [view, setView] = useState<View | "onboarding">(onboardingGoal !== null ? "onboarding" : "desk");
 
   // Which nav entries this project has earned (K9). Day one is four; Memory
   // arrives with the first memory, Activity with the first event, Chart with
@@ -251,7 +302,7 @@ function ProjectWorkspace({
   // A view can stop being visible only by the project changing under us (a
   // reveal is sticky), but a stale `view` would render a hidden surface — so
   // fall back to the Desk, which is always there.
-  const shownView = visible.includes(view) ? view : "desk";
+  const shownView = view === "onboarding" || visible.includes(view) ? view : "desk";
 
   // The only number in the chrome (design §3.5): how many things are asking for
   // you — through useAsksCount, which applies the very join the Asks stack
@@ -261,6 +312,14 @@ function ProjectWorkspace({
   // While the Desk is open it already holds both lists, so it reports its own
   // count up and this hook stands down (W4 collapsing X7's duplicate fetch).
   const onDesk = view === "desk";
+  // The interview itself: created once, reused on re-entry, and never started
+  // at all unless this project is actually being onboarded.
+  const { sessionId: onboardSessionId, error: onboardError } = useOnboardingSession({
+    apiBase: API,
+    token: auth.projects.find((p) => p.id === project)?.token ?? "",
+    goal: onboardingGoal,
+    enabled: view === "onboarding",
+  });
   const [deskAsks, setDeskAsks] = useState(0);
   const { count: fetchedAsks } = useAsksCount({ enabled: !onDesk });
   const openAsks = onDesk ? deskAsks : fetchedAsks;
@@ -320,7 +379,17 @@ function ProjectWorkspace({
         <Box sx={{ px: 1.5, pt: 1.5 }}>
           <CredentialModeBadge mode={credentialMode} />
         </Box>
-        <ViewNav view={shownView} entries={visible} onChange={setView} asks={openAsks} />
+        <ViewNav
+          view={shownView}
+          entries={visible}
+          onChange={(next) => {
+            // Leaving onboarding ends it: clearing the pending goal stops a
+            // later remount from dropping the human back into the interview.
+            if (view === "onboarding") onOnboardingDone();
+            setView(next);
+          }}
+          asks={openAsks}
+        />
         <RevealNotice appeared={appeared} onDismiss={acknowledge} />
         {/* The sidebar stays mounted in every view: it carries the project
             switcher and the session list, which are how you leave a view. */}
@@ -366,6 +435,13 @@ function ProjectWorkspace({
           />
         )}
         {shownView === "settings" && <ProjectSettingsPage />}
+        {shownView === "onboarding" && (
+          <OnboardingPage
+            sessionId={onboardSessionId}
+            sessionError={onboardError}
+            refreshMs={4000}
+          />
+        )}
       </Box>
     </Box>
   );
@@ -419,7 +495,10 @@ function ViewNav({
   onChange,
   asks,
 }: {
-  view: View;
+  // Widened for the shell's one transient view ("onboarding"), which is not a
+  // NavEntry and therefore highlights nothing here — correct: it is a thing
+  // you are doing, not a place you go back to.
+  view: View | "onboarding";
   entries: NavEntry[];
   onChange: (v: View) => void;
   asks: number;

@@ -167,6 +167,7 @@ export {
   coerceCharterEffects,
   coerceCharterCurrent,
   describeCharterCadence,
+  buildOnboardingSeed,
 } from './charter.js'
 export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './charter.js'
 export { default as useCharter } from './useCharter.js'
@@ -870,6 +871,10 @@ export type { ScheduleEditorProps } from './components/ScheduleEditor.js'
 // an architect.
 export { default as CharterPanel } from './components/CharterPanel.js'
 export type { CharterPanelProps } from './components/CharterPanel.js'
+export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './components/RunArchitectControl.js'
+export type { RunArchitectControlProps } from './components/RunArchitectControl.js'
+export { default as OnboardingPage } from './components/OnboardingPage.js'
+export type { OnboardingPageProps } from './components/OnboardingPage.js'
 export { default as NlAssistField } from './components/NlAssistField.js'
 export type { NlAssistFieldProps } from './components/NlAssistField.js'
 

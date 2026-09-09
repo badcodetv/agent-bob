@@ -13,17 +13,18 @@ export default function ProjectPicker({
 }: {
   auth: AuthState;
   onSelect: (projectID: string) => void;
-  onCreate: (projectID: string) => Promise<void>;
+  onCreate: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
   const [newProject, setNewProject] = useState("");
+  const [goal, setGoal] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     try {
-      await onCreate(newProject.trim());
+      await onCreate(newProject.trim(), goal.trim());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create project");
     }
@@ -52,16 +53,34 @@ export default function ProjectPicker({
           )}
         </Box>
         {auth.wildcard && (
-          <Box component="form" onSubmit={create} sx={{ display: "flex", gap: 1 }}>
+          <Box component="form" onSubmit={create} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <TextField
               size="small"
               fullWidth
+              label="Project name"
               placeholder="new-project-name"
               value={newProject}
               onChange={(e) => setNewProject(e.target.value)}
               slotProps={{ htmlInput: { "data-testid": "new-project-input" } }}
             />
-            <Button type="submit" variant="contained" disabled={!newProject.trim()} data-testid="new-project-create" sx={{ textTransform: "none" }}>
+            {/* Required, and labelled for what it DOES. Agent Wolf's scar: the
+                equivalent field was once marked "optional", nothing read it,
+                and it became the single most confusing thing in the product.
+                Here it is the interview's first message. */}
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={2}
+              required
+              label="What is this project for?"
+              helperText="Your goal — the interview starts from this."
+              placeholder="e.g. send a weekly newsletter that brings people back into the shop"
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              slotProps={{ htmlInput: { "data-testid": "new-project-goal" } }}
+            />
+            <Button type="submit" variant="contained" disabled={!newProject.trim() || !goal.trim()} data-testid="new-project-create" sx={{ textTransform: "none" }}>
               Create
             </Button>
           </Box>

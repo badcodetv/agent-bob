@@ -1320,7 +1320,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   `userEvent` refuses to click a disabled control at all, so it would have
   asserted the test library's behaviour rather than the panel's.
 
-### T16: `OnboardingPage` + "Run the architect now"   [Status: pending | Model: opus]
+### T16: `OnboardingPage` + "Run the architect now"   [Status: done | Model: opus]
 - **Scope:** The screen: a chat rail bound to the **named onboarding session
   specifically** — `AgentChat` takes all-optional props and otherwise falls
   back to `AgentChatProvider`'s *current* session
@@ -1346,10 +1346,27 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd web && npm test && npm run typecheck && npm run build`
 - **Depends on:** T15, T13
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `web/src/components/OnboardingPage.tsx` (7 tests) and a new
+  `RunArchitectControl.tsx` (5 tests), both exported.
+  **`EmitEventControl` did not fit and was not reused.** Its words are about
+  tracing a wire on the org chart — "Emit this event", "Emit a real event?",
+  a paragraph about which envelope fields core stamps — and its confirmation
+  quotes a count of matching subscriptions, a list the onboarding screen has
+  no reason to load and a count that would be a guess if it did. Same shape,
+  different sentence, so `RunArchitectControl` is its own component. It still
+  confirms first, for the same reason: this spends real tokens.
+  **The run control went into `WokenBy` (`WorkerTriggers.tsx`), not
+  `WorkersPage.tsx`.** `WokenBy` is the one place that already knows how a
+  worker is woken and already has the subscription list; putting it there
+  meant no extra fetch and no worker-name heuristic — the control is offered
+  on the strength of an enabled `architect.run` subscription, so a project
+  that named its architect something else still gets it.
+  The rail is bound with `sessionId` explicitly and a test asserts the stub
+  never receives `undefined`, which is what falling through to
+  `AgentChatProvider`'s current session would look like.
 
-### T17: app-shell wiring   [Status: pending | Model: opus]
+### T17: app-shell wiring   [Status: done | Model: opus]
 - **Scope:** In `examples/web`: a **required** goal field on project creation
   (`ProjectPicker.tsx`, and replace `Sidebar.tsx`'s `window.prompt` with a real
   form — a prompt box cannot carry two fields). Label it for what it DOES
@@ -1379,8 +1396,33 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** no (wiring)
 - **Validation:** `(cd web && npm run build) && (cd examples/web && yarn && yarn typecheck)`
 - **Depends on:** T16
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `examples/web/src/onboarding.ts` (the four-call sequence and a hook
+  around it), plus `App.tsx`, `ProjectPicker.tsx` and `Sidebar.tsx`.
+  `Sidebar`'s `window.prompt` is gone: a new project needs two fields, and a
+  prompt box cannot ask for two, cannot mark one required, cannot show the
+  server's refusal and cannot say what the goal is FOR. It is a dialog with a
+  form. The same required goal field is on `ProjectPicker`, labelled "Your
+  goal — the interview starts from this".
+  `buildOnboardingSeed` lives in `web/src/charter.ts`, not in the shell, so it
+  is testable: the shell has no test rig. Three tests pin that the seed
+  carries the session id, carries the goal verbatim below a rule, and
+  attributes everything below the rule to the user — that attribution is the
+  §6.2.4 boundary, without which a goal reading "ignore your instructions"
+  arrives as though the system had said it.
+  Two things added beyond the ticket:
+  (a) **the pending onboarding is persisted to `localStorage`.** Without it a
+  reload mid-interview drops the human on the Desk with a live interview they
+  can no longer see — and re-entry is the path the ticket's own "reuses it
+  rather than 409-ing" requirement describes, so without persistence that
+  requirement had no way of being exercised at all.
+  (b) **`enableInterviewer` round-trips every field** through
+  `PUT /agent/workers/{name}`. That route is a whole-object replace, so a PUT
+  of `{enabled: true}` alone would erase the interviewer's system prompt —
+  DI2 exactly. This is the client-side half; T27 is the server-side half.
+  `onboarding` is a shell-owned transient view widening `ViewNav`'s `view`
+  prop, not a `NavEntry`: it highlights nothing, which is right for a thing
+  you are doing rather than a place you go back to.
 
 ### T18: repair the browser e2e fixtures   [Status: pending | Model: sonnet]
 - **Scope:** **[rev2]** T17 breaks the existing suite and rev1 had no ticket

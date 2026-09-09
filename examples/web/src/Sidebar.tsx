@@ -1,7 +1,19 @@
 // Left sidebar: project switcher + "New session" + the library's
 // ChatHistoryDrawer (session rows with the filter-by-user select).
 import { useEffect, useMemo, useState } from "react";
-import { Box, Button, Select, Typography } from "@mui/material";
+import {
+  Alert,
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Select,
+  TextField,
+  Typography,
+} from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import { ChatHistoryDrawer, useAgentChat, useAgentSessions } from "@agentkit/chat-ui";
 import { AuthState } from "./auth";
@@ -18,13 +30,37 @@ export default function Sidebar({
   auth: AuthState;
   project: string;
   onSwitchProject: (projectID: string) => void;
-  onCreateProject: (projectID: string) => Promise<void>;
+  onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
   const { sessions, refresh, select } = useAgentSessions();
   const { createSession, session, isCreating } = useAgentChat();
   const [userFilter, setUserFilter] = useState<string>("me");
   const [searchQuery, setSearchQuery] = useState("");
+  // A new project needs TWO things — an id and a goal — and window.prompt can
+  // only ask for one. It also cannot mark a field required, cannot show the
+  // server's refusal, and cannot say what the goal is FOR.
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [newProjectId, setNewProjectId] = useState("");
+  const [newProjectGoal, setNewProjectGoal] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const submitNewProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    setCreateError(null);
+    try {
+      await onCreateProject(newProjectId.trim(), newProjectGoal.trim());
+      setNewProjectOpen(false);
+      setNewProjectId("");
+      setNewProjectGoal("");
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   useEffect(() => {
     void refresh({ userEmail: userFilter === "me" ? undefined : userFilter });
@@ -50,8 +86,8 @@ export default function Sidebar({
           value={project}
           onChange={(e) => {
             if (e.target.value === NEW_PROJECT_SENTINEL) {
-              const name = window.prompt("New project id (kebab-case, e.g. apples-oranges):");
-              if (name?.trim()) void onCreateProject(name.trim()).catch((err) => window.alert(String(err)));
+              setCreateError(null);
+              setNewProjectOpen(true);
               return;
             }
             onSwitchProject(e.target.value);
@@ -84,6 +120,58 @@ export default function Sidebar({
           </Button>
         </Box>
       </Box>
+      <Dialog open={newProjectOpen} onClose={() => (creating ? undefined : setNewProjectOpen(false))} fullWidth maxWidth="sm">
+        <DialogTitle>New project</DialogTitle>
+        <Box component="form" onSubmit={submitNewProject}>
+          <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <DialogContentText sx={{ fontSize: 14 }}>
+              Creating a project starts an interview. It asks what the project is for and how you
+              would know it is working, then writes that down for you to approve.
+            </DialogContentText>
+            <TextField
+              size="small"
+              fullWidth
+              autoFocus
+              required
+              label="Project id"
+              placeholder="apples-oranges"
+              helperText="Kebab-case. This is the namespace everything in the project lives under."
+              value={newProjectId}
+              onChange={(e) => setNewProjectId(e.target.value)}
+              slotProps={{ htmlInput: { "data-testid": "new-project-input" } }}
+            />
+            <TextField
+              size="small"
+              fullWidth
+              multiline
+              minRows={2}
+              required
+              label="What is this project for?"
+              helperText="Your goal — the interview starts from this."
+              placeholder="e.g. send a weekly newsletter that brings people back into the shop"
+              value={newProjectGoal}
+              onChange={(e) => setNewProjectGoal(e.target.value)}
+              slotProps={{ htmlInput: { "data-testid": "new-project-goal" } }}
+            />
+            {createError !== null && <Alert severity="error">{createError}</Alert>}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setNewProjectOpen(false)} disabled={creating} sx={{ textTransform: "none" }}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={creating || !newProjectId.trim() || !newProjectGoal.trim()}
+              data-testid="new-project-create"
+              sx={{ textTransform: "none" }}
+            >
+              {creating ? "Creating…" : "Create project"}
+            </Button>
+          </DialogActions>
+        </Box>
+      </Dialog>
+
       <ChatHistoryDrawer
         open
         onClose={() => {}}

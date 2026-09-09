@@ -210,3 +210,11 @@ export { default as ArtifactTreeView } from './ArtifactTreeView.js'
 export { default as CharterPanel } from './CharterPanel.js'
 
 export type { CharterPanelProps } from './CharterPanel.js'
+
+export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './RunArchitectControl.js'
+
+export type { RunArchitectControlProps } from './RunArchitectControl.js'
+
+export { default as OnboardingPage } from './OnboardingPage.js'
+
+export type { OnboardingPageProps } from './OnboardingPage.js'
