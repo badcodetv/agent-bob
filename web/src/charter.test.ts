@@ -111,8 +111,9 @@ describe('coerceCharterCurrent', () => {
 })
 
 describe('coerceCharterEffects', () => {
-  // The schedule ships disabled, so "off" is both the safe reading and the
-  // true one; anything but a literal true must not claim the loop is running.
+  // A charter now creates an ENABLED schedule, so this field is what tells the
+  // human a loop is about to start changing their project by itself. Anything
+  // but a literal true must not put that sentence on screen.
   it.each([undefined, 'true', 1, null])('schedule_enabled is false for %o', (v) => {
     expect(coerceCharterEffects({ schedule_enabled: v }).schedule_enabled).toBe(false)
   })

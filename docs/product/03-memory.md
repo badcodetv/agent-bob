@@ -39,6 +39,22 @@ research lesson — curate the vocabulary to avoid tag-soup — is implemented a
 a project convention memory, maintained by whichever worker the project appoints, that other
 workers are prompted to consult. Mechanism/policy again.)
 
+> **How that convention actually reaches a worker** (2026-09-08 onboarding-and-architect design;
+> operator's view in `docs/18-workers-memory-events.md` §9a). The convention memory is
+> `name=label-registry`, seeded by onboarding, and it is delivered by the **project-wide
+> briefing** — `ProjectSettings.Briefing`, a selector list unioned into every JOB's briefing on
+> top of whatever the worker asks for itself. So the rulebook is handed to every job with no
+> per-worker configuration, and changing the rules is publishing a new version of one note rather
+> than a configuration change at all.
+>
+> Three things about that are worth knowing before relying on it. It reaches **jobs, not chat
+> sessions**: briefings are built inside `ComposeJob` on the dispatch path, so a worker you talk
+> to in the console receives none of it. It is **newest-one-per-selector**, so "the last ten
+> summaries" is a `memory_search` instruction in a prompt and not a briefing. And the registry is
+> an **ordinary memory with no protection**: any worker that can write memory can publish a new
+> version of the rulebook, and the newest wins. That is the mechanism/policy split holding, not a
+> gap — but it means the vocabulary is as durable as the prompts of the workers that respect it.
+
 **The `name=` convention (singleton semantics).** A memory labeled `name=<x>` is a version of
 "the current value of `<x>`": the current value is the **newest** match of `name=<x>`, and
 updating it means appending a newer memory with the same `name` label. Append-only plus

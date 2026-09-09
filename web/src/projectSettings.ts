@@ -16,6 +16,11 @@
 //     accidentally uncaps their token spend. `PROJECT_SETTING_NUMERICS` carries
 //     the semantics as data so the form renders the truth rather than a guess,
 //     and it mirrors `ProjectSettings.normalize()` in the engine exactly.
+//  3. **The project-wide briefing is checked with the engine's own grammar.**
+//     `parseMemorySelector` is already a mirror of `agentdb/labels.go`; a
+//     second, stricter rule here would refuse selectors the server accepts.
+
+import { parseMemorySelector } from './memories.js'
 
 /** Default endpoint for the project-settings routes (GET and PUT share it). */
 export const PROJECT_SETTINGS_ENDPOINT = '/agent/project-settings'
@@ -251,6 +256,11 @@ export type FieldErrors = Record<string, string>
  */
 export function validateProjectSettings(s: ProjectSettings): FieldErrors {
   const errors: FieldErrors = {}
+  const briefing = validateProjectBriefing(s.briefing)
+  const firstBad = Object.keys(briefing)[0]
+  if (firstBad !== undefined) {
+    errors.briefing = briefing[Number(firstBad)]
+  }
   for (const spec of PROJECT_SETTING_NUMERICS) {
     const v = s[spec.key]
     if (!Number.isFinite(v) || !Number.isInteger(v)) {
@@ -277,4 +287,30 @@ export function projectSettingsBody(
 ): Omit<ProjectSettings, 'project' | 'updated_at'> & { rationale?: string } {
   const { project: _project, updated_at: _updatedAt, ...body } = s
   return rationale.trim() === '' ? body : { ...body, rationale: rationale.trim() }
+}
+
+/**
+ * Per-entry errors for the project-wide briefing, keyed by index.
+ *
+ * The rule is the ENGINE's, borrowed rather than restated:
+ * `parseMemorySelector` is already a mirror of `agentdb/labels.go`'s parser,
+ * written for the memory browser, and the server applies exactly that parser
+ * to each entry of `ProjectSettings.Briefing`. A second, stricter rule here
+ * would refuse selectors the server accepts, which is worse than not checking
+ * at all — the human would have no way to find out they were wrong.
+ *
+ * A blank entry is an error rather than a silent drop: a row that vanishes
+ * when you save it reads as a bug.
+ */
+export function validateProjectBriefing(entries: string[]): Record<number, string> {
+  const errors: Record<number, string> = {}
+  entries.forEach((entry, i) => {
+    if (entry.trim() === '') {
+      errors[i] = 'empty — write a selector or remove the row'
+      return
+    }
+    const parsed = parseMemorySelector(entry)
+    if (parsed.error !== null) errors[i] = parsed.error
+  })
+  return errors
 }

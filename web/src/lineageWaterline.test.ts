@@ -26,6 +26,7 @@ const WORKER = 'email-answerer'
 /** A prompt write, at a given unix-ms instant. */
 const write = (id: string, at: number, prompt: string): ConfigEvent => ({
   id,
+  seq: at,
   project: 'acme',
   actor_worker: 'email-reviewer',
   actor_session: `sess-${id}`,
@@ -110,6 +111,7 @@ describe('cumulativeLineageDiff', () => {
   it('ignores non-prompt events in the mark arithmetic', () => {
     const freeze: ConfigEvent = {
       id: 'f1',
+      seq: 2500,
       project: 'acme',
       actor_worker: '',
       actor_session: '',
@@ -163,6 +165,7 @@ describe('Viewed, and its auto-invalidation', () => {
   it('takes its head from the newest PROMPT write, not the newest event', () => {
     const freeze: ConfigEvent = {
       id: 'f1',
+      seq: 2500,
       project: 'acme',
       actor_worker: '',
       actor_session: '',

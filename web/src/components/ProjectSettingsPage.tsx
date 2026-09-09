@@ -22,14 +22,17 @@ import {
   CircularProgress,
   Divider,
   FormHelperText,
+  IconButton,
   Stack,
   TextField,
   Typography,
 } from '@mui/material'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import useProjectSettings, { type UseProjectSettingsOptions } from '../useProjectSettings.js'
 import {
   describeNumericSetting,
   PROJECT_SETTING_NUMERICS,
+  validateProjectBriefing,
   type NumericSettingSpec,
 } from '../projectSettings.js'
 import JsonObjectEditor from './JsonObjectEditor.js'
@@ -121,6 +124,13 @@ export default function ProjectSettingsPage({
             'Where request_human_attention notifications go, e.g. ' +
             '{"kind":"webhook","url":"https://..."}. Unset: the tool still succeeds and only logs.'
           }
+        />
+
+        <Divider />
+
+        <ProjectBriefing
+          entries={s.draft.briefing}
+          onChange={(briefing) => s.update({ briefing })}
         />
 
         <Divider />
@@ -221,6 +231,84 @@ function NumericSetting({
       <FormHelperText error={error !== null}>
         {error !== null ? error : describeNumericSetting(spec, value)}
       </FormHelperText>
+    </Box>
+  )
+}
+
+/**
+ * The project-wide briefing (design B1): a list of label selectors handed to
+ * every JOB in the project, on top of whatever the worker lists for itself.
+ *
+ * Two sentences of copy here are load-bearing, and both describe a blast
+ * radius rather than a mechanism:
+ *
+ *   * every job in the project gets these — this is the one field on the
+ *     screen that changes what every worker is told, and a human adding a
+ *     selector here is editing every prompt at once;
+ *   * a CHAT gets none of them. Briefings are built inside ComposeJob on the
+ *     dispatch path only, so talking to a worker in the console gives it none
+ *     of this. Nothing anywhere else says so, and the difference is invisible
+ *     — the chat simply behaves as though the rulebook did not exist.
+ */
+function ProjectBriefing({
+  entries,
+  onChange,
+}: {
+  entries: string[]
+  onChange: (entries: string[]) => void
+}) {
+  const errors = validateProjectBriefing(entries)
+
+  return (
+    <Box data-testid="project-briefing">
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Project-wide briefing
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Label selectors handed to <strong>every job in this project</strong>, on top of whatever
+        each worker asks for itself. The newest memory matching each selector is injected as a
+        briefing section — so this is how one note, edited in one place, reaches every worker.{' '}
+        <strong>Chat sessions do not receive these.</strong> Briefings are built when a job is
+        dispatched, so a worker you talk to in the console is never handed them.
+      </Typography>
+
+      <Stack spacing={1}>
+        {entries.map((entry, i) => (
+          <Stack key={i} direction="row" spacing={1} alignItems="flex-start">
+            <TextField
+              fullWidth
+              size="small"
+              value={entry}
+              placeholder="name=label-registry"
+              error={errors[i] !== undefined}
+              helperText={errors[i]}
+              onChange={(e) => {
+                const next = [...entries]
+                next[i] = e.target.value
+                onChange(next)
+              }}
+              inputProps={{ 'aria-label': `Briefing selector ${i + 1}` }}
+            />
+            <IconButton
+              size="small"
+              aria-label={`Remove briefing selector ${i + 1}`}
+              onClick={() => onChange(entries.filter((_, j) => j !== i))}
+            >
+              <DeleteOutlineIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+        ))}
+      </Stack>
+
+      <Button size="small" sx={{ mt: 1 }} onClick={() => onChange([...entries, ''])}>
+        Add a selector
+      </Button>
+      {entries.length === 0 && (
+        <FormHelperText>
+          None set. Onboarding adds <code>name=label-registry</code> here, which is what puts the
+          project&rsquo;s label rulebook in front of every worker.
+        </FormHelperText>
+      )}
     </Box>
   )
 }

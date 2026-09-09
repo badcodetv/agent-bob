@@ -307,3 +307,44 @@ describe('the read-route contract', () => {
     expect(formatConfigTimestamp(0)).toBe('')
   })
 })
+
+describe('seq (T21)', () => {
+  it('coerces seq, and reads a missing one as 0 rather than guessing', () => {
+    expect(coerceConfigEvent({ id: 'c1', seq: 7 }).seq).toBe(7)
+    expect(coerceConfigEvent({ id: 'c1' }).seq).toBe(0)
+    expect(coerceConfigEvent({ id: 'c1', seq: '7' }).seq).toBe(0)
+  })
+
+  // Two writes inside one millisecond have no order by the clock, and the
+  // changelog computes each diff against its neighbour — so an arbitrary
+  // order there produces a diff against the wrong version.
+  it('orders the changelog by seq when every record has one', () => {
+    const at = 1_700_000_000_000
+    const ev = (id: string, seq: number, prompt: string): ConfigEvent =>
+      coerceConfigEvent({
+        id,
+        seq,
+        project: 'acme',
+        action: 'worker_prompt_write',
+        payload: { name: 'w', system_prompt: prompt },
+        rationale: `r-${id}`,
+        created_at: at, // the SAME millisecond for all three
+      })
+
+    const entries = buildChangelog([ev('c', 3, 'third'), ev('a', 1, 'first'), ev('b', 2, 'second')])
+    expect(entries.map((e) => e.event.id)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('falls back to the clock when the server sent no seq at all', () => {
+    const ev = (id: string, createdAt: number): ConfigEvent =>
+      coerceConfigEvent({
+        id,
+        project: 'acme',
+        action: 'worker_create',
+        payload: { name: 'w' },
+        created_at: createdAt,
+      })
+    const entries = buildChangelog([ev('b', 2000), ev('a', 1000)])
+    expect(entries.map((e) => e.event.id)).toEqual(['b', 'a'])
+  })
+})

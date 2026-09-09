@@ -151,8 +151,9 @@ export default function OnboardingPage({
                 What happens next
               </Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                The architect exists but has not run yet, and its daily schedule starts switched
-                off. Run it once and watch what it does.
+                The architect exists but has not run yet. It will run on its own schedule from now
+                on — run it once now and watch what it does, so the first time it changes something
+                is not while you are looking the other way.
               </Typography>
               <RunArchitectControl
                 {...apiOptions}

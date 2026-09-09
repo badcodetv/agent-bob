@@ -71,8 +71,9 @@ func TestCharterValidateAcceptsAWholeDeposit(t *testing.T) {
 	if s.ArchitectCron != charter.DefaultArchitectCron {
 		t.Errorf("architect_cron: want %q, got %q", charter.DefaultArchitectCron, s.ArchitectCron)
 	}
-	if s.ScheduleEnabled {
-		t.Error("schedule_enabled must be false — the daily loop ships off (Decision C5)")
+	if !s.ScheduleEnabled {
+		t.Error("schedule_enabled must be true — approving a charter starts the daily loop, " +
+			"and the interviewer has to be able to tell the human that")
 	}
 	if s.SubscriptionEvent != charter.EventArchitectRun {
 		t.Errorf("subscription_event: want %q, got %q", charter.EventArchitectRun, s.SubscriptionEvent)

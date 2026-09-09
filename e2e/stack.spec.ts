@@ -90,13 +90,35 @@ test.describe('standalone stack', () => {
       data: { email: TEST_EMAIL, password: TEST_PASSWORD },
     })
     if (!loginResp.ok()) return
-    const { projects } = (await loginResp.json()) as { projects: Array<{ id: string; token: string }> }
-    const token = projects.find((p) => p.id === PROJECT_A)?.token
-    if (!token) return
+    const login = (await loginResp.json()) as {
+      projects: Array<{ id: string; token: string }>
+      login_token?: string
+    }
+
+    // Every project this spec might have created a session in, not just
+    // PROJECT_A. Creating a project through the picker now starts an ONBOARDING
+    // INTERVIEW — a real session in PROJECT_NEW, holding a real container and
+    // one of agentd's ports — and a delete sent with PROJECT_A's token is a 404
+    // that leaks it silently. `DELETE` is tenancy-scoped, so the only way to
+    // reach a session is with a token for its own project.
+    const tokens = login.projects.map((p) => p.token)
+    if (login.login_token) {
+      const minted = await request
+        .post('/auth/project-token', { data: { token: login.login_token, project: PROJECT_NEW } })
+        .catch(() => null)
+      if (minted?.ok()) tokens.push(((await minted.json()) as { token: string }).token)
+    }
+    if (tokens.length === 0) return
+
     for (const sid of createdSessions.splice(0)) {
-      await request
-        .delete(`/agent/session/${sid}`, { headers: { Authorization: `Bearer ${token}` } })
-        .catch(() => {})
+      // Try each token until one is the session's owner; a wrong project is a
+      // 404, never an error worth reporting here.
+      for (const token of tokens) {
+        const resp = await request
+          .delete(`/agent/session/${sid}`, { headers: { Authorization: `Bearer ${token}` } })
+          .catch(() => null)
+        if (resp?.ok()) break
+      }
     }
   })
 
@@ -121,9 +143,29 @@ test.describe('standalone stack', () => {
     await expect(page.getByTestId(`project-option-${PROJECT_A}`)).toBeVisible()
     await expect(page.getByTestId(`project-option-${PROJECT_B}`)).toBeVisible()
 
-    // ── Wildcard grant: create a brand-new project (it auto-selects, empty) ─
+    // ── Wildcard grant: create a brand-new project ─────────────────────────
+    //
+    // Creating a project now takes TWO fields — a name and a goal — and the
+    // Create button stays disabled until both are filled. The goal is not
+    // decoration: it becomes the first message of an onboarding interview, so
+    // creating a project lands on the onboarding screen with an interviewer
+    // starting behind it, rather than on an empty workspace.
+    //
+    // The response hook above records the interview session, so teardown
+    // releases its container along with everything else this spec creates.
     await page.getByTestId('new-project-input').fill(PROJECT_NEW)
+    // By LABEL, not by test id. The goal box is a multiline TextField, and MUI
+    // renders a second, hidden textarea beside the visible one to measure
+    // auto-resize — the test id lands on something that is not the control the
+    // human types into, so `fill` succeeds and the form stays empty. The
+    // accessible name is unambiguous and is what a person actually reads.
+    await page
+      .getByLabel('What is this project for?')
+      .fill('Smoke-test the standalone stack.')
     await page.getByTestId('new-project-create').click()
+    await expect(page.getByTestId('onboarding-rail')).toBeVisible({ timeout: 30_000 })
+    // The sidebar stays mounted through onboarding — it is how you leave it —
+    // and the brand-new project genuinely has no sessions to list.
     await expect(page.getByTestId('session-sidebar')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByTestId('session-row')).toHaveCount(0)
 

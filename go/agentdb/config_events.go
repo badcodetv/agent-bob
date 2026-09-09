@@ -72,6 +72,7 @@ package agentdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -476,6 +477,11 @@ type ConfigEventQuery struct {
 	// timestamp cursor would either skip or repeat records at a page boundary.
 	// A caller pages by passing the seq of the last record it received.
 	BeforeSeq int64
+	// Seq addresses ONE record by its per-project sequence number (0 = any).
+	// It is how a caller that saw a record in a list — or in a `config.changed`
+	// event — fetches exactly that record again, without paging back to it and
+	// without depending on the uuid, which nothing else in the product renders.
+	Seq int64
 }
 
 // configEntityScanCap bounds the rows an Entity-filtered query reads before it
@@ -511,6 +517,9 @@ func (s *Store) ListConfigEvents(ctx context.Context, q ConfigEventQuery) ([]*Co
 	if q.BeforeSeq > 0 {
 		db = db.Where("seq < ?", q.BeforeSeq)
 	}
+	if q.Seq > 0 {
+		db = db.Where("seq = ?", q.Seq)
+	}
 
 	// The entity filter is two-phase: narrow to the kind's actions in SQL, then
 	// match the key in Go. The SQL limit must therefore become a scan cap —
@@ -542,6 +551,37 @@ func (s *Store) ListConfigEvents(ctx context.Context, q ConfigEventQuery) ([]*Co
 		out = []*ConfigEvent{}
 	}
 	return out, nil
+}
+
+// ErrConfigEventNotFound is "no such record in this project" — including a
+// record that exists in ANOTHER project, which is the same answer on purpose:
+// a caller must not be able to learn that an id is real by the shape of the
+// refusal (P5).
+var ErrConfigEventNotFound = errors.New("agentdb: config event not found")
+
+// GetConfigEvent returns one record by id, scoped to the project.
+//
+// The project is an ARGUMENT, not a filter the caller applies afterwards, for
+// the reason above: there is one query, and it cannot be written in a way that
+// forgets the scope.
+func (s *Store) GetConfigEvent(ctx context.Context, project, id string) (*ConfigEvent, error) {
+	if strings.TrimSpace(project) == "" {
+		return nil, fmt.Errorf("agentdb: GetConfigEvent requires a project (P5)")
+	}
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("%w: empty id", ErrConfigEventNotFound)
+	}
+	var ev ConfigEvent
+	err := s.gdb.WithContext(ctx).Model(&ConfigEvent{}).
+		Where("project = ? AND id = ?", project, id).
+		First(&ev).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrConfigEventNotFound, id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("agentdb: get config event: %w", err)
+	}
+	return &ev, nil
 }
 
 // filterByEntity keeps the records whose payload keys to ref, newest first,

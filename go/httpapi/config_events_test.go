@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
@@ -13,16 +15,50 @@ import (
 // fakeConfigLog records the query it was handed and returns a canned page, so
 // the handler's parameter plumbing can be asserted without a database.
 type fakeConfigLog struct {
-	got  agentdb.ConfigEventQuery
-	out  []*agentdb.ConfigEvent
-	err  error
-	call int
+	got        agentdb.ConfigEventQuery
+	gotProject string
+	gotID      string
+	out        []*agentdb.ConfigEvent
+	err        error
+	call       int
+
+	// The revert leg.
+	reverts     int
+	revertWrite agentdb.ConfigWrite
+	revertErr   error
+	reverted    *agentdb.ConfigEvent
+}
+
+func (f *fakeConfigLog) RevertEvent(_ context.Context, project, eventID string, cw agentdb.ConfigWrite) (*agentdb.ConfigEvent, error) {
+	f.reverts++
+	f.gotProject, f.gotID, f.revertWrite = project, eventID, cw
+	if f.revertErr != nil {
+		return nil, f.revertErr
+	}
+	if f.reverted != nil {
+		return f.reverted, nil
+	}
+	return &agentdb.ConfigEvent{ID: "ce-new", Project: project, Seq: 99}, nil
 }
 
 func (f *fakeConfigLog) ListConfigEvents(_ context.Context, q agentdb.ConfigEventQuery) ([]*agentdb.ConfigEvent, error) {
 	f.call++
 	f.got = q
 	return f.out, f.err
+}
+
+func (f *fakeConfigLog) GetConfigEvent(_ context.Context, project, id string) (*agentdb.ConfigEvent, error) {
+	f.call++
+	f.gotProject, f.gotID = project, id
+	if f.err != nil {
+		return nil, f.err
+	}
+	for _, ev := range f.out {
+		if ev.ID == id && ev.Project == project {
+			return ev, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %s", agentdb.ErrConfigEventNotFound, id)
 }
 
 func newConfigLogHandlers(t *testing.T, store ConfigLogStore, id IdentityFunc) *Handlers {
@@ -50,11 +86,20 @@ func TestListConfigEvents_QueryPlumbing(t *testing.T) {
 		},
 		{
 			name: "every filter",
-			path: "/agent/config-events?action=worker_prompt_write&actor_worker=email-reviewer&since=1789000000000&until=1789000009999&limit=25&before_seq=42",
+			path: "/agent/config-events?action=worker_prompt_write&actor_worker=email-reviewer&since=1789000000000&until=1789000009999&limit=25&before_seq=42&entity=worker:email-answerer&seq=7",
 			want: agentdb.ConfigEventQuery{
 				Project: "acme", Action: "worker_prompt_write", ActorWorker: "email-reviewer",
-				Since: 1789000000000, Until: 1789000009999, Limit: 25, BeforeSeq: 42,
+				Entity: "worker:email-answerer",
+				Since:  1789000000000, Until: 1789000009999, Limit: 25, BeforeSeq: 42, Seq: 7,
 			},
+		},
+		{
+			// T21: the store has supported this filter since J2 and nothing
+			// exposed it, so the browser could ask "what changed" but never
+			// "what happened to this worker".
+			name: "entity alone",
+			path: "/agent/config-events?entity=schedule:sch-7",
+			want: agentdb.ConfigEventQuery{Project: "acme", Entity: "schedule:sch-7"},
 		},
 		{
 			name: "action prefix passes through verbatim",
@@ -331,4 +376,139 @@ func TestListConfigEvents_FiltersAndPaging_LivePG(t *testing.T) {
 func itoa(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// ---------------------------------------------------------------------------
+// T21 — one record by id.
+// ---------------------------------------------------------------------------
+
+func TestGetConfigEvent(t *testing.T) {
+	rows := []*agentdb.ConfigEvent{
+		{ID: "ce-1", Project: "acme", Seq: 4, Action: agentdb.ActionWorkerCreate},
+		{ID: "ce-2", Project: "other", Seq: 9, Action: agentdb.ActionWorkerCreate},
+	}
+
+	t.Run("returns the record", func(t *testing.T) {
+		store := &fakeConfigLog{out: rows}
+		h := newConfigLogHandlers(t, store, identityFor("acme"))
+		rec := do(h, http.MethodGet, "/agent/config-events/ce-1", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		var got agentdb.ConfigEvent
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.ID != "ce-1" || got.Seq != 4 {
+			t.Errorf("got %+v", got)
+		}
+		if store.gotProject != "acme" {
+			t.Errorf("project came from %q, not the token", store.gotProject)
+		}
+	})
+
+	// Another project's record is NOT FOUND, never forbidden: a distinguishable
+	// refusal would let a caller learn that an id is real.
+	t.Run("another project's record is a 404", func(t *testing.T) {
+		h := newConfigLogHandlers(t, &fakeConfigLog{out: rows}, identityFor("acme"))
+		rec := do(h, http.MethodGet, "/agent/config-events/ce-2", "")
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		missing := do(h, http.MethodGet, "/agent/config-events/nope", "")
+		if missing.Body.String() != rec.Body.String() {
+			t.Errorf("a foreign record and a missing one must read identically:\n %q\n %q",
+				rec.Body.String(), missing.Body.String())
+		}
+	})
+
+	t.Run("no config log configured is a 501", func(t *testing.T) {
+		h := newHandlers(t, Config{Runner: stubRunner{}, Store: stubStore{}, Identity: identityFor("acme")})
+		if rec := do(h, http.MethodGet, "/agent/config-events/ce-1", ""); rec.Code != http.StatusNotImplemented {
+			t.Fatalf("status=%d", rec.Code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// T23 — the revert route.
+// ---------------------------------------------------------------------------
+
+func TestRevertConfigEvent(t *testing.T) {
+	t.Run("performs the revert and returns the record it wrote", func(t *testing.T) {
+		store := &fakeConfigLog{}
+		h := newConfigLogHandlers(t, store, identityFor("acme"))
+		rec := do(h, http.MethodPost, "/agent/config-events/ce-1/revert", `{"rationale":"it got worse"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		if store.reverts != 1 || store.gotID != "ce-1" || store.gotProject != "acme" {
+			t.Fatalf("store call: reverts=%d id=%q project=%q", store.reverts, store.gotID, store.gotProject)
+		}
+		if store.revertWrite.Rationale != "it got worse" {
+			t.Errorf("rationale did not reach the store: %+v", store.revertWrite)
+		}
+		// A human edit carries no actor worker — the freeze blocks agents, not
+		// people, and this route is the human path.
+		if store.revertWrite.Worker != "" {
+			t.Errorf("a human revert must carry no actor worker: %q", store.revertWrite.Worker)
+		}
+		var got agentdb.ConfigEvent
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if got.ID != "ce-new" {
+			t.Errorf("want the compensating record back, got %+v", got)
+		}
+	})
+
+	// The store's refusal reaches the human VERBATIM: it names the records in
+	// the way, and a paraphrase would drop the part they need to act on.
+	t.Run("a refusal is a 409 in the store's own words", func(t *testing.T) {
+		store := &fakeConfigLog{revertErr: fmt.Errorf(
+			"%w: worker_prompt_write (seq 12) is not the newest change to worker:answerer — "+
+				"worker_prompt_write (seq 14) came after it", agentdb.ErrRevertRefused)}
+		h := newConfigLogHandlers(t, store, identityFor("acme"))
+		rec := do(h, http.MethodPost, "/agent/config-events/ce-1/revert", `{"rationale":"back"}`)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		if !strings.Contains(rec.Body.String(), "seq 14") {
+			t.Errorf("the intervening record must survive into the response: %q", rec.Body.String())
+		}
+	})
+
+	t.Run("another project's record is a 404", func(t *testing.T) {
+		store := &fakeConfigLog{revertErr: fmt.Errorf("%w: ce-1", agentdb.ErrConfigEventNotFound)}
+		h := newConfigLogHandlers(t, store, identityFor("acme"))
+		rec := do(h, http.MethodPost, "/agent/config-events/ce-1/revert", `{}`)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("status=%d", rec.Code)
+		}
+		// An unrouted path is ALSO a 404, so the status alone proves nothing:
+		// the store having been reached is what says the route exists.
+		if store.reverts != 1 {
+			t.Fatalf("the route did not reach the store — this 404 is the mux, not the answer")
+		}
+	})
+
+	// The reason is optional on the wire — the store fills in a default that
+	// names what was reverted, which is more use than an empty cell.
+	t.Run("an empty body is accepted", func(t *testing.T) {
+		store := &fakeConfigLog{}
+		h := newConfigLogHandlers(t, store, identityFor("acme"))
+		if rec := do(h, http.MethodPost, "/agent/config-events/ce-1/revert", ""); rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body)
+		}
+		if store.reverts != 1 {
+			t.Errorf("the store was not reached")
+		}
+	})
+
+	t.Run("no config log configured is a 501", func(t *testing.T) {
+		h := newHandlers(t, Config{Runner: stubRunner{}, Store: stubStore{}, Identity: identityFor("acme")})
+		if rec := do(h, http.MethodPost, "/agent/config-events/ce-1/revert", `{}`); rec.Code != http.StatusNotImplemented {
+			t.Fatalf("status=%d", rec.Code)
+		}
+	})
 }

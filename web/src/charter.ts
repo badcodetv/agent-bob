@@ -107,8 +107,11 @@ export function coerceCharterEffects(raw: unknown): CharterEffects {
   return {
     architect_name: str(r.architect_name, DEFAULT_ARCHITECT_NAME),
     architect_cron: str(r.architect_cron, DEFAULT_ARCHITECT_CRON),
-    // Absent or garbled reads as NOT enabled. The schedule ships disabled by
-    // design, so "off" is both the safe reading and the true one.
+    // Absent or garbled reads as NOT enabled — the safe direction. A charter
+    // now creates an ENABLED daily schedule, so this field is the one that
+    // tells the human a loop is about to start changing their project by
+    // itself; guessing "true" from a garbled value would put that sentence on
+    // screen without the server having said it.
     schedule_enabled: r.schedule_enabled === true,
     subscription_event: str(r.subscription_event),
     memory_seed_labels: strings(r.memory_seed_labels),

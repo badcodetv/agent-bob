@@ -206,3 +206,81 @@ describe('dirty tracking', () => {
     )
   })
 })
+
+describe('the project-wide briefing (B1)', () => {
+  const explainIt = async () => {
+    await userEvent.type(screen.getByLabelText(/why\?/i), 'adding the rulebook')
+  }
+
+  it('shows what the project already has', async () => {
+    stored = { ...stored, briefing: ['name=label-registry'] }
+    render(<ProjectSettingsPage />)
+    expect(await screen.findByDisplayValue('name=label-registry')).toBeInTheDocument()
+  })
+
+  // Two blast-radius sentences, and both matter: one field here edits every
+  // worker's prompt at once, and a chat receives none of it — which nothing
+  // else in the console says, and which is invisible when it bites.
+  it('says who gets these, and who does not', async () => {
+    render(<ProjectSettingsPage />)
+    const panel = await screen.findByTestId('project-briefing')
+    expect(panel.textContent).toMatch(/every job in this project/i)
+    expect(panel.textContent).toMatch(/chat sessions do not receive these/i)
+  })
+
+  it('adds and removes entries, and sends them', async () => {
+    render(<ProjectSettingsPage />)
+    await screen.findByTestId('project-briefing')
+
+    await userEvent.click(screen.getByRole('button', { name: /add a selector/i }))
+    await userEvent.type(screen.getByLabelText(/^briefing selector 1$/i), 'name=label-registry')
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
+  })
+
+  it('removes a row', async () => {
+    stored = { ...stored, briefing: ['name=label-registry', 'kind=lesson'] }
+    render(<ProjectSettingsPage />)
+    await screen.findByDisplayValue('kind=lesson')
+
+    await userEvent.click(screen.getByRole('button', { name: /^remove briefing selector 2$/i }))
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
+  })
+
+  it('refuses an unparseable selector with the engine own words, and blocks the save', async () => {
+    render(<ProjectSettingsPage />)
+    await screen.findByTestId('project-briefing')
+
+    await userEvent.click(screen.getByRole('button', { name: /add a selector/i }))
+    fireEvent.change(screen.getByLabelText(/^briefing selector 1$/i), {
+      target: { value: 'kind in (a' },
+    })
+    await explainIt()
+
+    expect(await screen.findByText(/unbalanced/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save settings/i })).toBeDisabled()
+    expect(puts()).toHaveLength(0)
+  })
+
+  // PUT is whole-object: before this field existed, every unrelated settings
+  // save wrote briefing: null and wiped it.
+  it('sends the briefing on a save that had nothing to do with it', async () => {
+    stored = { ...stored, briefing: ['name=label-registry'] }
+    render(<ProjectSettingsPage />)
+    await screen.findByLabelText(/base image/i)
+
+    await userEvent.type(screen.getByLabelText(/base image/i), '2')
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
+  })
+})

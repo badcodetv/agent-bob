@@ -70,16 +70,70 @@ export async function loginUI(page: Page): Promise<void> {
 }
 
 /**
- * Logs in and creates a brand-new project through the picker's wildcard grant,
- * landing in the workspace. Returns the project id so a spec can assert against
- * the API and the config log for the same project.
+ * Logs in and opens a brand-new, EMPTY project, landing on the Desk.
+ *
+ * It does NOT go through the picker's create form any more, and that is the
+ * point. Since the onboarding change, creating a project through the UI starts
+ * an interview: it applies `onboarding@v1` and provisions a container for the
+ * interviewer session. Thirteen specs that only wanted a namespace would each
+ * burn a container and a host port, and `port-pool.stack.spec.ts` runs against
+ * a deliberately narrowed pool.
+ *
+ * So this mints the project token through the API the shell itself uses
+ * (`POST /auth/project-token`, the wildcard grant), writes it into the shell's
+ * own localStorage state, and reloads. The project ends up genuinely empty —
+ * no interviewer, no session, no container — which is what every caller of
+ * this helper was asserting against before onboarding existed.
+ *
+ * Use `openOnboardingProject` when the interview is what you are testing.
  */
 export async function openFreshProject(page: Page, prefix = 'e2e-ui'): Promise<string> {
   const project = uniqueProject(prefix)
   await loginUI(page)
-  await page.getByTestId('new-project-input').fill(project)
-  await page.getByTestId('new-project-create').click()
+  await page.evaluate(async (id) => {
+    const KEY = 'agent-orange-auth'
+    const state = JSON.parse(localStorage.getItem(KEY) ?? '{}') as {
+      loginToken?: string
+      projects?: { id: string; token: string }[]
+      selectedProject?: string | null
+    }
+    const res = await fetch('/auth/project-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: state.loginToken, project: id }),
+    })
+    if (!res.ok) throw new Error(`project-token for ${id}: HTTP ${res.status}`)
+    const minted = (await res.json()) as { id: string; token: string }
+    state.projects = [...(state.projects ?? []).filter((p) => p.id !== minted.id), minted]
+    state.selectedProject = minted.id
+    localStorage.setItem(KEY, JSON.stringify(state))
+  }, project)
+  await page.reload()
   await expect(page.getByTestId('session-sidebar')).toBeVisible({ timeout: 30_000 })
+  openedProjects.push(project)
+  return project
+}
+
+/**
+ * Logs in and creates a project through the picker, goal and all, landing on
+ * the ONBOARDING screen with a real interview session starting behind it.
+ *
+ * This is the slow path on purpose: it provisions a container. Use it only in
+ * a spec whose subject is onboarding itself.
+ */
+export async function openOnboardingProject(
+  page: Page,
+  prefix: string,
+  goal: string,
+): Promise<string> {
+  const project = uniqueProject(prefix)
+  await loginUI(page)
+  await page.getByTestId('new-project-input').fill(project)
+  // By label — see the note in stack.spec.ts: the goal box is multiline, and
+  // its test id does not land on the control the human types into.
+  await page.getByLabel('What is this project for?').fill(goal)
+  await page.getByTestId('new-project-create').click()
+  await expect(page.getByTestId('onboarding-rail')).toBeVisible({ timeout: 30_000 })
   openedProjects.push(project)
   return project
 }

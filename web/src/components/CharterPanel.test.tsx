@@ -34,7 +34,7 @@ function validCharter(overrides: Record<string, unknown> = {}): CharterCurrent {
     summary_of_effects: {
       architect_name: 'architect',
       architect_cron: '0 9 * * 1',
-      schedule_enabled: false,
+      schedule_enabled: true,
       subscription_event: 'architect.run',
       memory_seed_labels: ['kind=project-goal,name=project-goal'],
       settings_fields: ['system_prompt', 'briefing'],
@@ -61,9 +61,21 @@ describe('CharterPanel', () => {
     expect(rules.textContent).not.toContain('…')
   })
 
-  it('says the schedule starts switched off, and reads the cron as a phrase', () => {
+  // The one line that says a loop will change the project on a clock, by
+  // itself. A human who approves without reading this is the failure mode the
+  // whole gate exists to prevent.
+  it('says the schedule starts running, and reads the cron as a phrase', () => {
     render(<CharterPanel charter={validCharter()} onApprove={vi.fn()} />)
     expect(screen.getByText('every Monday at 09:00')).toBeTruthy()
+    expect(screen.getByText(/runs on this schedule from now on/)).toBeTruthy()
+    expect(document.body.textContent).toMatch(/without asking/i)
+    expect(document.body.textContent).toMatch(/reverted from the changelog/i)
+  })
+
+  it('says the opposite when the server reports the schedule is off', () => {
+    const off = validCharter()
+    off.summary_of_effects!.schedule_enabled = false
+    render(<CharterPanel charter={off} onApprove={vi.fn()} />)
     expect(screen.getByText(/switched off/)).toBeTruthy()
   })
 

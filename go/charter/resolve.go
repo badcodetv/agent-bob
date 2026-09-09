@@ -38,9 +38,12 @@ const ArchitectRunInput = "Scheduled review: run your architect loop from step 0
 // It produces, and deliberately nothing else:
 //
 //   - ONE worker, the architect, carrying orgprompts.Architect().
-//   - ONE schedule at the charter's cadence, DISABLED (Decision C5): a
-//     freshly-approved charter must not start a daily self-revising loop
-//     before a human has watched it run once.
+//   - ONE schedule at the charter's cadence, ENABLED. This is the product:
+//     approving a charter starts a loop that will change the project on a
+//     clock, by itself, without asking. It shipped disabled through the build
+//     (Decision C5) so that half-built code could not run; T25 turned it on.
+//     Read the operator documentation before deciding that is what you want —
+//     the loop has no mechanical brake, and revert is the entire control.
 //   - ONE subscription on architect.run, which is how "Run the architect now"
 //     reaches it. It has to be an event and not a chat: BuildBriefingSections
 //     runs only inside ComposeJob on the dispatch path, so opening a chat
@@ -103,9 +106,11 @@ func Resolve(c *Charter) (*topology.Bundle, error) {
 			Worker: name,
 			Cron:   cron,
 			Input:  ArchitectRunInput,
-			// Disabled: see Decision C5 above. T25 is the ticket that turns
-			// it on, and the console's toggle is how an operator does.
-			Enabled: false,
+			// ON. A charter that produced a switched-off architect would be a
+			// charter that did nothing until somebody found the schedule
+			// editor — and the architect is the entire point of the charter.
+			// Turning it back off is one toggle on the worker's Triggers tab.
+			Enabled: true,
 		}},
 		SettingsPatch: &agentdb.ProjectSettings{
 			SystemPrompt: projectBackground(c),

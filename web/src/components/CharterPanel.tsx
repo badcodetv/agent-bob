@@ -116,15 +116,29 @@ export default function CharterPanel({
             <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
               <Chip size="small" label={c.architect_name} />
               <Chip size="small" variant="outlined" label={describeCharterCadence(c.architect_cron)} />
-              {/* The schedule ships off. Saying so here is the difference
-                  between a human expecting a daily loop and getting one. */}
-              {effects !== null && !effects.schedule_enabled && (
-                <Chip size="small" variant="outlined" color="default" label="scheduled runs start switched off" />
+              {/* What approving actually starts. This is the one line on the
+                  screen that says a loop will change the project on a clock,
+                  by itself — and the difference between a human expecting
+                  that and being surprised by it. */}
+              {effects !== null && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={effects.schedule_enabled ? 'warning' : 'default'}
+                  label={
+                    effects.schedule_enabled
+                      ? 'runs on this schedule from now on'
+                      : 'scheduled runs start switched off'
+                  }
+                />
               )}
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Approving this creates the architect and nothing else. It decides what workers this
-              project needs, and you can run it whenever you like.
+              Approving this creates the architect and nothing else — it decides what workers this
+              project needs, and creates them itself.
+              {effects?.schedule_enabled === true
+                ? ' From then on it reviews the project on the schedule above and makes changes without asking. Every change it makes can be reverted from the changelog, and the schedule itself can be switched off on the architect\u2019s Triggers tab.'
+                : ' You can run it whenever you like.'}
             </Typography>
           </Box>
         )}

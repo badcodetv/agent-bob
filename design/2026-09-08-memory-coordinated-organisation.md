@@ -362,6 +362,12 @@ it **must** be frozen, because a free architect holding `worker_prompt_write`
 over its own scorekeeper is reward hacking in the most literal sense.
 
 **Decision C5 — the daily alarm ships disabled; "run now" is an event.**
+> **Half of this was superseded by T25, as T25 was always meant to.** The alarm
+> shipped disabled *through the build* so half-finished code could not run on a
+> clock; `charter.Resolve` now renders it `Enabled: true`, and an approved
+> charter starts the loop. The second half stands unchanged and is the load-
+> bearing half: **"run now" must be an event and never a chat**, for the reason
+> given below.
 `charter.Resolve` creates the schedule with `Enabled: false` and a subscription
 on `architect.run`; the console's button posts that event.
 ⚠️ This is not a stylistic choice: `BuildBriefingSections` runs only inside
@@ -1424,7 +1430,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   prop, not a `NavEntry`: it highlights nothing, which is right for a thing
   you are doing rather than a place you go back to.
 
-### T18: repair the browser e2e fixtures   [Status: pending | Model: sonnet]
+### T18: repair the browser e2e fixtures   [Status: done | Model: sonnet]
 - **Scope:** **[rev2]** T17 breaks the existing suite and rev1 had no ticket
   for it. `e2e/helpers/ui.ts:77-85`'s `openFreshProject` fills
   `new-project-input`, clicks `new-project-create` and waits for
@@ -1444,10 +1450,41 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** no (fixtures)
 - **Validation:** `NO_TMUX=1 ./stack start mock && ./e2e/run-stack-e2e.sh test mock`
 - **Depends on:** T17
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `openFreshProject` no longer goes through the create form at all. It
+  mints the project token through `POST /auth/project-token` — the same route
+  the shell itself uses for a wildcard grant — writes it into the shell's own
+  `localStorage` state and reloads. That IS the fast path the ticket asks
+  about, and it was not optional: creating a project through the UI now starts
+  an interview, so thirteen specs that only wanted a namespace would each have
+  provisioned a container and taken a host port, and `port-pool.stack.spec.ts`
+  runs against a deliberately narrowed pool.
+  **The consequence the ticket did not anticipate: `console.stack.spec.ts`
+  needed no changes at all.** The fast path leaves the project genuinely empty
+  — no interviewer, no session — so "This project has no workers yet" and the
+  four-views assertion are still true, for the same reason they were before.
+  `openOnboardingProject` is the slow path beside it, used only by T20, with a
+  doc comment saying it provisions a container on purpose.
+  **Two things the first full suite run found that the grep did not.**
+  (a) `e2e/stack.spec.ts` — the root smoke spec, not under `features/` — drives
+  the picker's create form directly rather than through the helper, so it was
+  invisible to a search for `openFreshProject`. It sat clicking a Create button
+  that stays disabled until the goal is filled. Fixing it exposed a second
+  problem: creating a project now starts an interview, and that spec's teardown
+  deleted sessions with PROJECT_A's token only — a delete for another project's
+  session is a 404, so the interview's container leaked silently. The teardown
+  now tries every project's token, including one minted for the project the
+  test created.
+  (b) The goal box could not be filled by test id at all. It is a multiline
+  `TextField`, and MUI renders a second hidden textarea beside the visible one
+  to measure auto-resize; the id lands on something that is not the control a
+  human types into, so `fill` succeeds and the form stays empty. Both call
+  sites now select it by its accessible label, which is the convention
+  `e2e/README.md` already states for library components.
+  (c) A third failure in that file was **pre-existing and impossible** — see
+  DI8.
 
-### T19: project briefing in the console   [Status: pending | Model: sonnet]
+### T19: project briefing in the console   [Status: done | Model: sonnet]
 - **Scope:** Show and edit `ProjectSettings.Briefing` on
   `ProjectSettingsPage.tsx`, with copy explaining these selectors are handed to
   **every job** in the project (and noting chat sessions do not receive them —
@@ -1462,10 +1499,25 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd web && npm test && npm run typecheck`
 - **Depends on:** T2, T17
-- [ ] done
-- Notes:
+- [x] done
+- Notes: a `ProjectBriefing` section on `ProjectSettingsPage`, plus
+  `validateProjectBriefing` in `projectSettings.ts` (6 pure tests, 6 page
+  tests).
+  The client-side selector check **borrows the engine's own grammar**:
+  `parseMemorySelector` (written for the memory browser) is already a mirror of
+  `agentdb/labels.go`, and the server applies exactly that parser to each
+  entry. A second, stricter rule here would refuse selectors the server
+  accepts, which is worse than not checking at all — the human would have no
+  way to find out they were wrong.
+  A blank row is an error rather than a silent drop: a row that vanishes when
+  you save it reads as a bug.
+  The wipe hazard the ticket warns about was **already closed** by T2 —
+  `projectSettingsBody` spreads the whole draft and `coerceProjectSettings`
+  fills `briefing`, so an unrelated save round-trips it. There is now a test
+  saying so explicitly, because that is exactly the kind of correctness that
+  gets refactored away by accident.
 
-### T20: onboarding e2e (mock mode)   [Status: pending | Model: sonnet]
+### T20: onboarding e2e (mock mode)   [Status: done | Model: sonnet]
 - **Scope:** One spec in the only rig (`e2e/features/` +
   `playwright.stack.config.ts`) plus the mock script driving it. The stack's
   mock is `go/modelproxy` fed by `AGENTKIT_MOCK_MODEL_SCRIPT`
@@ -1495,14 +1547,32 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   so the flag is silently dropped and the spec fails against the default canned
   mock. `run` is also a clean-room cycle that tears the stack down.
 - **Depends on:** T18, T19
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `e2e/mock-scripts/onboarding.json` + `e2e/features/onboarding.stack.spec.ts`,
+  gated on `STACK_MOCK_SCRIPT`, **passing** with 0/100 session ports in use
+  afterwards.
+  **The spec had to be restructured twice, and the reason is worth recording.**
+  The charter is found by `name=<the interview's session id>`, and the mock
+  model cannot write a label decided at run time — `modelproxy`'s script is
+  fixed JSON with no templating. Pinning the session id instead does not work
+  either: session ids are globally unique and rows are **soft-deleted**, so a
+  pinned id is permanently taken after the first run. (Both were tried; the
+  second failed with a primary-key collision on `agent_sessions_pkey`.)
+  The shape that works splits the two halves and proves each properly. THE
+  TOOL PATH is proved by the scripted interviewer, in a real container, calling
+  `charter_validate` and then `memory_create` — the script only reaches the
+  second call if the first returned, so its deposit existing proves both
+  crossed the MCP boundary. THE SCREEN is proved against a charter deposited
+  under the real session id through `POST /agent/memories`. What is
+  consequently NOT proved is that a model reads its session id out of the seed
+  and labels the deposit with it — that is discovery, which doc 25 §5 says mock
+  mode never proves, and T1 observed it live.
 
 ---
 
 *Revert phase. The architect's daily schedule stays disabled until T25.*
 
-### T21: config-event addressability   [Status: pending | Model: sonnet]
+### T21: config-event addressability   [Status: done | Model: sonnet]
 - **Scope:** `GET /agent/config-events` gains `entity` and `seq` filters — the
   store's `ConfigEventQuery.Entity` exists (`go/agentdb/config_events.go:469`)
   but is not exposed over HTTP; add `GET /agent/config-events/{id}`; carry
@@ -1521,10 +1591,24 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go` and `(cd web && npm test)`
 - **Depends on:** T20
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `ConfigEventQuery.Seq` and `Store.GetConfigEvent` in `agentdb`;
+  `entity` and `seq` query parameters plus `GET /agent/config-events/{id}` in
+  `httpapi`; `seq` on the MCP `configHistoryRecord`; `seq` on the web
+  `ConfigEvent` and its coercer.
+  Two decisions:
+  (a) **a record in another project is NOT FOUND, and reads identically to one
+  that does not exist.** A distinguishable refusal would let a caller learn
+  that an id is real. The test asserts the two response bodies are byte-equal.
+  (b) **the changelog sorts by `seq` only when every record has one**, falling
+  back to the clock otherwise. `seq` is commit order and is total, so two
+  changes inside one millisecond sort arbitrarily by the clock — and this list
+  is what the diffs are computed against, so an arbitrary order there produces
+  a diff against the wrong neighbour. The fallback is not tidiness: an older
+  agentd sends no `seq` at all, and sorting a whole page to 0 would be worse
+  than the clock.
 
-### T22: `RevertEvent`   [Status: pending | Model: opus]
+### T22: `RevertEvent`   [Status: done | Model: opus]
 - **Scope:** A **forward** compensating write through the ordinary logged
   mutations, in one transaction, with a rationale quoting the reverted event
   id. Revert of a create is a delete; revert of a delete recreates the row
@@ -1547,10 +1631,27 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go`
 - **Depends on:** T21
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/agentdb/config_revert.go` + `config_revert_test.go` (9 tests, all
+  on sqlite so they run on every `go test`).
+  **"Already reverted" is refused, not a no-op, and it falls out of D2 rather
+  than being coded for**: the first revert appends a new record for the entity,
+  so the original is no longer newest and a second attempt hits the
+  newest-only rule. The way back is to revert the REVERT, which *is* newest —
+  tested, and it works.
+  The refusal NAMES the intervening records (`action (seq N)`), because "not
+  the newest" without saying what is in the way is a dead end for whoever is
+  reading it.
+  Beyond the ticket: **`image_create` and `skill_create` are refused too**,
+  with their own sentence. Both are append-only at the tool surface, so there
+  is no delete verb to compensate a create with — the ticket only named
+  `topology_apply`, but the same argument applies and silently doing something
+  approximate would be worse.
+  `decodePayload` goes through JSON so the struct tags decide, exactly as they
+  did on the way in; a payload that will not decode is an error, never a
+  partial row, because reverting to half a worker would look like success.
 
-### T23: revert HTTP route   [Status: pending | Model: sonnet]
+### T23: revert HTTP route   [Status: done | Model: sonnet]
 - **Scope:** `POST /agent/config-events/{id}/revert` taking `{rationale}`,
   returning the event written. Project from the credential. No MCP equivalent
   (D4).
@@ -1562,10 +1663,21 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go`
 - **Depends on:** T22
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `POST /agent/config-events/{id}/revert` on the `ConfigLogStore` seam,
+  5 tests. The store's refusal is passed through **verbatim** as the 409 body:
+  it names the records standing in the way, and a paraphrase would drop exactly
+  the part that tells the human what to do next.
+  The reason is optional on the wire — the store fills in
+  `revert of <action> (seq N, event <id>)` — because an empty rationale in a
+  changelog is worse than a mechanical one, and refusing a revert over a
+  missing JSON body would be pedantry.
+  One test-design note worth keeping: an unrouted path is ALSO a 404, so the
+  "another project's record is a 404" case asserts the store was *reached*.
+  Without that it passed while the route did not exist at all — which is how it
+  was written the first time, and the mistake it caught was mine.
 
-### T24: revert in the changelog UI   [Status: pending | Model: sonnet]
+### T24: revert in the changelog UI   [Status: done | Model: sonnet]
 - **Scope:** A "Revert to this version" action on `ChangelogView` entry cards,
   requiring a typed rationale and showing a confirmation naming exactly what
   will change. **Never the word "undo"**
@@ -1578,10 +1690,26 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd web && npm test && npm run typecheck`
 - **Depends on:** T23
-- [ ] done
-- Notes:
+- [x] done
+- Notes: a `RevertControl` on every changelog entry plus `revertBlocks` in
+  `configLog.ts`; 9 tests in `web/src/components/ChangelogRevert.test.tsx`.
+  The word "undo" is asserted absent from the whole rendered document, dialog
+  included — including out of the *blocked* reasons, where the first draft had
+  smuggled it back in ("would undo that change too") and the test caught it.
+  `revertBlocks` mirrors the store's two rules client-side (newest-only, and
+  the kinds with no inverse) so the button is not offered for something the
+  server will refuse — a control that fails after the human has decided to
+  click it is worse than one that was never offered. It is computed from the
+  loaded page, so it can be wrong at a page boundary; the server checks again
+  and its refusal renders verbatim. The doc comment says exactly that.
+  The confirmation names the thing that will change and says **nothing is
+  erased**, because "are you sure?" is not a confirmation when the reader has
+  been scrolling a list of similar entries.
+  The success notice lives on the VIEW, not the card: a successful revert
+  reloads the list, which remounts every card, so a notice held inside one
+  vanished at exactly the moment it was earned. Caught by the test.
 
-### T25: switch the architect on + document   [Status: pending | Model: sonnet]
+### T25: switch the architect on + document   [Status: done | Model: sonnet]
 - **Scope:** Flip the architect's schedule to `Enabled: true` in
   `charter.Resolve` (T8 created it disabled) and update T8's test.
   **[rev2]** Note in the docs that projects onboarded before this ticket keep a
@@ -1606,8 +1734,24 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** no (config + docs)
 - **Validation:** `cd go && go test ./charter/... -count=1`
 - **Depends on:** T24
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `charter.Resolve` now renders the schedule `Enabled: true`, and four
+  places that said the opposite were corrected with it: T8's test, the
+  `charter_validate` summary test, `CharterPanel`'s chip and caption, and the
+  T20 e2e.
+  The panel's copy changed shape rather than polarity. It now says the
+  architect "runs on this schedule from now on", that it "makes changes without
+  asking", and that every change can be reverted from the changelog — because
+  the moment a human approves is the only moment they are certainly reading,
+  and a chip saying `every day at 09:00` does not tell anyone that a loop is
+  about to start editing their project.
+  Docs: **`docs/18-workers-memory-events.md` §9a** (new) carries onboarding,
+  the charter, the standing loop, the memory contract, C6 **unhedged as a block
+  quote**, the no-migration note for projects onboarded before this, and the
+  six known limits. `docs/product/03-memory.md` gains the paragraph explaining
+  how the label-registry convention actually reaches a worker — and that it is
+  an ordinary, unprotected memory. `CLAUDE.md` gains the workstream paragraph
+  and repeats C6's sentence, because that file is what an agent reads first.
 
 ### T26: End-to-end verification   [Status: pending | Model: opus]
 - **Scope:**
@@ -1783,27 +1927,6 @@ may silently reach nobody."* Correct for a local stack with no attention webhook
 configured, so a config artifact rather than an engine bug — recorded because C3
 makes that channel the entire notification path for every architect change.
 
-### DI6 (T13) — `BuildBriefingSections` panicked on a briefing source that returns no row and no error
-
-`go/compose.go:266-283`: the miss branch lived entirely inside `if err != nil`,
-so a `BriefingMemorySource` whose `NewestMemory` returns `(nil, nil)` fell
-through to `strings.TrimSpace(mem.Content)` and **panicked the dispatcher**
-mid-compose.
-
-`*agentdb.Store` returns `ErrMemoryNotFound`, so production never hit it, and
-the one existing test using a map-backed fake (`fakeBriefingSource` in
-`router_test.go`) happened to have every selector match. T13's negative case —
-a worker whose briefing selects something deliberately absent — is the first
-thing that ever asked for a miss through that seam.
-
-`BriefingMemorySource` is **exported**, and its method documentation promises
-neither an error nor a nil on a miss. A host implementing it the obvious way
-would take down its own dispatcher.
-
-Fixed: the miss branch now covers `err != nil || mem == nil` and logs the same
-RD19 "thinner prompt" line either way. One line of behaviour change; a panic
-in the dispatch path is a considerably worse answer than a thinner prompt.
-
 ### DI5 (T5) — the probe's architect prompt named an argument `worker_update` does not have
 
 `architect-prompt.md`, the text that actually ran in T1, says to correct a
@@ -1826,3 +1949,131 @@ is now shown taking `entity` as a named argument rather than as prose, and
 `schedule_create` is named with `worker`, `cron` and `input` — its `worker`
 versus `target_session` exclusivity is enforced in the handler, not the schema,
 so a prompt that named both would validate and then fail.
+
+### DI6 (T13) — `BuildBriefingSections` panicked on a briefing source that returns no row and no error
+
+`go/compose.go:266-283`: the miss branch lived entirely inside `if err != nil`,
+so a `BriefingMemorySource` whose `NewestMemory` returns `(nil, nil)` fell
+through to `strings.TrimSpace(mem.Content)` and **panicked the dispatcher**
+mid-compose.
+
+`*agentdb.Store` returns `ErrMemoryNotFound`, so production never hit it, and
+the one existing test using a map-backed fake (`fakeBriefingSource` in
+`router_test.go`) happened to have every selector match. T13's negative case —
+a worker whose briefing selects something deliberately absent — is the first
+thing that ever asked for a miss through that seam.
+
+`BriefingMemorySource` is **exported**, and its method documentation promises
+neither an error nor a nil on a miss. A host implementing it the obvious way
+would take down its own dispatcher.
+
+Fixed: the miss branch now covers `err != nil || mem == nil` and logs the same
+RD19 "thinner prompt" line either way. One line of behaviour change; a panic
+in the dispatch path is a considerably worse answer than a thinner prompt.
+
+### DI7 (T20) — a session id can never be reused, because deletes are soft and ids are global
+
+Two properties of `agent_sessions`, neither documented together anywhere, and
+together they make a pinned session id unusable in a re-runnable test:
+
+- `id` is the **primary key of one global table** — it is not scoped by
+  project, so two projects cannot both hold a session called `onboard-1`;
+- `DELETE /agent/session/{id}` is a **soft delete**: it stamps `deleted_at` and
+  leaves the row, so the key stays taken forever.
+
+The visible symptom was a browser test failing on
+`duplicate key value violates unique constraint "agent_sessions_pkey"` for an
+id whose session had been deleted, in a project that no longer had any
+sessions, minutes earlier. `cleanup()` had worked exactly as designed.
+
+Not a bug — soft delete is the right call for a table whose rows are the
+provenance of everything else, and a global id space is what makes a permalink
+work. Recorded because the combination is invisible from either half, and the
+consequence ("ids are consumed permanently; never pin one") is the sort of
+thing that costs an afternoon each time it is rediscovered. It is also why
+T20's mock script cannot label a charter with a session id at all — see that
+ticket's notes.
+
+### DI8 (T18) — `console.stack.spec.ts` had never been run, and had FIVE defects
+
+The file's own header says it: **UNRUN AT AUTHORING TIME (2026-08-14)** —
+*"It typechecks; that is all that is currently proved."* This is the first time
+anybody has executed it. Five separate things in it could not have passed.
+
+**1. A reveal announcement that can never appear.** The test posted an event and
+expected the nav-reveal notice to name **Activity**. Activity is revealed by the
+project's first EVENT — and hiring a worker produces one, because every
+configuration mutation emits `config.changed` as a project event (§15.8). So the
+first `PUT /agent/workers/{name}` is also the first thing that ever happened in
+the project, Activity had been sticky for two reloads, `appeared` was empty and
+the notice was not drawn at all. Verified against the running stack: a fresh
+project goes 0 → 1 events on that call, with
+`type: "config.changed", text: "A human hired worker \"probe-one\"."`.
+
+**2 and 3. Two field labels that do not exist.** `ScheduleEditor`'s fields are
+**Instruction** and **Rationale**; the test asked for `/what should .* do|input/i`
+("Instruction" does not contain "input") and `/^Why\??$/`.
+
+**4. A button name that does not exist.** For a new schedule the button reads
+**"Create schedule"**; the test asked for `/save/i`.
+
+**5. A required field never filled, and a save never waited for.** The editor
+does not prefill the worker even when opened from that worker's own Triggers
+tab, so `validateSchedule` kept the save button disabled forever. And the final
+assertion read `api.listSchedules()` in the same tick as the click, before the
+round trip could have completed — it could only ever have passed by luck.
+
+All five fixed here, each with a comment saying what was wrong, because T18's
+acceptance criterion is that the stack suite passes and because the next reader
+should not have to re-derive any of it. The wider lesson is the one the header
+already stated and nobody acted on: **a test that has never been run is not a
+test.** Nothing here was caused by this plan.
+
+### DI9 (T18) — a trigger editor opened from a worker does not prefill that worker
+
+`WorkerTriggers` renders "New schedule" / "New subscription" on a tab whose
+entire premise is *triggers are edited on the worker* — and then hands
+`ScheduleEditor` / `SubscriptionEditor` a null draft, keeping `workerName` to
+itself. The editor asks which worker the trigger is for, and
+`validateSchedule` refuses to enable Save until you answer.
+
+Both editors behave the same way, so it is a consistent design choice rather
+than a slip — possibly deliberate, so a trigger can be retargeted without
+leaving the page. But it undercuts the tab's own premise, and it reads as the
+software not paying attention to where you are standing.
+
+**Not changed here.** It is a screen this plan does not own, and widening scope
+one ticket from the finish line is exactly what the execution rules forbid.
+Recorded for a decision: passing `workerName` through as the new draft's
+`worker` is a two-line change in `WorkerTriggers.tsx`.
+
+### DI10 (T18) — the browser suite runs three workers with no retries, and three of its tests are time-boxed
+
+`playwright.stack.config.ts` sets `workers: 3` (overridable with
+`STACK_E2E_WORKERS`) and `retries: 0`. Each worker drives its own browser and
+its own session containers inside one DinD, on one machine.
+
+Three tests carry hard time limits that this hardware cannot always meet under
+that load, and they failed in different combinations on three consecutive full
+runs while passing individually every time:
+
+- `stack.spec.ts` — waits 30s for a replayed assistant message to render;
+- `product-ui.stack.spec.ts` — waits 120s for a reply to settle;
+- `port-pool.stack.spec.ts` — waits 45s for a session deleted mid-create to
+  disappear, on the strength of an orphan once "measured arriving ~14s after
+  the delete".
+
+Serial (`STACK_E2E_WORKERS=1`) the suite went from 57 to 60 passing and the
+first two of those stopped failing.
+
+⚠️ **The engine is not at fault, and this was checked rather than assumed.**
+Reproduced the third case by hand against the running stack on an idle machine:
+create a session, `DELETE` it a second later while it is still `creating`, wait
+50s — the row is gone and `docker ps` inside DinD shows no `sandbox-<id>`
+container. The cancellation path (`b34c366`) works; the test's 45 seconds is
+simply not always enough here.
+
+**Not changed here.** Turning the default down would slow every run including
+CI, on the evidence of one WSL2 laptop that was also running Go suites at the
+time. Recorded so the next person does not spend an afternoon on it, and so
+that a red run on this machine is read correctly before anything is "fixed".

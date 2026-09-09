@@ -710,6 +710,184 @@ Stated plainly because each one will otherwise be discovered the hard way.
 
 ---
 
+## 9a. Onboarding, the charter, and the architect
+
+*(design/2026-09-08-memory-coordinated-organisation.md. Read the warning at the
+end of this section before you approve a charter on a project you care about.)*
+
+### What creating a project now does
+
+Creating a project asks for two things: a name and **a goal**. The goal is not
+decoration and it is not optional — it is the first message of an interview.
+
+1. `onboarding@v1` is applied. One worker, `interviewer`, no triggers.
+2. A **chat** session named `onboard` is created with `persona: "interviewer"`
+   — persona and **not** `worker`, deliberately: `worker` is the identity
+   `emitIdleFinish` requires before it emits `worker.finished`, whose text is
+   the *entire transcript*. An interview created with `worker` set would push
+   its whole conversation, charter JSON included, onto the project event spine
+   where a future archivist's unfiltered subscription would sweep it into
+   memory.
+3. The session is seeded with its own id and the human's goal, the goal
+   verbatim below a rule and attributed to the user — the §6.2.4 boundary,
+   without which a goal reading "ignore your instructions and…" arrives as
+   though the system had said it.
+4. The interview drives at three things: a **goal**, a **measure** ("how would
+   you know, in a month?"), and a first set of **labelling rules**. It calls
+   `charter_validate` before it writes anything, and deposits the charter as an
+   ordinary memory labelled `{kind: "org-charter", name: <the session id>}`.
+
+The interview creates no workers. That is the point: deciding what workers
+should exist is the architect's job, and putting roster design in two places is
+what the design rejected.
+
+### The charter
+
+Six fields, and the first four are required:
+
+| field | |
+| --- | --- |
+| `goal` | what the project is for |
+| `measure` | how you would know in a month |
+| `label_rules` | the vocabulary, and when each label is written |
+| `rationale` | why this charter — the interviewer's commit message |
+| `architect_name` | optional; defaults to `architect` |
+| `architect_cron` | optional; defaults to `0 9 * * *` |
+| `project_background` | optional; context every worker carries |
+
+The console shows it, validates it server-side, and **one approval applies it**.
+The gate is for comprehension, not correctness: nobody is being asked to audit a
+schema, only whether this is what their project is for.
+
+The charter is always deposited **whole**. There is no partial update and no
+edit; revising means writing the complete charter again, and the newest one
+wins. There is also no "finished" signal — the console polls, and the panel
+appears when there is something to show.
+
+`POST /agent/charter/apply` re-reads the **stored** memory rather than anything
+in its body: the interviewer runs inside a container, and a container is the
+untrusted party. In one transaction it writes:
+
+- the **architect** worker, carrying the prompt in `go/orgprompts/architect.md`;
+- a **schedule** at the charter's cadence — **enabled**, see the warning below;
+- a **subscription** on `architect.run`, which is what the console's "Run the
+  architect now" button posts;
+- a **settings patch**: the goal and measure as project background prose, and
+  `briefing: ["name=label-registry"]`;
+- two **memory seeds**: the goal, and the label registry.
+
+Then, outside the transaction, it disables the `interviewer` — otherwise it
+would persist enabled and unwired, and the architect's first reconciliation
+pass would find an orphan worker it is free to rewrite or delete.
+
+### The architect's standing loop
+
+Every run, in order:
+
+0. **Bootstrap.** If the project has no workers but itself and the interviewer,
+   skip the evidence gate entirely, design the initial roster, and create it —
+   **including at least one worker subscribed to `worker.finished` that writes
+   summaries**. Nothing else in this system writes memory on its own; until
+   that worker exists there is no evidence, and every later run would correctly
+   conclude there is nothing to act on, forever.
+1. **What did I change last time?** `config_history`, filtered to itself.
+2. **Did it help?** Write a `kind=architect-verdict` memory — `helped`, `hurt`
+   or `no-signal` — **before** touching anything. A verdict written afterwards
+   is a justification, not a measurement.
+3. **Is there anything new?** Fewer than three new summary/lesson memories, or
+   a last change made minutes ago, means change nothing. The elapsed-time half
+   matters more than the count: the summary-writer is woken by `worker.finished`
+   *including the architect's own*, so a pure count ratchets itself open on
+   evidence the architect manufactured.
+4. **Reconcile.** Briefings exactly; prompts by judgement, **at most one
+   rewrite per run**; new roles wired with a subscription and/or a schedule.
+5. **If anything changed, say so** — `request_human_attention`, act-then-notify,
+   never ask.
+6. **Three no-signal runs in a row** ⇒ say plainly that nothing in the project
+   is writing memory and somebody should either give a worker that job or turn
+   the architect off.
+
+### The memory contract
+
+Two mechanisms carry it, and neither is a vocabulary enforcer — core enforces no
+vocabulary at all (`docs/product/03-memory.md`).
+
+- **The project-wide briefing.** `ProjectSettings.Briefing` is a list of label
+  selectors unioned into *every job's* briefing on top of whatever the worker
+  asks for itself. Onboarding sets it to `name=label-registry`, so the newest
+  version of the project's rulebook is handed to every job with no per-worker
+  configuration. Editing the rules is publishing a new version of one note —
+  no config change at all. Editable on the project settings page.
+- **`kind=rolling-summary, worker=<name>`.** The one briefing section every
+  worker receives automatically. Whoever summarises finished work must write
+  these, one per subject worker, or a summary only reaches the worker it is
+  about if that worker happens to search for it — which, for a fresh
+  conversation with a blank memory, means never.
+
+### ⚠️ The architect has no mechanical brake
+
+Stated the way the design states it, because a softened version would be a
+worse document:
+
+> **The architect's loop has no mechanical brake. Every rule in its prompt is
+> an instruction it may choose to delete. Revert is the entire control, and the
+> failure mode to watch for is the system quietly ceasing to tell you what it
+> is doing.**
+
+Concretely: `worker_prompt_write`'s only guard is `if target.Frozen`
+(`go/cmd/agentd/mcp_management.go`). There is **no self-write check and no
+per-run rate limit anywhere in the engine**. So the architect can rewrite the
+very prompt containing its evidence gate, its one-rewrite cap and its
+notify-on-change clause — after which none of those exist. This was put to the
+operator explicitly alongside the alternatives (refuse self-rewrite in the
+engine; freeze the architect), and the decision was to leave it open and say so
+plainly. It is not a bug and it is not an oversight.
+
+Two things follow for whoever runs this:
+
+- **Read the changelog.** It is written by construction, not by discipline, and
+  a "Revert to this version" action sits on every entry. Reverting is a forward
+  compensating write: nothing is erased, both changes stay in the log, and you
+  can revert the revert.
+- **A quiet architect is the alarm.** The loop is supposed to end every
+  changing run with `request_human_attention`. If it stops telling you what it
+  did, that is the symptom to act on — not a sign that nothing happened.
+
+And it is switched on by default: **a newly approved charter creates an enabled
+daily schedule.** That is the product, and it is a real decision to make on a
+real project. Turning it off is one toggle on the architect's Triggers tab.
+
+**Projects onboarded before this was turned on keep a disabled architect.**
+There is no migration and there will not be one — flipping other people's
+schedules on from a code change is exactly the kind of thing this document
+warns about. The console's schedule editor is how an operator enables one.
+
+### Known limits, all of them deliberate
+
+- **Tools cannot be granted after hire, and the architect cannot discover which
+  tools the project carries.** A worker's MCP config is set when it is created;
+  the architect designs roles without being able to read what the project's
+  images and servers actually offer.
+- **The label registry is unprotected.** It is an ordinary memory. Any worker
+  that can write memory can publish a new version of the rulebook, and the
+  newest wins.
+- **Briefings are newest-ONE-per-selector.** "My last ten summaries" is not
+  expressible as a briefing; it is a `memory_search` call in a prompt.
+- **Chat sessions receive no briefing at all.** Briefings are built inside
+  `ComposeJob` on the dispatch path only. Talking to a worker in the console
+  hands it none of the rulebook — which is why "Run the architect now" posts an
+  `architect.run` event rather than opening a chat.
+- **A project briefing cannot be cleared through a charter.** The settings
+  overlay's convention is zero-means-keep, and a `SelectorList` marshals nil and
+  empty identically, so the distinction cannot survive the preview round-trip.
+  Clear it through `PUT /agent/project-settings` — the project settings page.
+- **Only the newest change to a thing can be reverted.** Payloads are whole
+  rows, so putting an older one back would erase every change made since,
+  silently. The refusal names what is in the way. `topology_apply` records a
+  decision rather than a row and is not individually revertable at all.
+
+---
+
 ## 10. The acceptance loop, if you want to see it work
 
 The scenario the whole design exists to serve (§8.7): two workers, `email-answerer` and

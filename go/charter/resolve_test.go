@@ -56,10 +56,12 @@ func TestResolveProducesExactlyTheArchitect(t *testing.T) {
 	}
 }
 
-// The schedule ships DISABLED (Decision C5). This is the single assertion
-// standing between approving a charter and a self-revising loop running daily
-// before anyone has watched it run once.
-func TestResolveSchedulesTheArchitectButLeavesItOff(t *testing.T) {
+// The schedule ships ON, and that is the product: approving a charter starts a
+// loop that changes the project on a clock, by itself. It was disabled through
+// the build (C5) so half-finished code could not run; T25 turned it on. The
+// assertion is kept sharp because flipping it back would make onboarding
+// silently produce an architect that never runs.
+func TestResolveSchedulesTheArchitectAndTurnsItOn(t *testing.T) {
 	b, err := Resolve(goodCharter())
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -69,8 +71,9 @@ func TestResolveSchedulesTheArchitectButLeavesItOff(t *testing.T) {
 		t.Fatalf("schedules: want 1, got %d", len(b.Schedules))
 	}
 	s := b.Schedules[0]
-	if s.Enabled {
-		t.Error("the architect's schedule MUST render disabled — see Decision C5")
+	if !s.Enabled {
+		t.Error("the architect's schedule must render ENABLED — an approved charter that " +
+			"produces a switched-off architect does nothing until someone finds the schedule editor")
 	}
 	if s.Worker != DefaultArchitect {
 		t.Errorf("schedule worker: want %q, got %q", DefaultArchitect, s.Worker)

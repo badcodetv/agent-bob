@@ -358,6 +358,13 @@ type Endpoints struct {
 	Schedule  string // "/agent/schedules/{id}" (GET, PUT, DELETE)
 	// The config log (§15.10) — read-only; the project comes from the JWT.
 	ConfigEvents string // "GET /agent/config-events"
+	// One record by id — what makes a changelog entry addressable, and what
+	// the revert action names.
+	ConfigEvent string // "GET /agent/config-events/{id}"
+	// The one write on this surface: a FORWARD compensating change (design
+	// §D). No MCP twin (D4) — an architect that could revert would be able to
+	// undo the human who had just corrected it.
+	RevertConfigEvent string // "POST /agent/config-events/{id}/revert"
 	// Attention requests (design B1) — read-only; the project comes from the JWT.
 	AttentionRequests string // "GET /agent/attention-requests"
 	// Memory (§7.6) — the project comes from the JWT, never from the request.
@@ -454,6 +461,8 @@ var DefaultEndpoints = Endpoints{
 	Schedules:          "/agent/schedules",
 	Schedule:           "/agent/schedules/{id}",
 	ConfigEvents:       "GET /agent/config-events",
+	ConfigEvent:        "GET /agent/config-events/{id}",
+	RevertConfigEvent:  "POST /agent/config-events/{id}/revert",
 	AttentionRequests:  "GET /agent/attention-requests",
 	ListMemories:       "GET /agent/memories",
 	CreateMemory:       "POST /agent/memories",
@@ -541,6 +550,8 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.Schedules:         h.Schedules,
 		e.Schedule:          h.Schedule,
 		e.ConfigEvents:      h.ListConfigEvents,
+		e.ConfigEvent:       h.GetConfigEvent,
+		e.RevertConfigEvent: h.RevertConfigEvent,
 		e.AttentionRequests: h.ListAttentionRequests,
 		e.ListMemories:      h.ListMemories,
 		e.ListDatasets:      h.ListDatasets,
