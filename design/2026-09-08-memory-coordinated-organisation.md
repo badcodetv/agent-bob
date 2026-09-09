@@ -898,7 +898,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   `web/src/memories.ts` or `BriefingPreview.tsx`: nothing on the selector side
   needed to change.
 
-### T5: `orgprompts` leaf package + the three prompts   [Status: pending | Model: opus]
+### T5: `orgprompts` leaf package + the three prompts   [Status: done | Model: opus]
 - **Scope:** Create `go/orgprompts`, importing **nothing** from this module,
   with `//go:embed` accessors. **Start from the prompt text T1 preserved** and
   fold in what the probe learned — that handoff is why T1 comes first.
@@ -929,8 +929,33 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** no (prose). The assertions live in T6.
 - **Validation:** `cd go && go build ./... && go test ./orgprompts/... -count=1`
 - **Depends on:** T1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/orgprompts/{prompts.go,interviewer.md,architect.md,registry.md}`
+  plus `prompts_test.go` (6 tests). `architect.md` is T1's
+  `architect-prompt.md` verbatim with the run README's three revisions folded
+  in — elapsed time in STEP 3, the per-worker `worker.finished` filter in
+  STEP 4, and the instrument check — plus a fourth paragraph for DI3 telling
+  the architect to have any summary-writer it creates also write
+  `{kind: "rolling-summary", worker: <subject>}`. STEP 0 and STEP 5 are
+  untouched, as the README asks.
+  **One correction the probe text needed:** it said to fix a briefing with
+  "worker_update, passing briefing". `worker_update`'s schema
+  (`mcp_management.go:542-562`) has no top-level `briefing` — it takes `name`
+  and `fields`, and `briefing` lives inside `fields`. The probe's architect
+  got this right anyway; the prompt was wrong and would have failed T6's
+  argument assertion. Every tool named in either prompt is now named with its
+  real argument names.
+  The data-not-instructions rule gained a sentence saying it holds in a chat
+  too, because a chat session gets no core preamble (B-scope note) — the rule
+  has to live in the prompt or it is absent there.
+  `registry.md` is the *frame* (how `name=`, `retracts=` and the automatic
+  `kind=rolling-summary` section work, plus the starting vocabulary), not the
+  whole note: T8 appends the charter's `label_rules` to it.
+  `interviewer.md`'s worked example is fenced as ```` ```charter ````; a test
+  pins that there is exactly one such fence, so T6 can extract it
+  unambiguously. Verified out-of-band that the example parses through
+  `charter.Parse` and returns zero `charter.Validate` issues — T6 makes that
+  a permanent assertion.
 
 ### T6: the prompt/tool-schema assertions   [Status: pending | Model: sonnet]
 > ⚠️ **Worked OUT OF NUMERIC ORDER — after T10.** It asserts against the
@@ -993,7 +1018,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   name IS the JSON path; a nested schema would need a real path-tracking
   decoder instead.
 
-### T8: `charter.Resolve`   [Status: pending | Model: opus]
+### T8: `charter.Resolve`   [Status: done | Model: opus]
 - **Scope:** Charter → `*topology.Bundle`, pure, leaving `ID`/`Project`/
   timestamps zero for apply to stamp. Produces exactly: the architect worker
   (prompt `orgprompts.Architect()`, briefing including `name=label-registry`);
@@ -1010,10 +1035,29 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go test ./charter/... -count=1 && go vet ./...`
 - **Depends on:** T7, T2
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/charter/resolve.go` + `resolve_test.go` (8 tests). Two constants
+  are exported because three other places need the same strings:
+  `RegistrySelector = "name=label-registry"` and `ArchitectRunInput`.
+  Three choices worth recording:
+  (a) the architect gets `Briefing: ["name=label-registry"]` of its **own**,
+  duplicating the project-wide briefing. `BuildBriefingSections` de-duplicates
+  by selector, so it costs nothing, and it means clearing the project-wide
+  list later cannot silently strip the architect of the rulebook.
+  (b) the settings patch carries goal AND measure as prose, not just the goal.
+  A worker reads its prompt unconditionally and a memory only when handed one;
+  the architect judges itself against the measure every run.
+  (c) the registry seed is `orgprompts.LabelRegistry()` (the frame: `name=`,
+  `retracts=`, the automatic `kind=rolling-summary` section, the starting
+  vocabulary) followed by the charter's `label_rules`. T8's scope said
+  "content from `LabelRules`"; `LabelRules` alone would have shipped a
+  registry that never explains retraction or the one automatic briefing
+  section, which is engine behaviour and not the charter's to state.
+  `Resolve` re-checks `architect_name` and `architect_cron` even though
+  `Validate` covers them — it is reachable from the MCP tool with text a model
+  just wrote, and the alternative is a store error mid-transaction.
 
-### T9: `onboarding@v1` topology   [Status: pending | Model: sonnet]
+### T9: `onboarding@v1` topology   [Status: done | Model: sonnet]
 - **Scope:** A 16th built-in in `go/topology/onboarding.go` following
   `solo.go`. No questions; one worker, `interviewer`, with
   `orgprompts.Interviewer()`, enabled; no subscriptions, no schedules.
@@ -1024,8 +1068,17 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go build ./... && go test ./topology/... -count=1`
 - **Depends on:** T5
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/topology/onboarding.go` + `onboarding_test.go` (4 tests). Exports
+  `topology.OnboardingWorker = "interviewer"`, because the name is needed in
+  three packages (the topology, the session that sets `persona`, and
+  `POST /agent/charter/apply` which disables it under A8) and a string literal
+  in each is how they drift apart. `Questions: nil` — the create-project form
+  already collects name and goal, and the interview's whole job is to ask the
+  rest. No subscription and no schedule: the interview is a chat (A7), so
+  nothing wakes this worker as a job. `topology.List()` now returns 16;
+  nothing anywhere asserts a count, checked. The prompt is asserted
+  byte-identical to `orgprompts.Interviewer()`.
 
 ### T10: MCP `charter_validate`   [Status: pending | Model: sonnet]
 - **Scope:** One new file plus one `mcpSrv.register(...)` line in `main.go`
@@ -1423,6 +1476,56 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - [ ] done
 - Notes:
 
+### T27: `PUT /agent/workers/{name}` must stop wiping omitted fields   [Status: pending | Model: sonnet]
+> Opened out of the original 26 by the orchestrator, from **DI2**, found live
+> during T1. It is not a prerequisite for anything in T5–T26 and is deliberately
+> **not** folded into another ticket's scope; work it when the charter chain is
+> done, or sooner if the console's worker editor is touched first.
+- **Scope:** `PutWorker` (`go/httpapi/workers.go:111-116`) builds a fresh
+  `agentdb.NewWorker` and then assigns `Description`, `SystemPrompt`,
+  `MCPConfig`, `Image` and `Briefing` **unconditionally** from the request
+  body. Any of those five that the body omits is written as its zero value.
+  Installing the probe prompt with `{"system_prompt": …}` during T1 therefore
+  erased the architect's briefing — silently, with a 200 and a read-back echo
+  that looked correct because it echoed what had just been stored.
+  **The defect is inconsistency inside this one handler, not PUT purity.** The
+  other three writable fields — `MaxInstances`, `Enabled`, `Frozen` — are
+  already `*T` in `workerBody` and are already keep-on-absent (`:116-124`). So
+  the route today wipes five fields and preserves three, with nothing saying
+  which is which.
+  **Chosen fix:** make the five pointers too, matching the three that already
+  behave this way. Absent (or JSON `null`) keeps the stored value; an explicit
+  `""`, `{}` or `[]` clears it. On create there is no stored value, so absent
+  is the zero value and nothing changes. This keeps one rule for the whole
+  body and leaves clearing possible, which a plain merge does not.
+  Rejected: (a) leaving the route alone and only round-tripping every field in
+  the console's worker editor — it fixes the console and leaves every API
+  embedder holding the same loaded gun, and `docs/19-embedding.md` points third
+  parties at exactly this route; (b) a blanket merge with no way to clear —
+  `Briefing` then becomes append-only through HTTP.
+  Also: **round-trip every field in the console's worker editor anyway.** A
+  client that sends the whole row is correct under either semantics, and it is
+  the surface an operator actually uses.
+  Out of scope: `PUT /agent/project-settings`, whose identical hazard is
+  already documented (T19's warning) and whose fix is a separate decision — the
+  `project_settings.go:190-205` comment names three pinned consumers.
+- **Files:** modify `go/httpapi/workers.go` (`workerBody` + `PutWorker`),
+  `go/httpapi/workers_test.go`; audit `web/src/components/` for the worker
+  editor's PUT body and any other caller of the route.
+- **Acceptance criteria:** a PUT omitting `briefing` on a worker that has one
+  leaves it intact — asserted by reading the row back from the store, not from
+  the response echo; a PUT sending `"briefing": []` clears it; the same pair of
+  assertions for `system_prompt` and `mcp_config`; creating a worker through
+  PUT is unchanged; `docs/18-workers-memory-events.md` states the rule in one
+  sentence.
+- **TDD:** yes — write the omitted-`briefing` test first and watch it fail
+  against today's handler.
+- **Validation:** `cd go && go build ./... && go test ./httpapi/... -count=1`
+  and, for the console half, `cd web && npm test`
+- **Depends on:** nothing
+- [ ] done
+- Notes:
+
 ---
 
 ## Discovered Issues Log
@@ -1477,8 +1580,12 @@ projects.
 Defensible as PUT semantics, and T19 already carries the identical warning one
 level up for `PUT /agent/project-settings`. The worker-level twin is not
 documented anywhere, and the console's worker editor is where it will bite.
-**Wants a ticket** (not opened here, to avoid expanding scope mid-plan): either
-round-trip every field in the console editor, or make the route a merge.
+**Now ticketed as T27** (opened 2026-09-09 by the orchestrator, after the
+charter chain was clear of it). The chosen fix is neither of the two options
+first sketched here: the five wiped fields become pointers, matching
+`MaxInstances`, `Enabled` and `Frozen`, which are already keep-on-absent in the
+same handler. The real defect is that one handler has two rules and says so
+nowhere.
 
 ### DI3 (T1 probe) — a self-designed archivist does not write T4's label
 
@@ -1490,9 +1597,42 @@ cannot reach an archivist the architect authors itself, which A1 makes the
 normal case. Worth reconsidering whether the selector should follow the
 convention models reach for rather than the reverse.
 
+**Addressed in T5, from the other end.** `orgprompts/architect.md` now tells the
+architect that any summary-writing worker it creates must ALSO write
+`{kind: "rolling-summary", worker: <subject>}`, and says why: that exact label
+is the one briefing section delivered automatically, so a summary under any
+other convention only reaches its subject if that subject happens to search for
+it — which, for a fresh conversation with a blank memory, means never.
+`orgprompts/registry.md` repeats it as a mechanic, under "two labels that are
+not yours to design". This instructs rather than enforces; changing
+`RollingSummarySelector` itself remains open and is not scheduled.
+
 ### DI4 (T1 probe) — the attention channel may reach nobody, and a worker noticed
 
 A probe archivist wrote `kind=lesson`: *"request_human_attention in this project
 may silently reach nobody."* Correct for a local stack with no attention webhook
 configured, so a config artifact rather than an engine bug — recorded because C3
 makes that channel the entire notification path for every architect change.
+
+### DI5 (T5) — the probe's architect prompt named an argument `worker_update` does not have
+
+`architect-prompt.md`, the text that actually ran in T1, says to correct a
+briefing with *"worker_update, passing briefing"*. `worker_update`'s input
+schema (`go/cmd/agentd/mcp_management.go:542-562`) has exactly three top-level
+arguments — `name`, `fields`, `rationale` — and `briefing` lives inside
+`fields`, alongside `description`, `image`, `max_instances` and `enabled`, with
+`additionalProperties: false`.
+
+The probe's architect got it right anyway, which is why the run passed and the
+error survived into the record. That is the failure mode T6 exists for: a prompt
+that names a tool argument the tool does not accept looks fine in review, passes
+every Go test, and costs a model one wasted call and one error message at
+runtime — or, with a less capable model, a loop. Corrected in
+`go/orgprompts/architect.md` (T5); the probe file is left as-is, because it is
+the record of what ran.
+
+Two smaller ones fixed in the same pass, for the same reason: `config_history`
+is now shown taking `entity` as a named argument rather than as prose, and
+`schedule_create` is named with `worker`, `cron` and `input` — its `worker`
+versus `target_session` exclusivity is enforced in the handler, not the schema,
+so a prompt that named both would validate and then fail.
