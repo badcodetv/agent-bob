@@ -1,0 +1,160 @@
+// Charter — the browser-side mirror of the `/agent/charter` routes
+// (design/2026-09-08-memory-coordinated-organisation.md §A; engine:
+// go/charter, go/httpapi/charter.go).
+//
+// Pure: no React, no window, no fetch. The hook is useCharter.ts and the
+// panel is components/CharterPanel.tsx.
+//
+// A charter is what an onboarding interview deposits: what the project is
+// for, how anyone would know it is working, and the first rules about what
+// gets written down. It is deliberately NOT a roster — approving it creates
+// an architect, and the architect decides what workers should exist.
+//
+// Validation policy, as everywhere else here: mirror the engine, do not
+// out-legislate it. The server validates and says so; this module carries no
+// rules of its own, only the coercion that stops a component branching on
+// undefined.
+
+export const CHARTER_ENDPOINTS = {
+  current: '/agent/charter/current',
+  apply: '/agent/charter/apply',
+}
+
+/** One addressable validation failure, as the server phrases it. `path` names
+ *  the charter field, so the panel can point at what to fix. */
+export interface CharterIssue {
+  path: string
+  message: string
+}
+
+/** The charter itself. Field names are the wire names. */
+export interface Charter {
+  goal: string
+  measure: string
+  label_rules: string
+  architect_name: string
+  architect_cron: string
+  project_background: string
+  rationale: string
+}
+
+/** What approving the charter would do, as the server summarises it. This is
+ *  a description of the resolved bundle and never the bundle: the bundle
+ *  carries the whole architect prompt, which nothing on this screen wants. */
+export interface CharterEffects {
+  architect_name: string
+  architect_cron: string
+  schedule_enabled: boolean
+  subscription_event: string
+  memory_seed_labels: string[]
+  settings_fields: string[]
+  worker_count: number
+}
+
+/** The GET /agent/charter/current body. */
+export interface CharterCurrent {
+  /** Null when the deposit could not be parsed at all. */
+  charter: Charter | null
+  /** The deposit's line-1 human summary — what changed and why. */
+  summary: string
+  memory_id: string
+  created_at: number
+  valid: boolean
+  errors: CharterIssue[]
+  /** Present only when valid. */
+  summary_of_effects: CharterEffects | null
+}
+
+// ---------------------------------------------------------------------------
+// Coercion — fill anything the server omitted so components never branch on
+// undefined, the same posture as coerceWorker and coerceTopology.
+// ---------------------------------------------------------------------------
+
+const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+const record = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+
+export function coerceCharterIssue(raw: unknown): CharterIssue {
+  const r = record(raw) ?? {}
+  return { path: str(r.path), message: str(r.message) }
+}
+
+export function coerceCharter(raw: unknown): Charter {
+  const r = record(raw) ?? {}
+  return {
+    goal: str(r.goal),
+    measure: str(r.measure),
+    label_rules: str(r.label_rules),
+    // The server omits these when the charter left them to the engine's
+    // defaults, and the panel has to show the human what will actually
+    // happen — so the defaults are filled in here rather than rendered as a
+    // blank that reads like "nothing will run".
+    architect_name: str(r.architect_name, DEFAULT_ARCHITECT_NAME),
+    architect_cron: str(r.architect_cron, DEFAULT_ARCHITECT_CRON),
+    project_background: str(r.project_background),
+    rationale: str(r.rationale),
+  }
+}
+
+/** The engine's defaults (go/charter/charter.go). Mirrored, not invented. */
+export const DEFAULT_ARCHITECT_NAME = 'architect'
+export const DEFAULT_ARCHITECT_CRON = '0 9 * * *'
+
+export function coerceCharterEffects(raw: unknown): CharterEffects {
+  const r = record(raw) ?? {}
+  return {
+    architect_name: str(r.architect_name, DEFAULT_ARCHITECT_NAME),
+    architect_cron: str(r.architect_cron, DEFAULT_ARCHITECT_CRON),
+    // Absent or garbled reads as NOT enabled. The schedule ships disabled by
+    // design, so "off" is both the safe reading and the true one.
+    schedule_enabled: r.schedule_enabled === true,
+    subscription_event: str(r.subscription_event),
+    memory_seed_labels: strings(r.memory_seed_labels),
+    settings_fields: strings(r.settings_fields),
+    worker_count: num(r.worker_count),
+  }
+}
+
+export function coerceCharterCurrent(raw: unknown): CharterCurrent {
+  const r = record(raw) ?? {}
+  const effects = record(r.summary_of_effects)
+  return {
+    charter: record(r.charter) ? coerceCharter(r.charter) : null,
+    summary: str(r.summary),
+    memory_id: str(r.memory_id),
+    created_at: num(r.created_at),
+    // Absent, "true", 1 and null all read as INVALID. The failure mode must
+    // block Approve, never wave it through — this is the one field on the
+    // screen that decides whether a human can change the project's shape.
+    valid: r.valid === true,
+    errors: Array.isArray(r.errors) ? r.errors.map(coerceCharterIssue) : [],
+    summary_of_effects: effects ? coerceCharterEffects(effects) : null,
+  }
+}
+
+/** The 422 body POST /agent/charter/apply answers with: every problem at once. */
+export function coerceCharterIssues(raw: unknown): CharterIssue[] {
+  const r = record(raw) ?? {}
+  return Array.isArray(r.errors) ? r.errors.map(coerceCharterIssue) : []
+}
+
+/**
+ * A cron expression as a phrase, for the one cadence line on the panel. It
+ * recognises the handful of shapes onboarding actually produces and otherwise
+ * hands back the expression itself — a wrong plain-English reading of a cron
+ * is worse than the cron, because the human cannot tell it is wrong.
+ */
+export function describeCharterCadence(cron: string): string {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return cron.trim()
+  const [min, hour, dom, mon, dow] = parts
+  if (dom !== '*' || mon !== '*') return cron.trim()
+  if (!/^\d{1,2}$/.test(min) || !/^\d{1,2}$/.test(hour)) return cron.trim()
+  const at = `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  if (dow === '*') return `every day at ${at}`
+  if (/^[0-6]$/.test(dow)) return `every ${days[Number(dow)]} at ${at}`
+  return cron.trim()
+}

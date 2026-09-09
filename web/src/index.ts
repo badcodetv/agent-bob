@@ -153,6 +153,25 @@ export type {
 export { default as useTopologies } from './useTopologies.js'
 export type { UseTopologiesOptions, TopologiesApi } from './useTopologies.js'
 
+// The onboarding charter — the /agent/charter surface: what an interview
+// deposits, whether it is fit to approve, and the one approval that applies
+// it. NOT a roster: approving creates the architect, and the architect
+// designs the team.
+export {
+  CHARTER_ENDPOINTS,
+  DEFAULT_ARCHITECT_NAME,
+  DEFAULT_ARCHITECT_CRON,
+  coerceCharter,
+  coerceCharterIssue,
+  coerceCharterIssues,
+  coerceCharterEffects,
+  coerceCharterCurrent,
+  describeCharterCadence,
+} from './charter.js'
+export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './charter.js'
+export { default as useCharter } from './useCharter.js'
+export type { UseCharterOptions, CharterApi } from './useCharter.js'
+
 // Events & observability (F1) — the `/agent/events` + `/agent/deliveries` read
 // surface: pure helpers, the overview hook, and the dry-run subscription
 // matcher. Read-only; F2 owns the subscription/schedule editors.
@@ -846,6 +865,11 @@ export { default as SubscriptionEditor } from './components/SubscriptionEditor.j
 export type { SubscriptionEditorProps } from './components/SubscriptionEditor.js'
 export { default as ScheduleEditor } from './components/ScheduleEditor.js'
 export type { ScheduleEditorProps } from './components/ScheduleEditor.js'
+
+// The onboarding charter panel — the one human gate between an interview and
+// an architect.
+export { default as CharterPanel } from './components/CharterPanel.js'
+export type { CharterPanelProps } from './components/CharterPanel.js'
 export { default as NlAssistField } from './components/NlAssistField.js'
 export type { NlAssistFieldProps } from './components/NlAssistField.js'
 

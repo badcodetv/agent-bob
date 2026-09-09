@@ -265,12 +265,16 @@ func BuildBriefingSections(ctx context.Context, src BriefingMemorySource, projec
 	sections := make([]BriefingSection, 0, len(selectors))
 	for i, selector := range selectors {
 		mem, err := src.NewestMemory(ctx, project, selector)
-		if err != nil {
-			if !errors.Is(err, agentdb.ErrMemoryNotFound) {
-				log.Printf("[compose] briefing selector %q for worker %q in project %q: %v — section skipped",
-					selector, worker.Name, project, err)
-				continue
-			}
+		if err != nil && !errors.Is(err, agentdb.ErrMemoryNotFound) {
+			log.Printf("[compose] briefing selector %q for worker %q in project %q: %v — section skipped",
+				selector, worker.Name, project, err)
+			continue
+		}
+		// A miss is `ErrMemoryNotFound` from *agentdb.Store and a nil row from
+		// some other implementation of this exported seam — the interface
+		// promises neither, and a nil row used to panic the dispatcher here,
+		// which is a worse answer than a thinner prompt by some distance.
+		if err != nil || mem == nil {
 			// RD19 — "nothing written yet" and "the selector is a typo" produce
 			// exactly the same silence, and the job then runs with a quietly
 			// thinner prompt. Not an error (an empty briefing is legal and is

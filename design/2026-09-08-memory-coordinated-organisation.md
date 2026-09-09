@@ -1145,7 +1145,7 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
   has **no worker identity**, because that is the only kind of session that
   will ever call it (A7).
 
-### T11: charter HTTP routes   [Status: pending | Model: sonnet]
+### T11: charter HTTP routes   [Status: done | Model: sonnet]
 - **Scope:** `GET /agent/charter/current?session=` reads the newest memory
   labelled `{kind:"org-charter", name:<session>}` for the credential's project;
   `Parse`, `Validate`, and return the documented body; 404 with the documented
@@ -1169,10 +1169,32 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go`
 - **Depends on:** T10
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/httpapi/charter.go` + `charter_test.go` (10 tests), two lines in
+  `httpapi.go`'s `Endpoints`.
+  Three things the ticket did not specify, decided here:
+  (a) **the session id is validated before it is spliced into a selector.** A
+  comma is the selector language's AND, so an unchecked id could widen the read
+  past the deposit it named. `agentdb.ValidateLabelValue`, the same guard
+  `/agent/memories/current` applies (`memories.go:387`).
+  (b) **a named `memory_id` is checked against the selector, not fetched
+  blind.** Without that the route would apply any memory in the project whose
+  content happens to parse as a charter — including one a worker wrote itself.
+  (c) **disabling the interviewer is outside the transaction, and its failure
+  is silent.** It runs after the charter has already committed; reporting it
+  would tell the operator the approval failed when it did not, and rolling the
+  charter back because a cleanup write failed would be far worse than an
+  untidy project.
+  A deposit that does not parse is a 200 with `valid:false`, not a 500 — the
+  console's job on that screen is to show the human why the interview has not
+  produced something approvable yet.
+  The acceptance criterion "creates the worker, schedule, subscription, the
+  project briefing and both memory seeds in one transaction" is asserted at
+  this layer as *one `TopologyApplication` carrying all of them crosses the
+  seam*; the transaction itself is `agentdb/topology_apply_test.go`'s, which
+  is where it can actually be observed.
 
-### T12: the shared-verdict test   [Status: pending | Model: sonnet]
+### T12: the shared-verdict test   [Status: done | Model: sonnet]
 - **Scope:** Assert `charter_validate` and the apply route reach the same
   verdict. A table of charters (valid and invalid) through both; they must
   agree on `valid` and on the issue set for every case.
@@ -1182,10 +1204,22 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/... -count=1`
 - **Depends on:** T11
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `TestCharterValidateAndApplyAgree` in
+  `go/cmd/agentd/mcp_charter_test.go`, 11 cases — every invalidity class from
+  T7 plus the two parse failures and an all-fields-empty case.
+  It drives the **real** `httpapi.Handlers.ApplyCharter` (with the router
+  tests' existing `stubRunner`/`newFakeRouterStore`), not a re-implementation:
+  a re-implemented route would agree with itself by construction and prove
+  nothing. Comparison is on `valid` and on the **set of issue paths**, not the
+  messages — prose may legitimately differ in framing between a tool result
+  and an HTTP body; which fields are wrong may not.
+  A refactor came out of writing it: `charter.Effects` and `charter.Summarise`
+  moved into `go/charter`, so the MCP tool and the HTTP route describe the same
+  charter through one implementation rather than two. A5's rule, applied to the
+  description as well as to the verdict.
 
-### T13: `architect.run` reaches a briefed job   [Status: pending | Model: sonnet]
+### T13: `architect.run` reaches a briefed job   [Status: done | Model: sonnet]
 - **Scope:** **[rev2]** rev1 put this assertion inside a web ticket whose
   validation could never run it. Prove, in Go, that emitting `architect.run`
   produces a dispatched architect job whose **composed prompt contains the
@@ -1201,10 +1235,23 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `./stack test-go`
 - **Depends on:** T11
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/charter_dispatch_test.go` (3 tests), beside the router
+  and dispatch tests. The worker, the subscription and the settings are built
+  by `charter.Resolve` and overlaid with `agentdb.TopologySettingsOverlay` —
+  hand-writing them would keep passing after `Resolve` stopped producing them.
+  **The negative case had to change shape.** As written the ticket asks for "a
+  project with no project briefing produces a job without it"; that fails,
+  because `Resolve` sets the registry selector **twice** — project-wide and on
+  the architect itself, so clearing the project list later cannot silently
+  strip the architect of the rulebook. The negative case therefore removes
+  both, and a third test pins the redundancy directly: with the project
+  briefing gone, the architect's own briefing still delivers the registry.
+  **Found a real bug doing it — see DI6.** `BuildBriefingSections` panicked on
+  a `BriefingMemorySource` that returns `(nil, nil)` for a miss. Fixed in
+  `go/compose.go`.
 
-### T14: `web/src/charter.ts` + `useCharter`   [Status: pending | Model: sonnet]
+### T14: `web/src/charter.ts` + `useCharter`   [Status: done | Model: sonnet]
 - **Scope:** Pure types, coercers and the polling hook, mirroring
   `web/src/topologies.ts` and `useTopologies.ts`. `valid` coerces as
   `raw.valid === true` so an absent or garbled field reads as INVALID
@@ -1220,10 +1267,30 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm test && npm run typecheck`
 - **Depends on:** T11
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `web/src/charter.ts` (+ `charter.test.ts`, 30 cases) and
+  `web/src/useCharter.ts`; exported from `index.ts` and from `pure.ts`, and
+  `pure.test.ts` still passes, so the tier line holds with it in the graph.
+  `valid` is `raw.valid === true`, pinned against `undefined`, `"true"`, `1`,
+  `null`, `0`, `""`, `{}` and `[]`. `schedule_enabled` takes the same
+  treatment: the schedule ships off, so "off" is both the safe reading and the
+  true one, and nothing but a literal `true` may claim the loop is running.
+  Two decisions beyond the ticket:
+  (a) `coerceCharter` fills `architect_name` and `architect_cron` with the
+  engine's defaults when the server omits them, because the panel has to show
+  what will actually happen and a blank there reads as "nothing will run".
+  (b) `describeCharterCadence` renders only the cron shapes onboarding
+  produces (`m h * * *` and `m h * * <0-6>`) and otherwise hands the
+  expression back untouched — a wrong plain-English reading of a cron is worse
+  than the cron, because the human cannot tell that it is wrong.
+  The hook polls (default 4s) because the charter arrives from OUTSIDE the
+  browser and A6 gives it no end signal; it stops polling once applied. A 404
+  is the empty state and additionally does **not** clear a charter already
+  seen. `apply` sends the `memory_id` the human was looking at, not "the
+  newest" — the interview may revise between the render and the click, and
+  approving something nobody read is what the gate exists to prevent.
 
-### T15: `CharterPanel`   [Status: pending | Model: sonnet]
+### T15: `CharterPanel`   [Status: done | Model: sonnet]
 - **Scope:** Renders the summary, the rationale as a commit message, and the
   charter's four substantive parts — goal, measure, labelling rules, architect
   and cadence — plus one Approve button, disabled unless `valid`, with the
@@ -1236,8 +1303,22 @@ func (s *Store) RevertEvent(ctx context.Context, project, eventID string, cw Con
 - **TDD:** yes
 - **Validation:** `cd web && npm test && npm run typecheck`
 - **Depends on:** T14
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `web/src/components/CharterPanel.tsx` + test (9 cases), exported from
+  `components/index.ts` and `index.ts`. Router-free and store-free: it takes a
+  charter and an `onApprove`.
+  The labelling rules render with `whiteSpace: 'pre-wrap'` and no truncation,
+  and the test asserts every line of a four-line rule block survives — they
+  are the thing being agreed, and a human who cannot read the last one has not
+  agreed to it.
+  One thing added beyond the ticket: the panel says in words that scheduled
+  runs start switched off. Without it a human reads "daily at 09:00" on the
+  chip and expects a daily loop that will not happen until someone enables it.
+  A 422's issues supersede the read's, because a charter can be revised
+  between the render and the click.
+  The double-approve guard is tested with `fireEvent`, not `userEvent`:
+  `userEvent` refuses to click a disabled control at all, so it would have
+  asserted the test library's behaviour rather than the panel's.
 
 ### T16: `OnboardingPage` + "Run the architect now"   [Status: pending | Model: opus]
 - **Scope:** The screen: a chat rail bound to the **named onboarding session
@@ -1659,6 +1740,27 @@ A probe archivist wrote `kind=lesson`: *"request_human_attention in this project
 may silently reach nobody."* Correct for a local stack with no attention webhook
 configured, so a config artifact rather than an engine bug — recorded because C3
 makes that channel the entire notification path for every architect change.
+
+### DI6 (T13) — `BuildBriefingSections` panicked on a briefing source that returns no row and no error
+
+`go/compose.go:266-283`: the miss branch lived entirely inside `if err != nil`,
+so a `BriefingMemorySource` whose `NewestMemory` returns `(nil, nil)` fell
+through to `strings.TrimSpace(mem.Content)` and **panicked the dispatcher**
+mid-compose.
+
+`*agentdb.Store` returns `ErrMemoryNotFound`, so production never hit it, and
+the one existing test using a map-backed fake (`fakeBriefingSource` in
+`router_test.go`) happened to have every selector match. T13's negative case —
+a worker whose briefing selects something deliberately absent — is the first
+thing that ever asked for a miss through that seam.
+
+`BriefingMemorySource` is **exported**, and its method documentation promises
+neither an error nor a nil on a miss. A host implementing it the obvious way
+would take down its own dispatcher.
+
+Fixed: the miss branch now covers `err != nil || mem == nil` and logs the same
+RD19 "thinner prompt" line either way. One line of behaviour change; a panic
+in the dispatch path is a considerably worse answer than a thinner prompt.
 
 ### DI5 (T5) — the probe's architect prompt named an argument `worker_update` does not have
 

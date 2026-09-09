@@ -9,6 +9,7 @@ package charter
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
@@ -165,4 +166,70 @@ func goalSeed(c *Charter) string {
 // have workers writing under labels nothing delivers.
 func registrySeed(c *Charter) string {
 	return strings.TrimRight(orgprompts.LabelRegistry(), "\n") + "\n\n" + strings.TrimSpace(c.LabelRules) + "\n"
+}
+
+// Effects is what approving a charter would do, in the terms a person reading
+// the console panel would recognise. It is a summary of the bundle and never
+// the bundle itself: the bundle carries orgprompts.Architect(), the whole
+// architect prompt, and both consumers here — the interviewer's
+// charter_validate tool and the console's charter panel — would be showing it
+// to something that has no use for it and pays by the token to receive it.
+type Effects struct {
+	ArchitectName     string   `json:"architect_name"`
+	ArchitectCron     string   `json:"architect_cron"`
+	ScheduleEnabled   bool     `json:"schedule_enabled"`
+	SubscriptionEvent string   `json:"subscription_event"`
+	MemorySeedLabels  []string `json:"memory_seed_labels"`
+	SettingsFields    []string `json:"settings_fields"`
+	WorkerCount       int      `json:"worker_count"`
+}
+
+// Summarise describes a resolved bundle. One implementation, because the MCP
+// validator and the apply route must describe the same charter identically —
+// Decision A5's rule, applied to the description as well as to the verdict.
+func Summarise(b *topology.Bundle) *Effects {
+	if b == nil {
+		return nil
+	}
+	e := &Effects{
+		SubscriptionEvent: EventArchitectRun,
+		WorkerCount:       len(b.Workers),
+	}
+	if len(b.Workers) > 0 {
+		e.ArchitectName = b.Workers[0].Name
+	}
+	if len(b.Schedules) > 0 {
+		e.ArchitectCron = b.Schedules[0].Cron
+		e.ScheduleEnabled = b.Schedules[0].Enabled
+	}
+	if len(b.Subscriptions) > 0 {
+		e.SubscriptionEvent = b.Subscriptions[0].EventType
+	}
+	for _, seed := range b.MemorySeeds {
+		e.MemorySeedLabels = append(e.MemorySeedLabels, formatLabels(seed.Labels))
+	}
+	if p := b.SettingsPatch; p != nil {
+		if strings.TrimSpace(p.SystemPrompt) != "" {
+			e.SettingsFields = append(e.SettingsFields, "system_prompt")
+		}
+		if len(p.Briefing) > 0 {
+			e.SettingsFields = append(e.SettingsFields, "briefing")
+		}
+	}
+	return e
+}
+
+// formatLabels renders a label set as a stable "k=v,k=v" string, sorted by
+// key, so a summary is deterministic and reads the way a selector does.
+func formatLabels(labels map[string]string) string {
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, ",")
 }

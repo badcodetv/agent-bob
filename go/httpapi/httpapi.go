@@ -394,6 +394,13 @@ type Endpoints struct {
 	ListTopologies  string // "GET /agent/topologies"
 	PreviewTopology string // "POST /agent/topologies/preview"
 	ApplyTopology   string // "POST /agent/topologies/apply"
+	// The onboarding charter (T11 of the memory-coordinated-organisation
+	// design). CurrentCharter reads what the interview deposited and says
+	// whether it is fit to apply; ApplyCharter is the ONE approval, and reads
+	// the charter from the store rather than from its body — the interviewer
+	// runs in a container, and a container is the untrusted party.
+	CurrentCharter string // "GET /agent/charter/current"
+	ApplyCharter   string // "POST /agent/charter/apply"
 	// The image/skill catalogues (B4) — read-only; the project comes from the
 	// JWT. There is no write counterpart: both catalogues are append-only and
 	// are written only from inside a session (§13.4, §14.2).
@@ -463,6 +470,8 @@ var DefaultEndpoints = Endpoints{
 	ListTopologies:  "GET /agent/topologies",
 	PreviewTopology: "POST /agent/topologies/preview",
 	ApplyTopology:   "POST /agent/topologies/apply",
+	CurrentCharter:  "GET /agent/charter/current",
+	ApplyCharter:    "POST /agent/charter/apply",
 	ListImages:      "GET /agent/images",
 	ListSkills:      "GET /agent/skills",
 }
@@ -544,6 +553,8 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ListTopologies:    h.ListTopologies,
 		e.PreviewTopology:   h.PreviewTopology,
 		e.ApplyTopology:     h.ApplyTopologyHandler,
+		e.CurrentCharter:    h.GetCurrentCharter,
+		e.ApplyCharter:      h.ApplyCharter,
 		e.ListImages:        h.ListImages,
 		e.ListSkills:        h.ListSkills,
 		e.GetSessionByName:  h.GetSessionByName,

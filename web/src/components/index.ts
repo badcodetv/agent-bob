@@ -206,3 +206,7 @@ export { default as ArtifactLightbox } from './ArtifactLightbox.js'
 export { default as ArtifactGrid } from './ArtifactGrid.js'
 
 export { default as ArtifactTreeView } from './ArtifactTreeView.js'
+
+export { default as CharterPanel } from './CharterPanel.js'
+
+export type { CharterPanelProps } from './CharterPanel.js'

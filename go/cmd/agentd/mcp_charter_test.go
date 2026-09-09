@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 	"github.com/binocarlos/badcode-agent-orange/charter"
+	"github.com/binocarlos/badcode-agent-orange/httpapi"
 	"github.com/binocarlos/badcode-agent-orange/orgprompts"
 )
 
@@ -248,5 +252,171 @@ func TestCharterValidateOverHTTPFromAChatSessionWithNoWorker(t *testing.T) {
 	result, _ = res["result"].(map[string]any)
 	if result["isError"] != false {
 		t.Fatalf("tools/call from a worker-less chat session: %#v", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// T12 — the shared-verdict test.
+//
+// Decision A5 says the MCP validator and the apply route share the gate's code
+// exactly. "Exactly" is the load-bearing word: an interviewer told its charter
+// is fine, whose charter is then refused on approval, has no way to find out
+// why — it is not in the conversation where the refusal happens. So the two
+// paths are driven with the same charters and their verdicts compared.
+//
+// This drives the REAL httpapi handler, not a re-implementation of it, because
+// a test that re-implemented the route would agree with itself by construction.
+// ---------------------------------------------------------------------------
+
+type verdictMemories struct{ content string }
+
+func (v *verdictMemories) SearchMemories(context.Context, *agentdb.MemorySearchQuery) ([]*agentdb.MemorySearchResult, error) {
+	return nil, nil
+}
+
+func (v *verdictMemories) CreateMemory(_ context.Context, m *agentdb.Memory, _ []float32) (*agentdb.Memory, bool, error) {
+	return m, false, nil
+}
+
+func (v *verdictMemories) GetMemory(_ context.Context, _, _ string) (*agentdb.Memory, error) {
+	return v.row(), nil
+}
+
+func (v *verdictMemories) NewestMemory(_ context.Context, _, _ string) (*agentdb.Memory, error) {
+	return v.row(), nil
+}
+
+func (v *verdictMemories) row() *agentdb.Memory {
+	return &agentdb.Memory{
+		ID:      "mem-1",
+		Project: "acme",
+		Labels:  agentdb.LabelSet{"kind": charter.MemoryKindCharter, "name": "onboard-1"},
+		Content: v.content,
+	}
+}
+
+// verdictTopologies accepts anything: this test compares VERDICTS, and a store
+// refusal is a different question (T11 covers it).
+type verdictTopologies struct{ applies int }
+
+func (v *verdictTopologies) ListWorkers(context.Context, string) ([]*agentdb.Worker, error) {
+	return nil, nil
+}
+
+func (v *verdictTopologies) GetProjectSettings(_ context.Context, project string) (*agentdb.ProjectSettings, error) {
+	return agentdb.DefaultProjectSettings(project), nil
+}
+
+func (v *verdictTopologies) ResolveCustomImage(_ context.Context, _, ref string) (*agentdb.CustomImage, error) {
+	return nil, fmt.Errorf("%w: %s", agentdb.ErrCustomImageNotFound, ref)
+}
+
+func (v *verdictTopologies) GetProjectSkill(_ context.Context, _, name string) (*agentdb.Skill, error) {
+	return nil, fmt.Errorf("%w: %s", agentdb.ErrSkillNotFound, name)
+}
+
+func (v *verdictTopologies) ApplyTopology(_ context.Context, app agentdb.TopologyApplication, _ agentdb.ConfigWrite) (*agentdb.TopologyApplyResult, error) {
+	v.applies++
+	return &agentdb.TopologyApplyResult{
+		Workers: app.Workers,
+		Event:   &agentdb.ConfigEvent{ID: "ce-1", Action: agentdb.ActionTopologyApply},
+	}, nil
+}
+
+// issueSet reduces a verdict to what the two paths must agree on: which fields
+// are wrong. Messages are prose and may legitimately differ in framing; the
+// set of addressable paths may not.
+func issueSet(issues []charter.Issue) []string {
+	out := make([]string, 0, len(issues))
+	for _, i := range issues {
+		out = append(out, i.Path)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestCharterValidateAndApplyAgree(t *testing.T) {
+	const valid = `Charter v1: a weekly newsletter.
+{"goal":"Send one a week.","measure":"Four in a month.","label_rules":"kind=draft.","rationale":"Repeat visits."}`
+
+	cases := map[string]struct {
+		deposit   string
+		wantValid bool
+	}{
+		"valid":                     {valid, true},
+		"missing goal":              {"S.\n{\"goal\":\"\",\"measure\":\"m\",\"label_rules\":\"r\",\"rationale\":\"w\"}", false},
+		"missing measure":           {"S.\n{\"goal\":\"g\",\"measure\":\"\",\"label_rules\":\"r\",\"rationale\":\"w\"}", false},
+		"missing label_rules":       {"S.\n{\"goal\":\"g\",\"measure\":\"m\",\"label_rules\":\"\",\"rationale\":\"w\"}", false},
+		"missing rationale":         {"S.\n{\"goal\":\"g\",\"measure\":\"m\",\"label_rules\":\"r\",\"rationale\":\"\"}", false},
+		"bad architect_name":        {"S.\n{\"goal\":\"g\",\"measure\":\"m\",\"label_rules\":\"r\",\"rationale\":\"w\",\"architect_name\":\"Not A Name\"}", false},
+		"bad architect_cron":        {"S.\n{\"goal\":\"g\",\"measure\":\"m\",\"label_rules\":\"r\",\"rationale\":\"w\",\"architect_cron\":\"@daily\"}", false},
+		"every field empty at once": {"S.\n{\"goal\":\"\",\"measure\":\"\",\"label_rules\":\"\",\"rationale\":\"\",\"architect_cron\":\"nope\"}", false},
+		"unknown key":               {"S.\n{\"goal\":\"g\",\"measure\":\"m\",\"label_rules\":\"r\",\"rationale\":\"w\",\"workers\":[]}", false},
+		"no JSON body":              {"S.", false},
+		"empty deposit":             {"", false},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			toolValid, toolIssues := verdictFromTool(t, tc.deposit)
+			routeValid, routeIssues := verdictFromRoute(t, tc.deposit)
+
+			if toolValid != tc.wantValid {
+				t.Errorf("charter_validate says valid=%v, want %v (issues %+v)", toolValid, tc.wantValid, toolIssues)
+			}
+			if toolValid != routeValid {
+				t.Fatalf("the two paths disagree: charter_validate valid=%v, apply valid=%v\n  tool:  %+v\n  route: %+v",
+					toolValid, routeValid, toolIssues, routeIssues)
+			}
+			if got, want := issueSet(routeIssues), issueSet(toolIssues); !reflect.DeepEqual(got, want) {
+				t.Errorf("the two paths report different fields:\n  charter_validate: %v\n  apply:            %v", want, got)
+			}
+		})
+	}
+}
+
+func verdictFromTool(t *testing.T, deposit string) (bool, []charter.Issue) {
+	t.Helper()
+	res := charterValidateCall(t, deposit)
+	return res.Valid, res.Errors
+}
+
+// verdictFromRoute drives httpapi.Handlers.ApplyCharter — the real route.
+func verdictFromRoute(t *testing.T, deposit string) (bool, []charter.Issue) {
+	t.Helper()
+	h, err := httpapi.New(httpapi.Config{
+		// The real handler, with the runner and session stubs the router
+		// tests already use — a re-implementation of the route would agree
+		// with itself by construction and prove nothing.
+		Runner:     &stubRunner{},
+		Store:      newFakeRouterStore(),
+		Memories:   &verdictMemories{content: deposit},
+		Topologies: &verdictTopologies{},
+		Identity: func(*http.Request) (httpapi.Identity, error) {
+			return httpapi.Identity{Customer: "acme"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("httpapi.New: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	h.ApplyCharter(rec, httptest.NewRequest(http.MethodPost, "/agent/charter/apply",
+		strings.NewReader(`{"session":"onboard-1"}`)))
+
+	switch rec.Code {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusUnprocessableEntity:
+		var body struct {
+			Errors []charter.Issue `json:"errors"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode 422 body %q: %v", rec.Body.String(), err)
+		}
+		return false, body.Errors
+	default:
+		t.Fatalf("apply returned %d, which is neither a verdict nor a refusal this test knows: %s",
+			rec.Code, rec.Body.String())
+		return false, nil
 	}
 }

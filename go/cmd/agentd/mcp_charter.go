@@ -29,7 +29,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/binocarlos/badcode-agent-orange/charter"
@@ -86,20 +85,8 @@ type charterValidateArgs struct {
 type charterValidateResult struct {
 	Valid   bool             `json:"valid"`
 	Errors  []charter.Issue  `json:"errors,omitempty"`
-	Summary *charterEffects  `json:"summary,omitempty"`
+	Summary *charter.Effects `json:"summary,omitempty"`
 	Charter *charterEchoedIn `json:"charter,omitempty"`
-}
-
-// charterEffects is what approving this charter would do, in the terms a
-// person reading the console panel would recognise.
-type charterEffects struct {
-	ArchitectName     string   `json:"architect_name"`
-	ArchitectCron     string   `json:"architect_cron"`
-	ScheduleEnabled   bool     `json:"schedule_enabled"`
-	SubscriptionEvent string   `json:"subscription_event"`
-	MemorySeedLabels  []string `json:"memory_seed_labels"`
-	SettingsFields    []string `json:"settings_fields"`
-	WorkerCount       int      `json:"worker_count"`
 }
 
 // charterEchoedIn is the short read-back: what the tool understood, so a model
@@ -147,35 +134,9 @@ func (c *charterTools) validate(_ context.Context, _ mcpCaller, raw json.RawMess
 		}, nil
 	}
 
-	effects := &charterEffects{
-		SubscriptionEvent: charter.EventArchitectRun,
-		WorkerCount:       len(bundle.Workers),
-	}
-	if len(bundle.Workers) > 0 {
-		effects.ArchitectName = bundle.Workers[0].Name
-	}
-	if len(bundle.Schedules) > 0 {
-		effects.ArchitectCron = bundle.Schedules[0].Cron
-		effects.ScheduleEnabled = bundle.Schedules[0].Enabled
-	}
-	if len(bundle.Subscriptions) > 0 {
-		effects.SubscriptionEvent = bundle.Subscriptions[0].EventType
-	}
-	for _, seed := range bundle.MemorySeeds {
-		effects.MemorySeedLabels = append(effects.MemorySeedLabels, formatLabels(seed.Labels))
-	}
-	if p := bundle.SettingsPatch; p != nil {
-		if strings.TrimSpace(p.SystemPrompt) != "" {
-			effects.SettingsFields = append(effects.SettingsFields, "system_prompt")
-		}
-		if len(p.Briefing) > 0 {
-			effects.SettingsFields = append(effects.SettingsFields, "briefing")
-		}
-	}
-
 	return charterValidateResult{
 		Valid:   true,
-		Summary: effects,
+		Summary: charter.Summarise(bundle),
 		Charter: &charterEchoedIn{
 			Summary: summaryLine,
 			Goal:    parsed.Goal,
@@ -208,19 +169,4 @@ func parseCharterArg(raw json.RawMessage) (*charter.Charter, string, error) {
 		return nil, "", err
 	}
 	return c, "", nil
-}
-
-// formatLabels renders a label set as a stable "k=v,k=v" string, sorted by
-// key, so the summary is deterministic and reads the way a selector does.
-func formatLabels(labels map[string]string) string {
-	keys := make([]string, 0, len(labels))
-	for k := range labels {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+"="+labels[k])
-	}
-	return strings.Join(parts, ",")
 }
