@@ -181,6 +181,14 @@ type Config struct {
 	// to say "I cannot see whether this is working", never a reason to hide the
 	// repository link. See the file header in gitprojectionstatus.go.
 	GitProjection GitProjectionStore
+
+	// GitBootstrap backs POST /agent/git-bootstrap (gitbootstraproute.go,
+	// ticket G26): create a project's whole configuration from a folder in its
+	// repository. It is deliberately NOT auto-filled from AgentDB — a
+	// bootstrap needs a clone, a lease and a projector, none of which agentdb
+	// has — so the host wires it in cmd/agentd. Nil is a supported deployment
+	// and the route answers 501, the same way every other unwired seam does.
+	GitBootstrap GitBootstrapper
 }
 
 // Tenancy contract
@@ -432,6 +440,13 @@ type Endpoints struct {
 	// projection's configuration is four fields on project settings and its
 	// state is written only by the projector itself.
 	GitProjectionStatus string // "GET /agent/git-projection"
+	// GitBootstrap creates a project's configuration FROM its repository
+	// folder (ticket G26). Like the status read, the project comes from the
+	// JWT and never from a parameter; unlike it, this one writes — and refuses
+	// with 409 when the project already has configuration, because bootstrap
+	// creates a project from a folder and never merges a folder into a live
+	// one. See gitbootstraproute.go.
+	GitBootstrap string // "POST /agent/git-bootstrap"
 
 	ListWorkers  string // "GET /agent/workers"
 	GetWorker    string // "GET /agent/workers/{name}"
@@ -517,6 +532,7 @@ var DefaultEndpoints = Endpoints{
 	ListSkills:      "GET /agent/skills",
 
 	GitProjectionStatus: GitProjectionEndpoint,
+	GitBootstrap:        GitBootstrapEndpoint,
 	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
 	GitWebhook: "POST /agent/git/webhook",
 }
@@ -606,6 +622,7 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ListSkills:        h.ListSkills,
 
 		e.GitProjectionStatus: h.GetGitProjectionStatus,
+		e.GitBootstrap:        h.GitBootstrap,
 		e.GetSessionByName:    h.GetSessionByName,
 
 		e.DownloadArtifact:          h.DownloadArtifact,

@@ -119,6 +119,14 @@ func (s *gitProjectionStatusSource) messageForKind(ctx context.Context, project,
 			return msg
 		}
 		return gitproj.ErrNotFastForward.Error() + ": " + msg
+	case agentdb.GitProjectionErrorNeedsAdoption:
+		// G27. The message IS the operator instruction — it names
+		// POST /agent/git-bootstrap — so it is passed through untouched and
+		// deliberately not rewritten into any sentinel's shape. httpapi's
+		// classifier has no word for this kind and reports "failing" with this
+		// sentence attached, which is the honest answer: the projection is not
+		// publishing, and the sentence says exactly why and what to do.
+		return msg
 	case agentdb.GitProjectionErrorQuarantined:
 		// An inbound rejection, not a publish failure. Drop the summary only
 		// when the per-file notes that replace it actually exist — with no

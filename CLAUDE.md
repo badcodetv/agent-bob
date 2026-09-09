@@ -119,6 +119,33 @@ Agent Orange. Three pieces:
 > alone* while `[]` means *clear it*; coercing one to the other breaks something real in either
 > direction (DI14).
 >
+> **The git projection** (`design/2026-09-09-git-projection.md`, **complete on this branch — 27 of
+> 27 tickets**) makes a project's configuration readable, diffable and editable as markdown in a git
+> repository. The inversion Kai first proposed — git as the source of truth, the database as a
+> rebuildable index — was **rejected** by an adversarial review on three structural grounds: git has
+> no total order (`config_events.Seq` exists because ms + uuid was not enough), provenance would
+> become testimony rather than a server stamp, and the human-vs-agent collision has no safe merge
+> (`-X ours` discards a merged PR; under rebase git inverts it and discards the *agent's* write).
+> So the arrow runs the other way: **the database takes the writes, git gets the publication.**
+> A renderer hangs off the existing post-commit config hook and commits one commit per config event
+> in seq order, with the true actor in trailers derived from the log; a push loop pushes
+> fast-forward-only. Human commits come back **in** via webhook or poll, are diffed as trees, and
+> are applied through the **same store methods the HTTP API calls** — becoming config event N+1, so
+> conflicts are impossible by construction. Backfill replays the whole log into a real history;
+> `POST /agent/git-bootstrap` builds a project from a folder. Named memories render as documents;
+> the append-only log does not. Migrations `047`–`049`. **Postgres-only.**
+> Operator's guide: **`docs/21-git-projection.md`**.
+>
+> ⚠️ **Two things to know before pointing this at a repository you care about.** Secrets are an
+> **allowlist with a reflection guard** — a field with no rendering decision fails the build, and a
+> credential-bearing field holding anything but a whole-value `${VAR}` **refuses to render** (not
+> redacts). Add a field to `ProjectSettings`/`Worker`/`Skill`/`Subscription`/`Schedule`/`CustomImage`
+> and CI goes red until you decide; that is the guard working. And **git cannot forget**: anything
+> rendered is in history permanently, for everyone with repository access, forks included.
+> If you change the commit trailer format, read **DI4** first — rationales are model-written, git
+> parses the last paragraph as trailers, and `Orange-Seq:` decides whose commit a commit is. Never
+> read trailers by grepping the message.
+
 > ⚠️ **Read this before running it on a project you care about.** Approving a charter creates an
 > **enabled** daily schedule, and *the architect's loop has no mechanical brake: every rule in its
 > prompt is an instruction it may choose to delete, revert is the entire control, and the failure

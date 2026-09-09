@@ -205,6 +205,7 @@ type gitProjectionState interface {
 	// import, including a clean one — passing no entries is what clears a stale
 	// quarantine, and a red banner that outlives the push that caused it
 	// teaches an operator to ignore the banner.
+	ClearQuarantine(ctx context.Context, project string) error
 	PutNotes(ctx context.Context, project, kind string, notes []agentdb.GitProjectionNote) error
 	ProjectsWithRemote(ctx context.Context) ([]string, error)
 }
@@ -254,6 +255,7 @@ type gitProjectionStateStore interface {
 	MarkGitProjectionPushed(ctx context.Context, project, sha string) error
 	MarkGitProjectionImported(ctx context.Context, project, sha string) error
 	NoteGitProjectionFailure(ctx context.Context, project, kind, reason string) error
+	ClearGitProjectionQuarantine(ctx context.Context, project string) error
 	PutGitProjectionNotes(ctx context.Context, project, kind string, notes []agentdb.GitProjectionNote) error
 	ListProjectsWithGitRemote(ctx context.Context) ([]string, error)
 }
@@ -303,6 +305,14 @@ func (t *gitProjectionTable) NoteFailureKind(ctx context.Context, project, kind,
 
 func (t *gitProjectionTable) NoteFailure(ctx context.Context, project, reason string) error {
 	return t.store.NoteGitProjectionFailure(ctx, project, gitProjectionErrorKindFromText(reason), reason)
+}
+
+// ClearQuarantine drops the row's stored failure only when it is a quarantine —
+// the inbound kind — so a clean import or bootstrap stops the console reporting
+// a file the operator has already fixed. It cannot erase a push failure; see
+// the store method for why that distinction is in the WHERE clause.
+func (t *gitProjectionTable) ClearQuarantine(ctx context.Context, project string) error {
+	return t.store.ClearGitProjectionQuarantine(ctx, project)
 }
 
 func (t *gitProjectionTable) PutNotes(ctx context.Context, project, kind string, notes []agentdb.GitProjectionNote) error {
@@ -390,6 +400,18 @@ type gitProjector struct {
 	pushMu    sync.Mutex
 	pushAfter map[string]time.Time
 	pushFails map[string]int
+
+	// said is the log-once ledger: a key to the last message logged under it.
+	//
+	// 🔴 G27's smaller half. A project whose first push never completes keeps
+	// its git_remote, so the same unreachable-remote sentence was printed on
+	// every boot and every loop tick, for ever, and a log nobody can read is a
+	// log in which the next real failure is invisible. A message is printed
+	// when it CHANGES — including changing back to nothing, which is what
+	// logAgain records — and swallowed while it is the same sentence as last
+	// time.
+	saidMu sync.Mutex
+	said   map[string]string
 }
 
 const (
@@ -434,6 +456,7 @@ func newGitProjector(cfg gitProjectorConfig) (*gitProjector, error) {
 		works:     map[string]*sync.Mutex{},
 		pushAfter: map[string]time.Time{},
 		pushFails: map[string]int{},
+		said:      map[string]string{},
 	}, nil
 }
 
@@ -657,6 +680,31 @@ func (p *gitProjector) RenderProject(ctx context.Context, project string, pend *
 	}
 	sub := gitSubfolderOf(ps)
 
+	// 🔴 G27 / DI21. THE ONE CHECK THAT RUNS BEFORE ANYTHING WRITES.
+	//
+	// Render is hook-driven; import is not — it fires only on a webhook or the
+	// poll. So an operator who sets git_remote on a FRESH project, pointing it
+	// at a folder that already holds an export (the obvious way to try to adopt
+	// one), fires the config hook, wakes this loop, and gets this project's
+	// EMPTY configuration rendered over that folder — WriteTree deletes every
+	// file under the subfolder that is not in the map — before any import or
+	// bootstrap could have run. The push loop may then publish the deletion.
+	//
+	// So: refuse, and say what to do instead. It runs after the fast-forward
+	// above, because that is what makes HEAD the remote's content, and before
+	// loadProjectState, so a refusal costs one `git ls-tree` and no database
+	// reads at all.
+	needsAdoption, err := p.needsAdoption(ctx, project, repo, sub)
+	if err != nil {
+		return err
+	}
+	if needsAdoption {
+		msg := gitAdoptionRefusal(sub, gitBranchOf(ps))
+		p.logOnce(gitAdoptKey(project), "[agentd] git projection: %s: %s", project, msg)
+		return p.cfg.State.NoteFailureKind(ctx, project, agentdb.GitProjectionErrorNeedsAdoption, msg)
+	}
+	p.logAgain(gitAdoptKey(project))
+
 	st, skipped, err := p.loadProjectState(ctx, project, ps)
 	if err != nil {
 		return fmt.Errorf("read project state: %w", err)
@@ -711,6 +759,128 @@ func (p *gitProjector) RenderProject(ctx context.Context, project string, pend *
 	return p.noteSkippedDocuments(ctx, project, skipped)
 }
 
+// logOnce logs under key unless the identical sentence was the last thing
+// logged there. The first occurrence says so, so an operator reading a single
+// line knows why they will not see it again.
+func (p *gitProjector) logOnce(key, format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	p.saidMu.Lock()
+	last, seen := p.said[key]
+	if seen && last == msg {
+		p.saidMu.Unlock()
+		return
+	}
+	p.said[key] = msg
+	p.saidMu.Unlock()
+	p.cfg.Logf("%s (this will not be repeated until it changes)", msg)
+}
+
+// logAgain forgets a key, so the next occurrence of that condition speaks up.
+// Called on the SUCCESS path: a remote that comes back and then fails again is
+// a new fact and must be said again.
+func (p *gitProjector) logAgain(key string) {
+	p.saidMu.Lock()
+	delete(p.said, key)
+	p.saidMu.Unlock()
+}
+
+// ── 🔴 G27: the guard against rendering over somebody's export ──────────────
+
+// needsAdoption reports whether rendering this project would write its own
+// (possibly empty) configuration over a folder it has never imported.
+//
+// The condition is deliberately two halves, and BOTH are load-bearing:
+//
+//  1. THIS PROJECT HAS NEVER TAKEN OWNERSHIP of the remote — no import
+//     watermark, no render watermark, nothing pushed. Any one of those means a
+//     human has already answered the question this guard asks, so the guard
+//     must never fire again: latching on for ever would block every subsequent
+//     render, which is a worse failure than the one it prevents.
+//  2. THE REMOTE'S SUBFOLDER HAS CONTENT. An empty remote, an unborn branch, a
+//     repository that simply has no `orange/` yet — the ordinary first-run
+//     state of a brand-new project — is NOT this case and must render normally.
+//
+// The state read is a primary-key lookup and the git call happens only when
+// that read says the project is fresh, so on every render after the first this
+// costs one row read and no subprocess.
+func (p *gitProjector) needsAdoption(ctx context.Context, project string, repo *gitproj.Repo, sub string) (bool, error) {
+	rec, err := p.cfg.State.Get(ctx, project)
+	if err != nil {
+		return false, err
+	}
+	if gitProjectionAdopted(rec) {
+		return false, nil
+	}
+	return gitSubfolderHasContent(ctx, repo, sub)
+}
+
+// gitProjectionAdopted is "a human has already settled what this remote is".
+//
+// It reads three watermarks rather than the obvious one:
+//
+//   - last_imported_sha — an import or a bootstrap (gitbootstrapwiring.go,
+//     gitwebhookwiring.go). The intended answer to this refusal.
+//   - last_rendered_sha / last_rendered_seq — this project has published here
+//     before, so the folder's content is OURS and re-rendering it is the whole
+//     job. Both are read because a first render with nothing to commit stores
+//     seq N and an EMPTY sha (rule 3, MarkRendered against an unborn HEAD), and
+//     a backfill (gitbackfill.go) advances them per commit.
+//
+// 🔴 last_pushed_sha is deliberately NOT in the set. The push loop marks a
+// project pushed whenever the remote tip already equals local HEAD — which is
+// exactly the situation this guard creates, since the fast-forward leaves HEAD
+// sitting on the operator's export. Counting it would let the push loop switch
+// the guard off one tick after it fired, and the next config event would delete
+// the export. PushProject has its own G27 check for the same reason.
+func gitProjectionAdopted(rec gitProjectionRecord) bool {
+	return rec.LastImportedSHA != "" ||
+		rec.LastRenderedSHA != "" ||
+		rec.LastRenderedSeq > 0
+}
+
+// gitSubfolderHasContent asks git whether the branch tip holds anything under
+// sub. One `ls-tree`, not a directory walk, and never the working tree: the
+// question is what the REMOTE published (HEAD has just been fast-forwarded onto
+// it), not what a half-written render left lying around.
+//
+// Every failure answers "no content", on purpose. The one that actually happens
+// is an unborn HEAD — a brand-new project against an empty remote, which is the
+// case that must render — and a guard that turned an unreadable repository into
+// a permanent refusal would be the "blocks the common case" failure this ticket
+// warns about. A remote we could not read is handled by the push loop's
+// fast-forward-only refusal, which is what already stops us overwriting a
+// history we have not seen.
+func gitSubfolderHasContent(ctx context.Context, repo *gitproj.Repo, sub string) (bool, error) {
+	sub = strings.Trim(strings.TrimSpace(sub), "/")
+	if sub == "" {
+		// Cannot happen — gitSubfolderOf defaults it — and if it ever did, the
+		// subfolder would be the repository root and this guard would refuse
+		// every project for ever. Answer "no" and let §D's own rules apply.
+		return false, nil
+	}
+	out, _, err := runGit(ctx, repo.Path(), "ls-tree", "-z", "--name-only", "HEAD", sub+"/")
+	if err != nil {
+		return false, nil
+	}
+	return strings.TrimSpace(strings.ReplaceAll(out, "\x00", "")) != "", nil
+}
+
+// gitAdoptionRefusal is the sentence an operator reads in the console. It says
+// the three things they need in the order they need them: nothing was lost,
+// why we stopped, and the exact next action — the whole reason this is its own
+// state rather than a generic failure.
+func gitAdoptionRefusal(sub, branch string) string {
+	return fmt.Sprintf(
+		"the remote already holds content under %s/ on branch %s and this project has never imported it. "+
+			"Nothing was rendered and nothing was deleted. "+
+			"Adopt that export with POST /agent/git-bootstrap, or point git_remote at a repository whose %s/ folder is empty.",
+		sub, branch, sub)
+}
+
+func gitAdoptKey(project string) string { return "adopt:" + project }
+func gitFetchKey(project string) string { return "fetch:" + project }
+func gitPushKey(project string) string  { return "push:" + project }
+
 // workLock is the per-project working-tree lock. Never held across a push.
 func (p *gitProjector) workLock(project string) *sync.Mutex {
 	p.repoMu.Lock()
@@ -742,9 +912,11 @@ func (p *gitProjector) workLock(project string) *sync.Mutex {
 // so the render carries on against the local clone and catches up later.
 func (p *gitProjector) syncFromRemote(ctx context.Context, project string, repo *gitproj.Repo) (bool, error) {
 	if err := repo.Fetch(ctx); err != nil {
-		p.cfg.Logf("[agentd] git projection: %s: fetch failed (%v) — rendering against the local clone", project, err)
+		p.logOnce(gitFetchKey(project),
+			"[agentd] git projection: %s: fetch failed (%v) — rendering against the local clone", project, err)
 		return false, nil
 	}
+	p.logAgain(gitFetchKey(project))
 	return p.fastForwardLocal(ctx, project, repo)
 }
 
@@ -1033,6 +1205,19 @@ func (p *gitProjector) ensureRepo(ctx context.Context, project string, ps *agent
 	p.repoMu.Lock()
 	cached := p.repos[project]
 	p.repoMu.Unlock()
+	if cached != nil && !gitCloneStillThere(cached.Path()) {
+		// 🔴 G27's second half. The clone directory has gone — a wiped PVC, an
+		// operator clearing a half-finished first push, a tmpdir reaped. The
+		// cached Repo then fails every fetch against a path that does not
+		// exist, for ever, once per loop tick. Drop it and fall through: the
+		// code below re-inits, re-wires origin and re-installs the credential,
+		// which is a full recovery and costs one clone.
+		p.cfg.Logf("[agentd] git projection: %s: the clone at %s is gone — re-creating it", project, cached.Path())
+		p.repoMu.Lock()
+		delete(p.repos, project)
+		p.repoMu.Unlock()
+		cached = nil
+	}
 	if cached != nil && cached.Remote() == remote && cached.Branch() == branch {
 		// The credential may have been re-pointed in the console since the
 		// clone was opened, so the helper is re-applied every time. It is one
@@ -1060,6 +1245,21 @@ func (p *gitProjector) ensureRepo(ctx context.Context, project string, ps *agent
 // gitCloneDirName keeps a project id from addressing anything but a child of
 // the clone root. Project ids are already kebab-case (validProjectID), so this
 // is defence in depth rather than the only check.
+// gitCloneStillThere is a stat, not a `git rev-parse`: it runs on every render
+// and the condition it exists to catch is a directory that has vanished
+// wholesale. A corrupt-but-present clone is prepareClone's problem
+// (isGitWorkTreeRoot), and forking a git process on every render to ask a
+// question the filesystem answers would be a poor trade.
+func gitCloneStillThere(path string) bool {
+	if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+		return true
+	}
+	// A bare-ish or worktree-style clone keeps `.git` as a file, which Stat
+	// still finds; anything else means the directory itself is the question.
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 func gitCloneDirName(project string) string {
 	safe := strings.Map(func(r rune) rune {
 		switch {
@@ -1287,12 +1487,17 @@ func (p *gitProjector) PushAll(ctx context.Context) {
 			// A divergence has already said its piece, at length, in
 			// PushProject; anything else is reported here.
 			if !errors.Is(err, gitproj.ErrNotFastForward) {
-				p.cfg.Logf("[agentd] git push: %s: %v", project, err)
+				// logOnce, not Logf: the backoff caps at 15 minutes, so an
+				// unreachable remote otherwise prints the same line four times
+				// an hour until somebody notices, which is exactly the noise
+				// G27's second half is about.
+				p.logOnce(gitPushKey(project), "[agentd] git push: %s: %v", project, err)
 			}
 			_ = p.cfg.State.NoteFailureKind(ctx, project, gitProjectionErrorKind(err), err.Error())
 			p.pushFailed(project)
 			continue
 		}
+		p.logAgain(gitPushKey(project))
 		p.pushSucceeded(project)
 	}
 }
@@ -1358,6 +1563,19 @@ func (p *gitProjector) PushProject(ctx context.Context, project string) error {
 		return err
 	}
 	if head == "" {
+		return nil
+	}
+	// 🔴 G27. HEAD here may be the REMOTE'S OWN export, fast-forwarded in just
+	// above, on a project that has never adopted it. There is nothing of ours
+	// to publish, and MarkPushed would clear the state row that is telling the
+	// operator to run POST /agent/git-bootstrap — leaving a console reading
+	// "ok" while the projection publishes nothing at all. Say nothing, do
+	// nothing: the render loop owns this state.
+	needsAdoption, err := p.needsAdoption(ctx, project, repo, gitSubfolderOf(ps))
+	if err != nil {
+		return err
+	}
+	if needsAdoption {
 		return nil
 	}
 	if remoteHead == head {

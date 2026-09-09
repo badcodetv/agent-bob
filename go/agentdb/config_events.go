@@ -915,6 +915,11 @@ var ConfigMutationExempt = map[string]string{
 		"each logged as their own config event by the store methods that apply them (that is the whole " +
 		"design: git writes nothing the store did not serialise); this column only records how far the " +
 		"importer has read",
+	"ClearGitProjectionQuarantine": "§15.3 rule 3: the retraction half of NoteGitProjectionFailure, " +
+		"and exempt for the same reason it is. A clean import or bootstrap withdraws the quarantine it " +
+		"had recorded, so the console stops reporting a file the operator has already fixed — a stale " +
+		"red banner is how an operator learns to ignore banners. Nobody decided anything; the WHERE " +
+		"clause is deliberately narrow so a clean INBOUND run can never erase an OUTBOUND push failure",
 	"NoteGitProjectionFailure": "§15.3 rule 3: why the last publish failed — an unrenderable field, a " +
 		"diverged remote, an unreachable host — and which KIND of failure that was. An observation " +
 		"written by a loop that retries every interval, like NoteScheduleProvisionFailure, and a " +

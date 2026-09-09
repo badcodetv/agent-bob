@@ -66,6 +66,15 @@ const (
 	// because a file did not parse. Nothing was applied; the per-file reasons
 	// are the quarantine notes (gitprojectionnotes.go).
 	GitProjectionErrorQuarantined = "quarantined"
+	// GitProjectionErrorNeedsAdoption — the remote's subfolder already holds an
+	// exported project that THIS project has never imported, so rendering would
+	// have written an empty configuration over somebody's export and deleted
+	// their files (G27, DI21). Nothing was rendered and nothing was deleted.
+	//
+	// 🔴 It is a STATE, not a breakage: the projection is waiting for a human
+	// to say what the folder is. `POST /agent/git-bootstrap` adopts it; after
+	// that the watermark is set and this can never fire again for the project.
+	GitProjectionErrorNeedsAdoption = "needs_adoption"
 	// GitProjectionErrorOther — anything else: an unreachable host, a bad
 	// credential, a disk that filled.
 	GitProjectionErrorOther = "other"
@@ -250,6 +259,40 @@ func (s *Store) MarkGitProjectionImported(ctx context.Context, project, sha stri
 	})
 }
 
+// ClearGitProjectionQuarantine clears the stored failure ONLY when it is a
+// quarantine — the inbound kind. It is what a clean import or a clean bootstrap
+// calls once it has succeeded.
+//
+// It is deliberately narrower than "clear the error". MarkGitProjectionImported
+// clears nothing at all, for the good reason stated above it: an import can
+// succeed while the OUTBOUND half is still failing to publish, and blanking the
+// row there would hide a real push failure behind an unrelated success. But the
+// opposite error is just as bad and was the live behaviour: a quarantine that
+// outlived the push which fixed it left the console reading `failing`, with the
+// sentence describing a file the operator had already corrected. G23 persisted
+// the notes precisely so a stale red banner would not teach an operator to
+// ignore banners; leaving the row's own error behind defeated that.
+//
+// The kind is matched in the WHERE clause rather than read-then-written, so a
+// push failure recorded between the read and the write cannot be erased by it.
+func (s *Store) ClearGitProjectionQuarantine(ctx context.Context, project string) error {
+	if strings.TrimSpace(project) == "" {
+		return fmt.Errorf("agentdb: git projection clear quarantine: project is required")
+	}
+	err := s.gdb.WithContext(ctx).Model(&GitProjectionState{}).
+		Where("project = ? AND last_error_kind = ?", project, GitProjectionErrorQuarantined).
+		Updates(map[string]any{
+			"last_error":      "",
+			"last_error_at":   0,
+			"last_error_kind": GitProjectionErrorNone,
+			"updated_at":      time.Now().Unix(),
+		}).Error
+	if err != nil {
+		return fmt.Errorf("agentdb: git projection clear quarantine for %s: %w", project, err)
+	}
+	return nil
+}
+
 // NoteGitProjectionFailure records what kind of failure stopped the last
 // attempt, and why. The reason is truncated: a git error page must not become a
 // row nobody can display.
@@ -277,6 +320,8 @@ func normalizeGitProjectionErrorKind(kind string) string {
 		return GitProjectionErrorNotFastForward
 	case GitProjectionErrorQuarantined:
 		return GitProjectionErrorQuarantined
+	case GitProjectionErrorNeedsAdoption:
+		return GitProjectionErrorNeedsAdoption
 	default:
 		return GitProjectionErrorOther
 	}

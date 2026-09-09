@@ -407,6 +407,13 @@ func (s *spyProjectionStateStore) MarkGitProjectionImported(context.Context, str
 	return nil
 }
 
+// ClearGitProjectionQuarantine: the spy records nothing. The narrowing that
+// matters — clearing only a quarantine, never a push failure — is a WHERE
+// clause in the real store and is tested there.
+func (s *spyProjectionStateStore) ClearGitProjectionQuarantine(context.Context, string) error {
+	return nil
+}
+
 func (s *spyProjectionStateStore) NoteGitProjectionFailure(_ context.Context, _, kind, _ string) error {
 	s.calls = append(s.calls, "failure")
 	s.lastKind = kind

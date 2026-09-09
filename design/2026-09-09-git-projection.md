@@ -554,7 +554,7 @@ to render, that git configuration is not importable, and that git is never the
 write path.
 **Validation:** human read.
 
-### G18: end-to-end   [Status: pending | Model: opus]
+### G18: end-to-end   [Status: done | Model: opus]
 Against the compose stack with a local bare repo as the remote: change a prompt
 in the console → commit appears with the right trailers; edit the file and push
 → the change lands in the config log as event N+1 with the commit message as its
@@ -646,7 +646,7 @@ a variable NAME, never a secret, with the same live validation
 not configured", not as an error.
 **Validation:** `cd web && npx vitest run src/components/ProjectSettingsPage.test.tsx && npm run typecheck`
 
-### G26: bootstrap has no entry point   [Status: pending | Model: opus]
+### G26: bootstrap has no entry point   [Status: done | Model: opus]
 Found while closing G23. `gitbootstrap.go` is built, tested and proven by a
 render→bootstrap→fold-equal round trip — and **nothing calls it**. There is no
 route, no CLI, no console action. "Project as code" works in tests and an
@@ -661,6 +661,27 @@ way `gitwebhookwiring.go` does for an ordinary import — G23 could not, because
 `gitbootstrap.go` was outside its file list, so a bootstrap's ignored edits are
 currently dropped.
 **Validation:** `cd go && go test ./cmd/agentd/ -run 'GitBootstrap|GitProjection' && go test ./httpapi/ && go build ./...`
+
+### G27: a fresh project must not render its empty configuration OVER an existing folder   [Status: done | Model: opus]
+🔴 **Data loss.** Found by G18, spotted but not verified. Render is hook-driven;
+import fires only on a webhook or the poll. So setting `git_remote` on a **fresh**
+project pointed at an **existing** exported folder fires the config hook, the
+render loop wakes, and it renders that project's *empty* configuration over the
+folder — `WriteTree` deletes files no longer in the map — **before any import or
+bootstrap could run**. The operator's exported project is gone, and the push loop
+may already have published the deletion.
+
+Guard it in the render loop: **refuse to render when the remote's subfolder has
+content and this project has never imported it** (`last_imported_sha` empty).
+Record it as a distinct state — the project needs `POST /agent/git-bootstrap`
+(G26) first, or an explicit adopt — rather than a failure. The check must run
+*before* `WriteTree`, and must be safe on an empty or missing remote, which is
+the ordinary first-run case and must still render.
+
+Also close the smaller leak G18 hit: a project whose **first push never
+completes** keeps `git_remote` set, and agentd then logs a fetch failure for a
+deleted directory on every boot and every poll, for ever.
+**Validation:** `cd go && go test ./cmd/agentd/ -run GitProjection && go build ./... && go vet ./...` — with a test that a fresh project pointed at a populated folder renders NOTHING and deletes NOTHING.
 
 ## Discovered Issues Log
 
@@ -1282,6 +1303,69 @@ sentinel test no longer guards correctness — only the quality of
 🔴 **`gitbootstrap.go` has no caller.** Not a route, not a CLI, not a console
 action — nothing anywhere invokes it. The round trip is proven and the feature is
 unreachable. **Ticket G26.** Its `Ignored` list is dropped for the same reason.
+
+---
+
+### DI21 (G18) — it ran, against the real stack, and found a data-loss path
+
+**Seven scenarios passed in 2.0 minutes** against the compose stack in **mock
+mode**, confirmed from the boot line `[agentd] ANTHROPIC_API_KEY unset → MOCK
+model proxy`. The remote is a **local bare repo inside the agentd container** — no
+network, no GitHub. First render, out (trailers + bot author + body), no-op, in,
+quarantine, secret-never-leaves, unrenderable-field.
+
+⚠️ It **rebuilt the shared `agentd` container**: the running binary predated
+G20's webhook mount (the route answered the auth middleware's `unauthorized`) and
+G16/G22's state wiring (`state_available:false`). Other sessions using that stack
+should know.
+
+**It used the webhook rather than the poll**, pointing `git_webhook_secret_env`
+at a variable the stack-e2e overlay already defines — zero rig changes, against a
+5-minute poll interval. Overridable via `STACK_GIT_WEBHOOK_SECRET_ENV`.
+
+🔴 **The finding that matters — ticket G27.** Render is hook-driven; import fires
+only on webhook or poll. Pointing a **fresh** project at an **existing** exported
+folder therefore renders its *empty* configuration over that folder, deleting
+files, **before any import or bootstrap can run** — and the push loop may publish
+the deletion. Spotted, not verified, and not something to leave for someone to
+discover with a real repository.
+
+**Two smaller corrections.** `Orange-Actor-*` trailers are **absent for
+console/API writes** (empty actor is the encoding for a human edit), so the
+trailer list in §B holds in full only for MCP-driven writes; the spec asserts
+against the config event itself, so it is true either way. And G23's own text
+saying nothing persists quarantine is now stale — it is a persisted `quarantine[]`
+plus `health: "quarantined"`, with `last_error` deliberately empty.
+
+---
+
+### DI22 (G27) — the guard needed a second guard: the push loop would have wiped it
+
+The adoption refusal is checked in `RenderProject` **after** the fast-forward (so
+HEAD really is the remote) and **before** anything writes. Condition: no
+`last_imported_sha`, no `last_rendered_sha`, `last_rendered_seq == 0`, **and**
+`git ls-tree` shows content under the subfolder. Any git error answers "no
+content", so an unborn HEAD — an empty remote, or one with history but no
+`orange/` — renders normally, which is the ordinary first run.
+
+🔴 **The part the ticket did not name, and it would have re-armed the bug.**
+`PushProject` marks a project pushed whenever `remoteHead == head` — which is
+exactly the state the fast-forward creates — and `MarkPushed` **clears
+`last_error`**. The refusal would have been wiped one tick later, and had
+`last_pushed_sha` counted toward "this project has adopted", the data loss would
+have re-armed itself on the following render. So `PushProject` carries the same
+check, and `last_pushed_sha` is deliberately **excluded** from the adoption set.
+A guard that another loop quietly erases is not a guard.
+
+**Falsified:** removing the block makes the regression test fail with
+`orange/project.yaml is GONE from the remote` — the deletion reaches the **bare
+remote**, which confirms the push publishes it rather than it staying local.
+
+**The noisy-forever leak is closed in two halves**, and the second is a recovery
+rather than a silence: a log-once ledger prints a repeated failure only when the
+sentence *changes* and forgets it on success; and `ensureRepo` now drops a cached
+`Repo` whose clone directory has vanished (a stat, not a fork) and re-inits,
+re-wires origin and re-installs the credential.
 
 ---
 

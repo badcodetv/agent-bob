@@ -655,6 +655,7 @@ func TestMutationsAreLogged(t *testing.T) {
 		// serialise. Only "how far the loop has read" is exempt.
 		want := []string{
 			"AcquireGitProjectionLease",
+			"ClearGitProjectionQuarantine",
 			"ClearScheduleProvisionFailures",
 			"ClearWorkerBinding",
 			"CreateProjectEvent",

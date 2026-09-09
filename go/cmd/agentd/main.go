@@ -357,6 +357,14 @@ func main() {
 	if agentDB != nil {
 		coreMCP = coreMCPServers(selfURL)
 	}
+	// The bootstrap seam (G26): create a project's whole configuration from the
+	// folder in its repository. It is built EMPTY here and armed further down,
+	// because the projector it needs does not exist until the product-layer
+	// block — and boot order is not negotiable there (the config hook must be
+	// installed before anything can serve a request). Never armed on the sqlite
+	// fallback, where the route answers 501 rather than pretending.
+	gitBootstrap := newGitBootstrapWiring(log.Printf)
+
 	api, err := httpapi.New(httpapi.Config{
 		Runner:    runner,
 		Store:     store,
@@ -386,6 +394,10 @@ func main() {
 		// handed over here. Nil store → nil seam, and the route answers
 		// state_available=false exactly as it does on the sqlite fallback.
 		GitProjection: newGitProjectionStatusSource(agentDB),
+		// POST /agent/git-bootstrap (G26). Not auto-filled from AgentDB — a
+		// bootstrap needs a clone, a lease and a projector — and empty until
+		// the product-layer block arms it.
+		GitBootstrap: gitBootstrap,
 	})
 	must(err)
 
@@ -443,6 +455,10 @@ func main() {
 		gitHook, gitProj := installGitProjection(ctx, agentDB,
 			gitTokenEnvFromProjectMap(projectCfg), log.Printf)
 		gitWebhook = newGitWebhookWiring(agentDB, gitProj, os.Getenv, log.Printf)
+		// The bootstrap door can now do its work: it takes the same lease and
+		// work-lock as the render loop and the webhook import, off the same
+		// projector (G26).
+		gitBootstrap.enable(agentDB, gitProj)
 		agentDB.SetConfigEventHook(fanOutConfigEvents(log.Printf, configChanges.Hook(), gitHook))
 
 		gate := newDispatcher(dispatcherConfig{

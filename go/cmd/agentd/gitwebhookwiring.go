@@ -372,7 +372,14 @@ func (w *gitWebhookWiring) importProject(ctx context.Context, project string) er
 	// A clean run. Both lists are written EVEN WHEN EMPTY: an empty quarantine
 	// is how the previous one is cleared, and a red banner that outlives the
 	// push that fixed it teaches an operator to ignore the banner.
+	// The notes are gone; the row's own error must go too, or the console
+	// keeps reporting a file this run has just fixed. Narrow on purpose: it
+	// clears a quarantine and cannot touch a push failure (see the store).
 	w.putNotes(ctx, project, agentdb.GitProjectionNoteQuarantine, nil)
+	if err := w.proj.cfg.State.ClearQuarantine(ctx, project); err != nil {
+		w.logf("gitimport: clear quarantine for %s: %v", project, err)
+	}
+
 	w.putNotes(ctx, project, agentdb.GitProjectionNoteIgnored, gitImportIgnoredNotes(res.Ignored))
 
 	if err := w.proj.cfg.State.MarkImported(ctx, project, res.Watermark); err != nil {

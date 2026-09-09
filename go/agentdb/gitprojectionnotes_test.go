@@ -326,3 +326,53 @@ func itoaPad(i int) string {
 	}
 	return s
 }
+
+// TestClearGitProjectionQuarantineIsNarrow is the fix for the stale-banner bug
+// G26 found: a quarantine that outlived the push which fixed it left the console
+// reading `failing`, describing a file the operator had already corrected. G23
+// persisted the notes so a stale banner would not teach an operator to ignore
+// banners; leaving the row's own error behind defeated exactly that.
+//
+// The narrowness is the point and is the half most likely to be "simplified"
+// later: a clean INBOUND run must not erase an OUTBOUND failure. An import can
+// succeed while the push half is still broken, and blanking the row there would
+// hide a real problem behind an unrelated success.
+func TestClearGitProjectionQuarantineIsNarrow(t *testing.T) {
+	ctx := context.Background()
+	s, _ := newGitProjectionNotesTestStore(t)
+
+	for _, tc := range []struct {
+		name      string
+		kind      string
+		wantClear bool
+	}{
+		{"a quarantine is cleared", GitProjectionErrorQuarantined, true},
+		{"a push failure is NOT cleared", GitProjectionErrorNotFastForward, false},
+		{"an unrenderable field is NOT cleared", GitProjectionErrorUnrenderable, false},
+		{"an unclassified failure is NOT cleared", GitProjectionErrorOther, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			project := "clearnarrow-" + tc.kind
+			if err := s.NoteGitProjectionFailure(ctx, project, tc.kind, "the reason"); err != nil {
+				t.Fatalf("note failure: %v", err)
+			}
+			if err := s.ClearGitProjectionQuarantine(ctx, project); err != nil {
+				t.Fatalf("clear: %v", err)
+			}
+			got, err := s.GetGitProjectionState(ctx, project)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if tc.wantClear {
+				if got.LastError != "" || got.LastErrorKind != GitProjectionErrorNone {
+					t.Fatalf("quarantine survived a clean run: kind=%q error=%q", got.LastErrorKind, got.LastError)
+				}
+				return
+			}
+			if got.LastError != "the reason" || got.LastErrorKind != tc.kind {
+				t.Fatalf("clearing a quarantine erased a %s failure: kind=%q error=%q",
+					tc.kind, got.LastErrorKind, got.LastError)
+			}
+		})
+	}
+}

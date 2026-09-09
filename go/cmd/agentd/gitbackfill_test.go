@@ -260,6 +260,10 @@ func (s *backfillState) NoteFailureKind(_ context.Context, project, kind, reason
 
 // PutNotes: the backfill writes none — it replays the config log, it does not
 // import anything — but the seam it uses carries them (G23).
+// ClearQuarantine: nothing to clear — the backfill replays the config log and
+// never imports, so it can produce no quarantine.
+func (s *backfillState) ClearQuarantine(context.Context, string) error { return nil }
+
 func (s *backfillState) PutNotes(context.Context, string, string, []agentdb.GitProjectionNote) error {
 	return nil
 }

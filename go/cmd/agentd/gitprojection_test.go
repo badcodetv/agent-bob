@@ -31,6 +31,7 @@ import (
 
 	"github.com/binocarlos/badcode-agent-orange/agentdb"
 	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/binocarlos/badcode-agent-orange/httpapi"
 )
 
 // ── fakes ───────────────────────────────────────────────────────────────────
@@ -160,9 +161,12 @@ var _ gitProjectionStore = (*fakeProjectionStore)(nil)
 
 // fakeProjectionState is the durable half, in memory.
 type fakeProjectionState struct {
-	mu       sync.Mutex
-	rows     map[string]*gitProjectionRecord
-	projects []string
+	// quarantineCleared records every ClearQuarantine call, so a test can assert
+	// a clean path clears the row's own error and not only its notes.
+	quarantineCleared []string
+	mu                sync.Mutex
+	rows              map[string]*gitProjectionRecord
+	projects          []string
 	// notes are the per-file quarantine/ignored lists, keyed "project/kind".
 	notes map[string][]agentdb.GitProjectionNote
 	// failAcquire makes AcquireLease answer "somebody else holds it".
@@ -254,6 +258,16 @@ func (f *fakeProjectionState) NoteFailureKind(_ context.Context, project, kind, 
 }
 
 // PutNotes keeps the per-file notes of the last run, by kind (G23).
+// ClearQuarantine records the call. The behaviour under test is that a clean
+// path CALLS it; the narrowing to a quarantine kind lives in the real store's
+// WHERE clause, where a push failure racing the clear cannot be erased.
+func (f *fakeProjectionState) ClearQuarantine(_ context.Context, project string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.quarantineCleared = append(f.quarantineCleared, project)
+	return nil
+}
+
 func (f *fakeProjectionState) PutNotes(_ context.Context, project, kind string, notes []agentdb.GitProjectionNote) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1130,4 +1144,336 @@ func readProjectionFile(t *testing.T, rig *projectionRig, project, path string) 
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// ── 🔴 G27 / DI21: never render an empty configuration over somebody's export ─
+//
+// The data-loss path this guards, in full: render is hook-driven, import is
+// not. An operator who sets git_remote on a FRESH project and points it at a
+// folder that already holds an exported project — the obvious way to try to
+// adopt one — fires the config hook. The render loop wakes, renders that
+// project's EMPTY configuration, and WriteTree deletes every file under the
+// subfolder that is not in the map, before any import or bootstrap could run.
+// The push loop then publishes the deletion.
+//
+// TestGitProjectionRefusesToRenderOverAnUnimportedExport is the regression
+// test. It has been watched fail: with the needsAdoption block removed from
+// RenderProject, it reports the export's files GONE from the remote.
+
+// seedExport publishes an already-exported project into a project's bare
+// remote — what an operator points a fresh project's git_remote at when they
+// mean "adopt this". It returns the contents, for a byte-for-byte comparison
+// after the loops have had their chance at them.
+func seedExport(t *testing.T, rig *projectionRig, project string, files map[string]string) map[string]string {
+	t.Helper()
+	work := filepath.Join(rig.root, "seed-"+project)
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runProjectionGit(t, work, "init", "-b", "main", ".")
+	for path, body := range files {
+		full := filepath.Join(work, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runProjectionGit(t, work, "add", "-A")
+	runProjectionGit(t, work, "-c", "user.name=Kai", "-c", "user.email=kai@example.com",
+		"-c", "commit.gpgsign=false", "commit", "-m", "an exported project")
+	runProjectionGit(t, work, "remote", "add", "origin", rig.remotes[project])
+	runProjectionGit(t, work, "push", "-q", "origin", "main")
+	return files
+}
+
+// remoteFile reads one path out of the BARE REMOTE's branch tip — not the local
+// clone. The claim under test is about the operator's repository.
+func remoteFile(t *testing.T, rig *projectionRig, project, path string) (string, bool) {
+	t.Helper()
+	cmd := exec.Command("git", "show", "main:"+path)
+	cmd.Dir = rig.remotes[project]
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+func remoteHead(t *testing.T, rig *projectionRig, project string) string {
+	t.Helper()
+	return strings.TrimSpace(runProjectionGit(t, rig.remotes[project], "rev-parse", "main"))
+}
+
+func (f *fakeProjectionState) lastErrorKind(project string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.row(project).LastErrorKind
+}
+
+func TestGitProjectionRefusesToRenderOverAnUnimportedExport(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	export := map[string]string{
+		"orange/project.yaml":            "goal: sell the thing\n",
+		"orange/workers/copywriter.md":   "---\nname: copywriter\n---\nthe prompt a human wrote\n",
+		"orange/memory/message-board.md": "the board\n",
+		"README.md":                      "not the projection's file\n",
+	}
+	seedExport(t, rig, "wolf", export)
+	before := remoteHead(t, rig, "wolf")
+
+	// One config event — setting git_remote is itself one — and both loops get
+	// their turn, exactly as they would in agentd.
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "why")))
+	rig.proj.RenderPending(context.Background())
+	rig.proj.PushAll(context.Background())
+
+	// 🔴 The whole point: every file the operator exported is still there, byte
+	// for byte, and the remote has not moved.
+	for path, want := range export {
+		got, ok := remoteFile(t, rig, "wolf", path)
+		if !ok {
+			t.Fatalf("%s is GONE from the remote — the render deleted an operator's export", path)
+		}
+		if got != want {
+			t.Fatalf("%s changed on the remote: %q → %q", path, want, got)
+		}
+	}
+	if now := remoteHead(t, rig, "wolf"); now != before {
+		t.Fatalf("the remote moved %s → %s: the projection published over an unimported export", before, now)
+	}
+	if head := rig.head("wolf"); head != before {
+		t.Fatalf("the local clone committed on top of the export (%s → %s)", before, head)
+	}
+
+	// It is recorded as its own state, and the message names the way out.
+	if got, want := rig.state.lastErrorKind("wolf"), agentdb.GitProjectionErrorNeedsAdoption; got != want {
+		t.Fatalf("last_error_kind = %q, want %q", got, want)
+	}
+	reason := rig.state.lastError("wolf")
+	if !strings.Contains(reason, "POST /agent/git-bootstrap") {
+		t.Fatalf("the refusal does not tell the operator what to do next: %q", reason)
+	}
+	if !strings.Contains(reason, "nothing was deleted") {
+		t.Fatalf("the refusal does not say the export is safe: %q", reason)
+	}
+	// The push loop must not have quietly cleared that row by marking a remote
+	// it never pushed to as pushed.
+	rig.state.mu.Lock()
+	pushed := rig.state.row("wolf").LastPushedSHA
+	rig.state.mu.Unlock()
+	if pushed != "" {
+		t.Fatalf("the push loop marked %s pushed and cleared the refusal", pushed)
+	}
+}
+
+// The ordinary first run: a brand-new project against an empty remote. A guard
+// that blocks this is worse than the bug it fixes.
+func TestGitProjectionRendersIntoAnEmptyRemote(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "why")))
+	rig.proj.RenderPending(context.Background())
+
+	if n := rig.commitCount("wolf"); n != 1 {
+		t.Fatalf("a brand-new project against an empty remote did not render (%d commits)", n)
+	}
+	if kind := rig.state.lastErrorKind("wolf"); kind != agentdb.GitProjectionErrorNone {
+		t.Fatalf("the guard fired on the ordinary first run: kind %q, %q", kind, rig.state.lastError("wolf"))
+	}
+}
+
+// A repository that has history but no orange/ yet — a project's own repo
+// gaining a projection — is also the ordinary first run.
+func TestGitProjectionRendersWhenTheRemoteHasNoSubfolderYet(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	seedExport(t, rig, "wolf", map[string]string{
+		"README.md":   "somebody's application\n",
+		"src/main.go": "package main\n",
+	})
+
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "why")))
+	rig.proj.RenderPending(context.Background())
+
+	if kind := rig.state.lastErrorKind("wolf"); kind != agentdb.GitProjectionErrorNone {
+		t.Fatalf("the guard fired on a repository with no orange/ yet: kind %q, %q", kind, rig.state.lastError("wolf"))
+	}
+	if n := rig.commitCount("wolf"); n != 2 { // the seeded commit, plus ours
+		t.Fatalf("want the projection's commit on top of the existing history, got %d commits", n)
+	}
+	// It added its own folder and touched nothing else.
+	if _, err := os.Stat(filepath.Join(rig.clone("wolf"), "README.md")); err != nil {
+		t.Fatalf("the render removed a file outside its subfolder: %v", err)
+	}
+}
+
+// Once a project HAS imported, the guard must stop applying — otherwise it
+// blocks every subsequent render for ever, which is a worse failure than the
+// one it prevents.
+func TestGitProjectionAdoptionGuardStopsAfterAnImport(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	seedExport(t, rig, "wolf", map[string]string{
+		"orange/project.yaml": "goal: sell the thing\n",
+	})
+	// What a bootstrap or a webhook import leaves behind.
+	if err := rig.state.MarkImported(context.Background(), "wolf", remoteHead(t, rig, "wolf")); err != nil {
+		t.Fatal(err)
+	}
+
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "why")))
+	rig.proj.RenderPending(context.Background())
+
+	if kind := rig.state.lastErrorKind("wolf"); kind == agentdb.GitProjectionErrorNeedsAdoption {
+		t.Fatalf("the guard latched on after an import: %q", rig.state.lastError("wolf"))
+	}
+	if n := rig.commitCount("wolf"); n != 2 {
+		t.Fatalf("an adopted project did not render (%d commits)", n)
+	}
+}
+
+// The same, by the other door: a project that has rendered once owns the
+// folder, and must keep rendering into it for ever afterwards.
+func TestGitProjectionAdoptionGuardDoesNotLatchAfterAFirstRender(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "first")))
+	rig.proj.RenderPending(context.Background())
+	if err := rig.proj.PushProject(context.Background(), "wolf"); err != nil {
+		t.Fatalf("first push: %v", err)
+	}
+	// The remote's orange/ now has content — put there by us.
+	if _, ok := remoteFile(t, rig, "wolf", "orange/README.md"); !ok {
+		t.Fatal("setup: the first render did not publish into the subfolder")
+	}
+
+	// A second mutation that really does change the tree, so "did it render?"
+	// is answered by a commit rather than by rule 3's no-change path.
+	rig.store.mu.Lock()
+	rig.store.workers["wolf"] = []*agentdb.Worker{{
+		Project: "wolf", Name: "copywriter", SystemPrompt: "write well", Enabled: true,
+	}}
+	rig.store.mu.Unlock()
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "second")))
+	rig.proj.RenderPending(context.Background())
+
+	if kind := rig.state.lastErrorKind("wolf"); kind == agentdb.GitProjectionErrorNeedsAdoption {
+		t.Fatalf("the guard fired on the project's OWN published folder: %q", rig.state.lastError("wolf"))
+	}
+	if n := rig.commitCount("wolf"); n != 2 {
+		t.Fatalf("the second render did not commit (%d commits)", n)
+	}
+}
+
+// The state reaches an operator through GET /agent/git-projection unchanged,
+// bootstrap route and all. gitStatusBody drives the real httpapi handler.
+func TestGitProjectionStatusReportsNeedsAdoption(t *testing.T) {
+	msg := gitAdoptionRefusal(agentdb.DefaultGitSubfolder, agentdb.DefaultGitBranch)
+	body := gitStatusBody(t, &fakeGitStatusStore{
+		state: map[string]*agentdb.GitProjectionState{"wolf": {
+			Project:       "wolf",
+			LastError:     msg,
+			LastErrorKind: agentdb.GitProjectionErrorNeedsAdoption,
+		}},
+	})
+	got, _ := body["last_error"].(string)
+	if !strings.Contains(got, "POST /agent/git-bootstrap") {
+		t.Fatalf("last_error on the wire does not name the bootstrap route: %q", got)
+	}
+	if !strings.Contains(got, agentdb.DefaultGitSubfolder+"/") {
+		t.Fatalf("last_error does not name the folder it refused to write: %q", got)
+	}
+	if body["health"] == httpapi.GitProjectionOK {
+		t.Fatalf("health = ok while the projection is publishing nothing: %v", body)
+	}
+}
+
+// A kind agentdb does not know must not be silently downgraded to "other" —
+// that is the whole reason the column exists.
+func TestGitProjectionNeedsAdoptionKindSurvivesTheStore(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	if err := rig.state.NoteFailureKind(context.Background(), "wolf",
+		agentdb.GitProjectionErrorNeedsAdoption, "because"); err != nil {
+		t.Fatal(err)
+	}
+	if got := rig.state.lastErrorKind("wolf"); got != agentdb.GitProjectionErrorNeedsAdoption {
+		t.Fatalf("kind = %q", got)
+	}
+}
+
+// ── the smaller leak: noisy for ever ────────────────────────────────────────
+
+// A remote that has gone away must be reported, and then stop being reported.
+// Repeating the same sentence on every boot and every tick is how the next real
+// failure becomes invisible.
+func TestGitProjectionFetchFailureIsSaidOnceNotForEver(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "why")))
+	rig.proj.RenderPending(context.Background())
+
+	// Delete the remote out from under a project that still has git_remote set:
+	// exactly the "first push never completed" shape.
+	if err := os.RemoveAll(rig.remotes["wolf"]); err != nil {
+		t.Fatal(err)
+	}
+	rig.logs = nil
+	for i := 0; i < 5; i++ {
+		rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", fmt.Sprintf("try %d", i))))
+		rig.proj.RenderPending(context.Background())
+		rig.proj.PushAll(context.Background())
+	}
+
+	fetchLines := 0
+	for _, line := range rig.logs {
+		if strings.Contains(line, "fetch failed") {
+			fetchLines++
+		}
+	}
+	if fetchLines == 0 {
+		t.Fatalf("the unreachable remote was never reported at all: %v", rig.logs)
+	}
+	if fetchLines > 1 {
+		t.Fatalf("the same fetch failure was logged %d times across 5 ticks — noisy for ever:\n%s",
+			fetchLines, strings.Join(rig.logs, "\n"))
+	}
+	if !strings.Contains(strings.Join(rig.logs, "\n"), "not be repeated") {
+		t.Fatalf("the one line does not say it will not be repeated: %v", rig.logs)
+	}
+}
+
+// A clone directory that has vanished must be re-created, not fetched against
+// for ever.
+func TestGitProjectionRecreatesAVanishedClone(t *testing.T) {
+	rig := newProjectionRig(t, "wolf")
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "first")))
+	rig.proj.RenderPending(context.Background())
+	if err := rig.proj.PushProject(context.Background(), "wolf"); err != nil {
+		t.Fatalf("first push: %v", err)
+	}
+
+	// Somebody clears the clone root — a wiped volume, a reaped tmpdir. The
+	// projector still holds the cached *gitproj.Repo pointing at it.
+	if err := os.RemoveAll(rig.clone("wolf")); err != nil {
+		t.Fatal(err)
+	}
+
+	rig.store.mu.Lock()
+	rig.store.workers["wolf"] = []*agentdb.Worker{{
+		Project: "wolf", Name: "copywriter", SystemPrompt: "write well", Enabled: true,
+	}}
+	rig.store.mu.Unlock()
+	rig.proj.Hook()(context.Background(), rig.store.mutate("wolf", workerPromptWrite("copywriter", "second")))
+	rig.proj.RenderPending(context.Background())
+
+	if _, err := os.Stat(filepath.Join(rig.clone("wolf"), ".git")); err != nil {
+		t.Fatalf("the clone was not re-created: %v", err)
+	}
+	// Re-cloned, fetched, and rendered forward: the new worker is a real tree
+	// change, so it commits on top of the published history rather than
+	// starting a fresh one.
+	if n := rig.commitCount("wolf"); n != 2 {
+		t.Fatalf("after re-cloning, want the published commit plus the new one, got %d", n)
+	}
+	if kind := rig.state.lastErrorKind("wolf"); kind != agentdb.GitProjectionErrorNone {
+		t.Fatalf("a recoverable missing clone was recorded as a failure: %q / %q", kind, rig.state.lastError("wolf"))
+	}
 }
