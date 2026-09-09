@@ -135,8 +135,9 @@ func TestGetCharter_ValidDepositReportsItsEffects(t *testing.T) {
 	if got.SummaryOfEffects == nil {
 		t.Fatal("a valid charter must describe its effects")
 	}
-	if got.SummaryOfEffects.ScheduleEnabled {
-		t.Error("schedule_enabled must be false — the daily loop ships off")
+	if !got.SummaryOfEffects.ScheduleEnabled {
+		t.Error("schedule_enabled must be true — approving a charter starts the daily loop (T25), " +
+			"and this field is what tells the human so before they press Approve")
 	}
 	// The response describes the bundle; it never contains it.
 	if strings.Contains(rec.Body.String(), "STEP 0 — BOOTSTRAP") {
@@ -209,8 +210,8 @@ func TestApplyCharter_SendsTheWholeCharterAsOneApplication(t *testing.T) {
 	if len(app.Subscriptions) != 1 || app.Subscriptions[0].EventType != charter.EventArchitectRun {
 		t.Errorf("subscriptions = %+v", app.Subscriptions)
 	}
-	if len(app.Schedules) != 1 || app.Schedules[0].Enabled {
-		t.Errorf("schedules = %+v, want one, disabled", app.Schedules)
+	if len(app.Schedules) != 1 || !app.Schedules[0].Enabled {
+		t.Errorf("schedules = %+v, want exactly one, ENABLED (T25)", app.Schedules)
 	}
 	if len(app.MemorySeeds) != 2 {
 		t.Errorf("memory seeds = %d, want 2 (goal and registry)", len(app.MemorySeeds))
