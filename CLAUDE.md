@@ -88,20 +88,36 @@ Agent Orange. Three pieces:
 > Postgres-only. Documented in **`docs/20-datasets.md`**.
 >
 > **The memory-coordinated organisation** (`design/2026-09-08-memory-coordinated-organisation.md`,
-> in progress on this branch) makes a new project start with an *interview* rather than a roster.
+> **complete on this branch — 27 of 27 tickets**) makes a new project start with an *interview*
+> rather than a roster.
 > Creating a project takes a name and a **required goal**; an `interviewer` worker drives a
 > conversation towards a goal, a measure and a first set of labelling rules, and deposits that as
 > a **charter** — an append-only memory the console renders and a human approves ONCE. Approving
 > it creates exactly one worker, the **architect**, plus a daily schedule, an `architect.run`
 > subscription, the project background prose, a **project-wide briefing** carrying the label
 > registry, and two memory seeds. The architect designs the actual roster on its first run.
-> Built so far: `go/orgprompts` (the three prompts, as embedded files), `go/charter` (schema,
-> parser, validator, `Resolve`), `onboarding@v1`, the `charter_validate` core tool, the two
+> Built: `go/orgprompts` (the three prompts, as embedded files), `go/charter` (schema, parser,
+> validator, `Resolve`), `onboarding@v1`, the `charter_validate` core tool, the two
 > `/agent/charter` routes, the onboarding screen and charter panel in `web/`, the shell wiring in
 > `examples/web`, and **narrow revert**: `GET /agent/config-events/{id}`, `POST
 > /agent/config-events/{id}/revert`, and a "Revert to this version" action on every changelog
 > entry (a forward compensating write — nothing is ever erased, and only the newest change to a
 > thing may be reverted).
+>
+> The whole journey was walked end to end against the mock stack on 2026-09-09 (T26): interview →
+> charter → approve → architect with an ENABLED daily schedule → an `architect.run` event whose
+> job's composed prompt carries the label registry → revert, including a non-newest revert refused
+> with a readable reason. **What is deliberately not proved offline** is that a model reads its own
+> session id out of the seed and labels the charter with it — mock mode proves transmission, never
+> discovery (`docs/product/25-cooperative-patterns.md` §5). That was observed against the real
+> model in T1.
+>
+> Two behaviours changed late and are easy to trip over. `PUT /agent/workers/{name}` now has **two**
+> absent-field rules — `description`, `system_prompt`, `mcp_config`, `image` and `briefing` keep on
+> absent; `max_instances`, `enabled` and `frozen` still replace on absent — so **send the whole
+> row** (T27, and DI11 for why it is split). And on that route a briefing of `null` means *leave it
+> alone* while `[]` means *clear it*; coercing one to the other breaks something real in either
+> direction (DI14).
 >
 > ⚠️ **Read this before running it on a project you care about.** Approving a charter creates an
 > **enabled** daily schedule, and *the architect's loop has no mechanical brake: every rule in its
