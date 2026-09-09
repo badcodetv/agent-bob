@@ -9,13 +9,35 @@
 // Stickiness lives here rather than in the rule because it is storage, and the
 // rule must stay answerable from its arguments alone.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConfigApiOptions } from './configApi.js'
 import useWorkers from './useWorkers.js'
 import useMemories from './useMemories.js'
 import useSubscriptions from './useSubscriptions.js'
 import useEventsOverview from './useEvents.js'
-import { revealedNav, type NavEntry } from './navReveal.js'
+import { everythingRevealed, revealedNav, type NavEntry } from './navReveal.js'
+
+/**
+ * How often the nav re-counts what the project contains, in ms.
+ *
+ * DI12: it used to count once, on mount, and never again — every hook feeding
+ * it is a one-shot ref-guarded fetch, and they are separate instances from the
+ * ones the pages hold, so a worker hired on the Workers page could not reach
+ * the nav's copy. The Chart tab therefore did not appear when you gave a
+ * project its second worker; it appeared the next time you reloaded the page.
+ *
+ * That is not a tuning problem, it is the difference between the feature
+ * working and not: `appeared` + `navRevealSentence` exist so the shell can name
+ * a newly revealed entry IN THE CONFIRMATION OF THE ACTION THAT CAUSED IT
+ * (design 28 §3.2). On the next page load there is no such action left, so that
+ * sentence could never once have been shown.
+ *
+ * Ten seconds because a reveal is an "oh, and now you can also…" rather than
+ * something being waited on — cheaper than the 4s the charter panel polls at,
+ * and slow enough that four list requests a tick is not a cost worth thinking
+ * about. It also stops entirely once there is nothing left to reveal.
+ */
+export const NAV_REVEAL_POLL_MS = 10_000
 
 /** `localStorage` key for a project's revealed set. */
 export function navRevealKey(projectId: string): string {
@@ -47,6 +69,11 @@ export function writeRevealed(projectId: string, entries: NavEntry[]): void {
 export interface UseNavRevealOptions extends ConfigApiOptions {
   /** Project id — the sticky set's key. */
   projectId: string
+  /**
+   * Re-count interval in ms. 0 or negative switches polling off, which is what
+   * a test wants when it is driving the counts itself.
+   */
+  pollMs?: number
 }
 
 export interface NavRevealApi {
@@ -67,7 +94,7 @@ export interface NavRevealApi {
 }
 
 export default function useNavReveal(options: UseNavRevealOptions): NavRevealApi {
-  const { projectId } = options
+  const { projectId, pollMs = NAV_REVEAL_POLL_MS } = options
 
   const workers = useWorkers(options)
   const memories = useMemories(options)
@@ -122,6 +149,42 @@ export default function useNavReveal(options: UseNavRevealOptions): NavRevealApi
     // re-run this effect forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, unlockedKey])
+
+  // Re-count on a timer until every conditional entry has been revealed, then
+  // stop for good (DI12).
+  //
+  // The four reloads live in a ref rather than in the effect's dependencies.
+  // They are `useCallback`s whose own dependencies change as their data does,
+  // so depending on them directly would tear down and rebuild the interval on
+  // render after render — and an interval that is rebuilt more often than its
+  // period never fires at all, which is the same bug wearing a different hat.
+  const reloads = useRef({
+    workers: workers.reload,
+    memories: memories.reload,
+    subscriptions: subscriptions.reload,
+    events: events.reload,
+  })
+  reloads.current = {
+    workers: workers.reload,
+    memories: memories.reload,
+    subscriptions: subscriptions.reload,
+    events: events.reload,
+  }
+
+  const settled = everythingRevealed(result.sticky)
+  useEffect(() => {
+    if (pollMs <= 0 || settled) return
+    const id = setInterval(() => {
+      // Failures are the hooks' own business — each keeps its last good list
+      // and reports its own error. A rejected reload here must not take the
+      // interval down with it.
+      void reloads.current.workers().catch(() => {})
+      void reloads.current.memories().catch(() => {})
+      void reloads.current.subscriptions().catch(() => {})
+      void reloads.current.events().catch(() => {})
+    }, pollMs)
+    return () => clearInterval(id)
+  }, [pollMs, settled, projectId])
 
   const acknowledge = useCallback(() => {
     setHeld((prev) => (prev.appeared.length === 0 ? prev : { ...prev, appeared: [] }))

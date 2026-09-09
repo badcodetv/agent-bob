@@ -294,9 +294,16 @@ function ProjectWorkspace({
   const [view, setView] = useState<View | "onboarding">(onboardingGoal !== null ? "onboarding" : "desk");
 
   // Which nav entries this project has earned (K9). Day one is four; Memory
-  // arrives with the first memory, Activity with the first event, Chart with
-  // the first SUBSCRIPTION — because five workers with nothing wired between
-  // them have no shape worth drawing.
+  // arrives with the first memory, Activity with the first event, and Chart
+  // with the first subscription OR the second worker — two workers being the
+  // first moment there is a pair to wire, and the canvas being where a wire is
+  // drawn, so gating it on a subscription made the first wire unreachable by
+  // the gesture designed for it.
+  //
+  // The hook re-counts on a timer (DI12). It used to count once at mount, so a
+  // tab could not appear until the page was reloaded — and the `appeared`
+  // announcement below, which exists to name a new entry beside the action that
+  // caused it, could never have fired.
   const { visible, appeared, acknowledge } = useNavReveal({ projectId: project });
 
   // A view can stop being visible only by the project changing under us (a

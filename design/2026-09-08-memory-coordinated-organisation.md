@@ -2042,10 +2042,24 @@ than a slip — possibly deliberate, so a trigger can be retargeted without
 leaving the page. But it undercuts the tab's own premise, and it reads as the
 software not paying attention to where you are standing.
 
-**Not changed here.** It is a screen this plan does not own, and widening scope
-one ticket from the finish line is exactly what the execution rules forbid.
-Recorded for a decision: passing `workerName` through as the new draft's
-`worker` is a two-line change in `WorkerTriggers.tsx`.
+**Fixed** (Kai approved it in-session, after this was recorded for a decision).
+
+Both editors take an optional `defaultWorker`, used as the seed's `worker` when
+creating and ignored when editing a stored row — so retargeting an existing
+trigger is untouched, which was the one thing that might have made the old
+behaviour deliberate. `WorkerTriggers` passes `workerName` to both.
+
+The regression test is `web/src/components/WorkerTriggers.test.tsx`, and it
+aims at the SEAM rather than at the new prop: the bug was a passing-through
+failure, so a test that only checked `defaultWorker` on the editors would have
+passed against the broken wiring. It asserts the name reaches the field, that a
+schedule saves with the Worker input never touched, and — the guard on the fix
+— that a stored row's own worker is not overwritten. Nothing rendered this
+component before, which is why the gap survived every existing test.
+
+`e2e/features/console.stack.spec.ts` typed the worker in by hand with a comment
+explaining why it had to; that line is now the assertion that it no longer has
+to, and the comment says so rather than disappearing.
 
 ### DI10 (T18) — the browser suite runs three workers with no retries, and three of its tests are time-boxed
 
@@ -2077,3 +2091,91 @@ simply not always enough here.
 CI, on the evidence of one WSL2 laptop that was also running Go suites at the
 time. Recorded so the next person does not spend an afternoon on it, and so
 that a red run on this machine is read correctly before anything is "fixed".
+
+### DI11 (T27) — the worker PUT now has TWO absent-field rules, and the split is not a decision anyone made
+
+T27's ticket says the fix is to make `Description`, `SystemPrompt`, `MCPConfig`,
+`Image` and `Briefing` keep-on-absent, "matching `MaxInstances`/`Enabled`/
+`Frozen` which are already keep-on-absent in the same handler".
+
+**Those three are not keep-on-absent.** They are pointers so that a meaningful
+zero (`0`, `false`) can be told apart from absence, but an absent one still
+writes this route's *default* — `1`, `true`, `false` — not the stored value.
+`TestWorkersHTTP_FreezeAndUnfreezeRoundTrip` pins it in as many words:
+
+> And an omitted field means false, per this route's replace semantics.
+> `PUT is create-or-replace: an omitted frozen must read as false`
+
+So the ticket's premise was wrong, and its stated goal — "one rule for the whole
+body" — is not what T27 as specified produces. What shipped is T27's
+**acceptance criteria** exactly: five fields keep on absent, three still replace.
+The handler and `docs/18-workers-memory-events.md` both now say which is which
+instead of implying a single rule.
+
+**The same hazard remains on `frozen`, and it is arguably the worse one.** A
+partial PUT still silently thaws a frozen worker, and freeze is the flag
+reserved for humans — `docs/product/10-topology-library.md` §3 is the whole
+boundary. `max_instances` silently resets to 1 the same way.
+
+**Not changed here, deliberately.** Making the three keep-on-absent contradicts
+a test that states its reasoning, and what an omitted `frozen` should mean is a
+product decision about the safety flag, not a bug fix — widening T27 to take it
+unilaterally is not the executor's call. Every caller in this repo already sends
+the whole row (`web/src/workers.ts`'s `workerBody`, `OrgChartPage`'s
+read-modify-write, `examples/web`'s `enableInterviewer`), which is correct under
+either rule, so nothing here is exposed today. An outside embedder following
+`docs/19-embedding.md` is.
+
+**One caller did need changing.** `workerBody` sent `briefing: string[] | null`,
+and the console's editor sets the draft to `null` when the last selector is
+removed. Under the new rule `null` means KEEP, so "remove every selector, save"
+would have become a silent no-op. It now sends `[]`, which is the explicit clear.
+That is the general shape of the hazard in this change: a client that used null
+to mean "nothing" now says "don't touch".
+
+### DI12 (T26) — the console's progressive nav never re-counts, so a tab cannot appear until a reload
+
+Found by the sixth defect in `console.stack.spec.ts` — the same never-run file
+as DI8. `applying actor-critic@v1 draws the chart…` applies the topology through
+the UI, waits for the apply's own done step, then clicks `nav-chart` and times
+out after the full 300s. The page snapshot shows the nav holding only Desk,
+Chat, Workers and Settings: not just Chart missing, but Memory and Activity too,
+on a project that by then has two workers, two subscriptions and a handful of
+`config.changed` events.
+
+`revealedNav`'s rule is satisfied (`chart: subscriptions > 0 || workers >= 2`).
+The counts feeding it are not. `useNavReveal` reads them from `useWorkers`,
+`useMemories`, `useSubscriptions` and `useEventsOverview`, and **none of those
+four polls** — each is a render-phase ref-guarded fetch that runs once. They are
+also separate instances from the ones the Workers page holds, so a mutation made
+on a page cannot reach the nav's copy. The nav's counts are therefore frozen at
+whatever they were when the shell mounted, and every reveal waits for a reload.
+
+That contradicts the design this machinery exists for: `appeared`,
+`acknowledge` and `navRevealSentence` are all there so the shell can *name a
+newly revealed entry in the confirmation of the action that caused it*
+(`docs/product/28-console-ia-design.md` §3.2). A reveal that only lands on the
+next page load has no action left to be announced beside.
+
+**Fixed** (Kai approved it in-session). `useNavReveal` now re-counts on a timer
+— `NAV_REVEAL_POLL_MS`, 10s, overridable per call and switchable off with
+`pollMs: 0` — and **stops for good** once every conditional entry has been
+revealed, which the new pure `everythingRevealed(sticky)` decides. Reveals are
+sticky and one-way, so once all three are out there is nothing further to watch
+for and polling four list endpoints forever would be spending requests on a
+settled question.
+
+Two things worth knowing if this is touched again:
+
+- The four `reload` callbacks are held in a **ref**, not in the effect's
+  dependency array. They are `useCallback`s whose own dependencies change as
+  their data changes, so depending on them directly rebuilds the interval on
+  render after render — and an interval rebuilt more often than its period
+  never fires at all, which is the original bug wearing a different hat.
+- The tests deliberately do **not** install fake timers. The thing under test is
+  the timer; a test with its own proves only that an interval was requested, not
+  that it ever runs. They use a 20ms period against real time instead.
+
+`console.stack.spec.ts` needed no change for this — its `gotoView(page,
+'chart')` is a Playwright auto-waiting click, so a reveal that arrives one poll
+later still satisfies it.

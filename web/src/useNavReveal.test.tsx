@@ -6,7 +6,7 @@ import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import useNavReveal, { navRevealKey, readRevealed, writeRevealed } from './useNavReveal.js'
-import type { NavEntry } from './navReveal.js'
+import { everythingRevealed, NAV_CONDITIONAL, type NavEntry } from './navReveal.js'
 
 let originalFetch: typeof globalThis.fetch
 let workers: unknown[]
@@ -14,8 +14,8 @@ let memories: unknown[]
 let events: unknown[]
 let subscriptions: unknown[]
 
-function Probe({ projectId = 'acme' }: { projectId?: string }) {
-  const { visible, appeared } = useNavReveal({ projectId })
+function Probe({ projectId = 'acme', pollMs }: { projectId?: string; pollMs?: number }) {
+  const { visible, appeared } = useNavReveal({ projectId, pollMs })
   return (
     <div>
       <span data-testid="visible">{visible.join(',')}</span>
@@ -121,5 +121,93 @@ describe('stickiness', () => {
   it('survives unreadable storage rather than throwing', () => {
     window.localStorage.setItem(navRevealKey('acme'), 'not json')
     expect(readRevealed('acme')).toEqual([])
+  })
+})
+
+// DI12: the nav has to notice things that happen AFTER the page loaded.
+//
+// It used to count once and never again. Every hook feeding it is a one-shot
+// ref-guarded fetch, and they are separate instances from the ones the pages
+// hold, so hiring a worker on the Workers page could not reach the nav's copy —
+// the Chart tab appeared on the next page load, not when you earned it. Which
+// means `appeared` and `navRevealSentence`, whose whole job is to name a new
+// entry beside the action that caused it, could never once have fired.
+//
+// Deliberately no fake timers: the thing under test IS the timer, and a test
+// that installs its own proves the interval was requested rather than that it
+// ever runs. A 20ms period keeps that honest and still quick.
+describe('re-counting after mount (DI12)', () => {
+  it('reveals the Chart when the project earns it, with no reload', async () => {
+    render(<Probe pollMs={20} />)
+    await waitFor(() =>
+      expect(screen.getByTestId('visible')).toHaveTextContent('desk,chat,workers,settings'),
+    )
+    expect(screen.getByTestId('visible')).not.toHaveTextContent('chart')
+
+    // The project earns it while the page sits there — two workers is the rule.
+    workers = [
+      { name: 'a', project: 'acme', system_prompt: '', enabled: true },
+      { name: 'b', project: 'acme', system_prompt: '', enabled: true },
+    ]
+
+    await waitFor(() => expect(screen.getByTestId('visible')).toHaveTextContent('chart'), {
+      timeout: 4000,
+    })
+    // And it is announced, which is the half that was unreachable before.
+    expect(screen.getByTestId('appeared')).toHaveTextContent('chart')
+  })
+
+  it('stops polling once every entry has been revealed', async () => {
+    // Everything already earned, so the first evaluation settles it.
+    workers = [
+      { name: 'a', project: 'acme', system_prompt: '', enabled: true },
+      { name: 'b', project: 'acme', system_prompt: '', enabled: true },
+    ]
+    memories = [{ id: 'm1', project: 'acme', content: 'x', labels: {}, created_at: 1 }]
+    events = [
+      { id: 'e1', project: 'acme', type: 'x', text: '', envelope: {}, occurred_at: 1, created_at: 1 },
+    ]
+    subscriptions = [{ id: 's1', project: 'acme', event_type: 'x', worker: 'a', enabled: true }]
+
+    render(<Probe pollMs={20} />)
+    await waitFor(() => expect(screen.getByTestId('visible')).toHaveTextContent('chart'))
+
+    const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    // Long enough for many ticks of a 20ms interval, had one still been armed.
+    await new Promise((r) => setTimeout(r, 250))
+    expect((globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(
+      after,
+    )
+  })
+
+  it('does not poll at all when switched off', async () => {
+    render(<Probe pollMs={0} />)
+    await waitFor(() =>
+      expect(screen.getByTestId('visible')).toHaveTextContent('desk,chat,workers,settings'),
+    )
+    const after = (globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    workers = [
+      { name: 'a', project: 'acme', system_prompt: '', enabled: true },
+      { name: 'b', project: 'acme', system_prompt: '', enabled: true },
+    ]
+    await new Promise((r) => setTimeout(r, 150))
+    expect((globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(
+      after,
+    )
+    expect(screen.getByTestId('visible')).not.toHaveTextContent('chart')
+  })
+})
+
+describe('everythingRevealed', () => {
+  it('is false until every conditional entry is held, then true', () => {
+    expect(everythingRevealed([])).toBe(false)
+    expect(everythingRevealed(['memory'] as NavEntry[])).toBe(false)
+    expect(everythingRevealed(NAV_CONDITIONAL as NavEntry[])).toBe(true)
+    // The always-present entries are not part of the question.
+    expect(everythingRevealed(['desk', 'chat', 'workers', 'settings'] as NavEntry[])).toBe(false)
+  })
+
+  it('lists exactly the entries that have a reveal rule', () => {
+    expect([...NAV_CONDITIONAL].sort()).toEqual(['activity', 'chart', 'memory'])
   })
 })

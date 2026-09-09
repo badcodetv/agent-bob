@@ -543,14 +543,17 @@ export type { WorkerTriggersProps } from './components/WorkerTriggers.js'
 // sentence that announces a new one (design 28 §3, decision K9).
 export {
   NAV_ALWAYS,
+  NAV_CONDITIONAL,
   NAV_ENTRIES,
   NAV_LABELS,
+  everythingRevealed,
   navRevealSentence,
   revealedNav,
 } from './navReveal.js'
 export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'
 export {
   default as useNavReveal,
+  NAV_REVEAL_POLL_MS,
   navRevealKey,
   readRevealed,
   writeRevealed,
