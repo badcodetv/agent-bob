@@ -532,7 +532,7 @@ Newest-per-`name=` renders to `orange/memory/<name>.md`; an imported edit become
 a new memory. Depends on G4, G11.
 **Validation:** `go test ./gitproj/ ./cmd/agentd/ -run Document`.
 
-### G15: bootstrap a project from a folder   [Status: pending | Model: opus]
+### G15: bootstrap a project from a folder   [Status: done | Model: opus]
 Point an empty project at a repo+subfolder; the importer runs once over every
 file. Depends on G11.
 **Validation:** round-trip test — render project A, bootstrap project B from it,
@@ -589,6 +589,19 @@ Also read `AGENTKIT_GIT_WEBHOOK_POLL_INTERVAL` (`time.ParseDuration`, house styl
 per `gc.go`'s `AGENTKIT_SESSION_IDLE_TIMEOUT`, default 5m) and pass it as the
 poll's `Interval`. `httpapi` reads no env vars itself and that must stay true.
 **Validation:** `cd go && go test ./httpapi/ -run GitWebhook -race && go test ./cmd/agentd/ -run GitWebhook && go build ./...`
+
+### G21: the importer drops a skill's `visibility` and `requires_build`   [Status: pending | Model: sonnet]
+Opened by G15, pinned by its `TestGitBootstrapDoesNotRestoreServerOwnedSkillFields`.
+Both fields **render** (they are on G2's allowlist) and the importer does not
+apply them, so a skill does not round-trip: export a project, bootstrap a new
+one, and every skill comes back with default visibility. Either apply them in
+`gitimport.go`'s skill path, or mark them `Never` in the allowlist so the repo
+stops claiming to carry state it cannot restore. **Applying them is the right
+fix** — visibility is a real setting a human should be able to review in a diff.
+Note `revision` restarting at 1 is correct and must NOT be "fixed": skills are
+append-only and a bootstrapped project has no history to inherit.
+**Validation:** `cd go && go test ./cmd/agentd/ -run 'GitImport|GitBootstrap'` —
+extend the round-trip so a non-default visibility survives export→bootstrap.
 
 ## Discovered Issues Log
 
@@ -897,6 +910,45 @@ an unauthenticated route cannot be made to buffer or hash arbitrary bytes;
 non-push events get a quiet 2xx because GitHub hammers a non-2xx; and the route
 is deliberately **not** in `Mux()` because it must sit outside the JWT
 middleware — mounting is `main.go`'s job (G20).
+
+---
+
+### DI12 (G15) — bootstrap CANNOT reuse the import range, and the reason is inverted
+
+🔴 **An exported folder is made entirely of the renderer's own commits.** So
+`ImportRange`'s `Orange-Seq` skip — the rule that stops us re-importing our own
+output — would skip **every commit in the folder**, import nothing, and **report
+success**. A silent no-op that looks like a working bootstrap.
+
+Bootstrap therefore reads the **tree** and never consults trailers at all. That
+is safe for the reason the whole design is safe: the files still go through the
+store's front door, so they become ordinary config events either way. The
+authorship check is an optimisation against re-import, not an authorisation
+check, and bootstrap does not need it. G15's harness commits the folder *as
+ours* so that mistake fails loudly if anyone re-introduces it.
+
+**The round-trip is real.** Render project A — three workers including a
+disabled one, populated `mcp_config` on both project and worker, an attention
+channel, briefing lists, a skill, two subscriptions, two schedules including a
+session-mode one, and a named memory document — commit, bootstrap B, fold both,
+`DeepEqual`. Then the other direction: re-rendering B reproduces the folder
+byte-for-byte apart from `settings.md`, where the git fields are deliberately
+absent.
+
+**Falsification, and one honest negative result.** Removing the quarantine
+return goes red; removing the order sort goes red; advancing the watermark on
+quarantine goes red; **removing the README skip turns all eight tests red**,
+confirming DI9 item 2 is exactly as dangerous as stated. And
+`gitBootstrapCheckNotImportable` does **not** go red when removed — gitproj's
+`DroppedFields` and the settings restore already hold the line. G15 kept it as
+defence in depth at the most dangerous moment and **labelled it as such in the
+code rather than claiming it was load-bearing**. That is the right way to report
+a check that earns its place without earning a test.
+
+**Two limits pinned rather than hidden:** a skill's `visibility` and
+`requires_build` render but are not applied on import (**ticket G21**), and an
+imported body keeps the renderer's trailing newline, so a prompt round-trips
+modulo `\n` — idempotent under re-render, so loop termination still holds.
 
 ---
 
