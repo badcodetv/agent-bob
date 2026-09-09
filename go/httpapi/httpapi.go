@@ -171,6 +171,16 @@ type Config struct {
 	// host that can list datasets but not serve their bytes should say so on
 	// the one route that cannot be honoured.
 	DatasetBlobs DatasetBlobReader
+
+	// GitProjection backs GET /agent/git-projection (gitprojectionstatus.go).
+	// Same defaulting rule as Workers: auto-filled from AgentDB in New().
+	//
+	// Nil is a supported deployment and, unlike the others, does NOT 501: the
+	// route still reports whether projection is configured and where it
+	// publishes, with state_available=false. A missing state store is a reason
+	// to say "I cannot see whether this is working", never a reason to hide the
+	// repository link. See the file header in gitprojectionstatus.go.
+	GitProjection GitProjectionStore
 }
 
 // Tenancy contract
@@ -251,6 +261,9 @@ func New(cfg Config) (*Handlers, error) {
 	// its field comment.
 	if cfg.Datasets == nil && cfg.AgentDB != nil {
 		cfg.Datasets = cfg.AgentDB
+	}
+	if cfg.GitProjection == nil && cfg.AgentDB != nil {
+		cfg.GitProjection = cfg.AgentDB
 	}
 	if cfg.Topologies == nil && cfg.AgentDB != nil {
 		cfg.Topologies = cfg.AgentDB
@@ -411,8 +424,15 @@ type Endpoints struct {
 	// The image/skill catalogues (B4) — read-only; the project comes from the
 	// JWT. There is no write counterpart: both catalogues are append-only and
 	// are written only from inside a session (§13.4, §14.2).
-	ListImages   string // "GET /agent/images"
-	ListSkills   string // "GET /agent/skills"
+	ListImages string // "GET /agent/images"
+	ListSkills string // "GET /agent/skills"
+	// GitProjectionStatus is the console's read of the git projection's health
+	// (design/2026-09-09-git-projection.md, ticket G16). Read-only, and the
+	// project comes from the JWT: there is no write counterpart because the
+	// projection's configuration is four fields on project settings and its
+	// state is written only by the projector itself.
+	GitProjectionStatus string // "GET /agent/git-projection"
+
 	ListWorkers  string // "GET /agent/workers"
 	GetWorker    string // "GET /agent/workers/{name}"
 	PutWorker    string // "PUT /agent/workers/{name}"
@@ -495,6 +515,8 @@ var DefaultEndpoints = Endpoints{
 	ApplyCharter:    "POST /agent/charter/apply",
 	ListImages:      "GET /agent/images",
 	ListSkills:      "GET /agent/skills",
+
+	GitProjectionStatus: GitProjectionEndpoint,
 	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
 	GitWebhook: "POST /agent/git/webhook",
 }
@@ -582,7 +604,9 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ApplyCharter:      h.ApplyCharter,
 		e.ListImages:        h.ListImages,
 		e.ListSkills:        h.ListSkills,
-		e.GetSessionByName:  h.GetSessionByName,
+
+		e.GitProjectionStatus: h.GetGitProjectionStatus,
+		e.GetSessionByName:    h.GetSessionByName,
 
 		e.DownloadArtifact:          h.DownloadArtifact,
 		e.SessionArtifactsByName:    h.SessionArtifactsByName,

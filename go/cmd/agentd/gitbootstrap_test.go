@@ -40,9 +40,11 @@ const gitBootstrapSubfolder = gitproj.DefaultSubfolder
 //     whole-value ${VAR} reference, because the allowlist refuses to render
 //     anything else (§D) and a literal here would fail the render, not the
 //     round-trip;
-//   - the skill's Visibility, RequiresBuild, Revision and provenance are left
-//     at values that survive, because they provably cannot round-trip. That is
-//     not a convenient fixture hiding a bug: it is pinned in its own test,
+//   - the skill's Revision and provenance (CreatedByWorker/CreatedBySession)
+//     are left at values that do not survive bootstrap — a bootstrapped
+//     project has no history to inherit, and provenance is server-stamped,
+//     never taken from a file. Visibility and RequiresBuild DO round-trip.
+//     All of this is pinned in its own test,
 //     TestGitBootstrapDoesNotRestoreServerOwnedSkillFields.
 func gitBootstrapStateA(project string) gitproj.ProjectState {
 	settings := agentdb.DefaultProjectSettings(project)
@@ -692,7 +694,10 @@ func TestGitBootstrapDoesNotRestoreServerOwnedSkillFields(t *testing.T) {
 	stateA := gitBootstrapStateA("wolf-a")
 	sk := stateA.Skills[0]
 	sk.Revision = 9
-	sk.Visibility = "organizational"
+	// Non-default on purpose (G21): the default a fresh CreateSkill would
+	// apply is "organizational", so asserting that value back would not prove
+	// the importer applied it rather than just defaulting it.
+	sk.Visibility = "private"
 	sk.RequiresBuild = true
 	sk.InstallSh = "#!/bin/sh\napt-get install -y jq\n"
 	sk.CreatedByWorker = "architect"
@@ -708,12 +713,19 @@ func TestGitBootstrapDoesNotRestoreServerOwnedSkillFields(t *testing.T) {
 	}
 
 	got := storeB.skills["hypothesis-format"]
-	// What DOES come back: the parts of a skill a human writes.
+	// What DOES come back: the parts of a skill a human writes, including the
+	// two settings that render but did not used to be applied by the importer.
 	if got.Description != sk.Description || gitBootstrapTrim(got.Markdown) != gitBootstrapTrim(sk.Markdown) {
 		t.Fatalf("the skill's authored content did not round-trip: %#v", got)
 	}
 	if got.InstallSh != sk.InstallSh {
 		t.Fatalf("install_sh did not round-trip: %q", got.InstallSh)
+	}
+	if got.Visibility != "private" {
+		t.Fatalf("visibility did not round-trip: got %q, want %q", got.Visibility, "private")
+	}
+	if !got.RequiresBuild {
+		t.Fatalf("requires_build did not round-trip: got %v, want true", got.RequiresBuild)
 	}
 	// What does not, and must not be quietly assumed to.
 	if got.Revision != 1 {
@@ -722,10 +734,6 @@ func TestGitBootstrapDoesNotRestoreServerOwnedSkillFields(t *testing.T) {
 	}
 	if got.CreatedByWorker != "" || got.CreatedBySession != "" {
 		t.Fatalf("bootstrap asserted skill provenance: %#v", got)
-	}
-	if got.Visibility != "" || got.RequiresBuild {
-		t.Fatalf("visibility/requires_build now import; remove them from the fold's "+
-			"documented exclusions in this file: %#v", got)
 	}
 }
 

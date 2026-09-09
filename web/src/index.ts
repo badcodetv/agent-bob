@@ -173,6 +173,27 @@ export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './ch
 export { default as useCharter } from './useCharter.js'
 export type { UseCharterOptions, CharterApi } from './useCharter.js'
 
+// The git projection (G16) — the pure client for GET /agent/git-projection,
+// and the prose that turns one health word into a sentence an operator can act
+// on. Every failure mode this describes is one nobody would otherwise notice.
+export {
+  GIT_PROJECTION_ENDPOINT,
+  GIT_PROJECTION_HEALTHS,
+  GIT_PROJECTION_IGNORED_EXPLANATION,
+  coerceGitProjectionStatus,
+  coerceGitProjectionNote,
+  describeGitProjection,
+  isGitProjectionHealth,
+  shortSha,
+} from './gitProjection.js'
+export type {
+  GitProjectionHealth,
+  GitProjectionNote,
+  GitProjectionSeverity,
+  GitProjectionStatus,
+  GitProjectionSummary,
+} from './gitProjection.js'
+
 // Events & observability (F1) — the `/agent/events` + `/agent/deliveries` read
 // surface: pure helpers, the overview hook, and the dry-run subscription
 // matcher. Read-only; F2 owns the subscription/schedule editors.
@@ -878,6 +899,11 @@ export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './component
 export type { RunArchitectControlProps } from './components/RunArchitectControl.js'
 export { default as OnboardingPage } from './components/OnboardingPage.js'
 export type { OnboardingPageProps } from './components/OnboardingPage.js'
+
+// The git projection panel — presentational, so it lives in the components
+// tier: it takes a status and renders it, and ProjectSettingsPage owns the read.
+export { default as GitProjectionPanel } from './components/GitProjectionPanel.js'
+export type { GitProjectionPanelProps } from './components/GitProjectionPanel.js'
 export { default as NlAssistField } from './components/NlAssistField.js'
 export type { NlAssistFieldProps } from './components/NlAssistField.js'
 

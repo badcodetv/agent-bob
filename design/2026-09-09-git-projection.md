@@ -489,22 +489,26 @@ Migration for the four settings fields; `projectConfig.GitHubTokenEnv` validated
 at boot exactly like `api_key_env`. The four fields are marked not-importable.
 **Validation:** `go test ./agentdb/... ./cmd/agentd/ -run 'Settings|ProjectMap'`.
 
-### G8: the projection worker   [Status: pending | Model: opus]
+### G8: the projection worker   [Status: done | Model: opus]
 Hook fan-out (never error into the mutation), per-project dirty set, render+commit
 in seq order, durable last-rendered-seq watermark, boot reconciliation, lease.
 **Validation:** `go test ./cmd/agentd/ -run GitProjection`; a test that a config
 mutation produces exactly one commit whose trailers match the config event.
 
-### G9: the push loop   [Status: pending | Model: sonnet]
+### G9: the push loop   [Status: done | Model: sonnet]
 Background, fast-forward-only, never force, never inside the render mutex.
 Backs off and surfaces failure without blocking writes.
 **Validation:** `go test ./cmd/agentd/ -run GitPush`, including a remote that is
 unreachable and a remote that has diverged.
 
-### G10: backfill from the fold   [Status: pending | Model: opus]
+### G10: backfill from the fold   [Status: done | Model: opus]
 One-shot: replay `config_events` from seq 1 via `FoldConfig`, one commit each.
-**Validation:** a test that a project with N config events backfills to N
-commits whose subjects and trailers match the log in order.
+**Validation:** a test that a project's config events backfill to commits whose
+subjects and trailers match the log **in seq order**.
+**[corrected by G10]** This previously said "N config events backfill to N
+commits". That is wrong: an event that changes nothing *renderable* — a moved
+`updated_at`, a field the allowlist marks `Never` — correctly produces **no**
+commit. The count is ≤ N and the test asserts the weaker, correct property.
 
 ### G11: the importer   [Status: done | Model: opus]
 Tree diff from the watermark, skip `Orange-Seq:` commits, parse-all-then-apply,
@@ -527,7 +531,7 @@ the winning id.
 `AGENTKIT_TEST_POSTGRES_URL`) — a concurrent test where exactly one of two
 writers wins and the loser is told who won.
 
-### G14: named-document memory rendering   [Status: pending | Model: sonnet]
+### G14: named-document memory rendering   [Status: done | Model: sonnet]
 Newest-per-`name=` renders to `orange/memory/<name>.md`; an imported edit becomes
 a new memory. Depends on G4, G11.
 **Validation:** `go test ./gitproj/ ./cmd/agentd/ -run Document`.
@@ -538,7 +542,7 @@ file. Depends on G11.
 **Validation:** round-trip test — render project A, bootstrap project B from it,
 fold both, assert the configurations are equal.
 
-### G16: console surface   [Status: pending | Model: sonnet]
+### G16: console surface   [Status: done | Model: sonnet]
 Repo link, last-rendered seq, last-pushed SHA, push health, quarantine list with
 reasons, on the project settings page.
 **Validation:** `cd web && npm test && npm run typecheck`.
@@ -590,7 +594,7 @@ per `gc.go`'s `AGENTKIT_SESSION_IDLE_TIMEOUT`, default 5m) and pass it as the
 poll's `Interval`. `httpapi` reads no env vars itself and that must stay true.
 **Validation:** `cd go && go test ./httpapi/ -run GitWebhook -race && go test ./cmd/agentd/ -run GitWebhook && go build ./...`
 
-### G21: the importer drops a skill's `visibility` and `requires_build`   [Status: pending | Model: sonnet]
+### G21: the importer drops a skill's `visibility` and `requires_build`   [Status: done | Model: sonnet]
 Opened by G15, pinned by its `TestGitBootstrapDoesNotRestoreServerOwnedSkillFields`.
 Both fields **render** (they are on G2's allowlist) and the importer does not
 apply them, so a skill does not round-trip: export a project, bootstrap a new
@@ -602,6 +606,35 @@ Note `revision` restarting at 1 is correct and must NOT be "fixed": skills are
 append-only and a bootstrapped project has no history to inherit.
 **Validation:** `cd go && go test ./cmd/agentd/ -run 'GitImport|GitBootstrap'` —
 extend the round-trip so a non-default visibility survives export→bootstrap.
+
+### G23: persist quarantine and ignored, and give the state row an error KIND   [Status: pending | Model: opus]
+Opened by G16, and it is the largest remaining gap.
+1. 🔴 **Nothing persists quarantine or ignored results.** `gitImportResult`'s
+   `Failures` and `Ignored` live in memory for one run and no caller stores them.
+   `git_projection_state` holds a single `LastError`. So on a real deployment the
+   console's two most operationally useful lists are **empty forever** — an
+   operator whose push was rejected wholesale, or whose git edit did nothing,
+   sees nothing at all. Persist both (migration 049, beside 048) and write them
+   from the import path.
+2. **The state row stores `err.Error()` with no code**, so health is classified
+   by **matching sentinel text**. `TestGitProjectionStatusSentinelsMatchEngine`
+   pins it and goes red on a reword, which is honest but is a tripwire, not a
+   design. Add a `kind` column set at the point the error is known — where the
+   type is still in hand — and classify on that.
+**Validation:** `cd go && go test ./agentdb/ -run 'Migration|GitProjection' && go test ./cmd/agentd/ -run 'GitImport|GitProjection' && go test ./httpapi/ -run GitProjectionStatus`; a quarantined push must survive a restart and appear in the route's response.
+
+### G24: console editors for the four git fields   [Status: done | Model: sonnet]
+Opened by G16. `web/src/projectSettings.ts` carries `git_remote`, `git_branch`,
+`git_subfolder` and `git_token_env`, and `ProjectSettingsPage` has **no editors
+for any of them** — so there is still no way to point a project at a repository
+from the console. G16's panel is deliberately read-only status.
+Add the four fields to the settings form in the house style of its neighbours.
+`git_token_env` is a variable NAME: label it so nobody pastes a token into it,
+and say plainly that the value is read from agentd's environment. Note the
+server refuses a name that is not a valid environment variable name, and
+`git_subfolder` must be a single path segment — surface both as field-level
+validation rather than a save failure.
+**Validation:** `cd web && npx vitest run src/components/ProjectSettingsPage.test.tsx && npm run typecheck`
 
 ## Discovered Issues Log
 
@@ -949,6 +982,184 @@ a check that earns its place without earning a test.
 `requires_build` render but are not applied on import (**ticket G21**), and an
 imported body keeps the renderer's trailing newline, so a prompt round-trips
 modulo `\n` — idempotent under re-render, so loop termination still holds.
+
+---
+
+### DI13 (G8/G9) — how the push token reaches git without leaking, and three structural notes
+
+**The credential helper.** The token is passed via an inline credential helper
+written into the clone's `.git/config`, scoped to
+`credential.<scheme>://<host>.helper`, containing **only the environment
+variable's name**:
+`!f() { test "$1" = get && printf '…password=%s\n' "${VAR}"; }; f`.
+The value never touches the remote URL (where it would reach `git config`, `git
+remote -v` and every log line), never becomes argv (`printf` is a shell builtin —
+no `exec`, so it cannot appear in a process listing), and `store`/`erase` are
+ignored so it can never land in `~/.git-credentials`. The existing helper chain
+is reset first, and the variable name is validated against `envVarName` before it
+reaches a shell. A test asserts `.git/config` holds the name and not the value.
+
+**DI3 is now enforced** in one function, `resolveGitTokenEnv`: the settings
+column wins, the project map is the fallback, and neither resolving is
+`ErrNoGitToken` naming **both** candidates — failing before any network call
+rather than attempting an unauthenticated push.
+
+🔴 **The watermark table was created by `AutoMigrate` at boot.** Nothing else in
+this product creates schema at boot; every table comes from a numbered migration.
+A table that appears by side effect is invisible in the migration list, cannot be
+reviewed, and can differ between a fresh database and an upgraded one. **Ticket
+G22** moves it.
+
+**`agentdb/leases.go` has no project lease** — it is session-only
+(`RenewSessionLease` et al.). G8 built a row-based CAS lease in the projection
+state table, **re-entrant for the same owner** so the render and push goroutines
+cannot deadlock each other.
+
+**`gitproj.Clone` cannot be the first network call for a private repo** — the
+credential helper lives in `.git/config`, which does not exist until after a
+clone. `ensureRepo` therefore does `init` → `remote add` → install helper →
+`fetch`, then hands the directory to `Clone`, which reuses it.
+
+---
+
+### DI14 (G14) — `SearchMemories` would have published TRUNCATED documents
+
+Two properties of the memory search that §E does not mention, both of which
+silently corrupt a published document:
+
+🔴 **It returns a 500-byte SNIPPET, not the content.** Rendering search results
+directly publishes a truncated document — a `message-board` losing everything
+past 500 bytes — which the importer then reads back as the document's real
+content, and the next append is built on the truncation. The loader therefore
+**re-reads each winner with `GetMemory`**. Anything that renders memory content
+must do the same; the snippet is for display, never for the repo.
+
+🔴 **It caps a page at 100 rows and offers no cursor.** A single query publishes
+the hundred newest named documents and drops the rest with no signal. The loader
+pages on `Until` (an inclusive upper bound on `created_at` — the only key
+available, since that query has no offset), and in the one case where the bound
+cannot be lowered — a full page whose oldest row equals the bound already asked
+for, which needs 100 distinct names sharing a millisecond — it **returns an error
+naming the timestamp rather than a partial set**, because at that point it cannot
+know how much it is missing.
+
+**A memory whose `name=` is not a legal filename is skipped and reported**, not
+fatal and not sanitised. Fatal would let any worker holding `memory_create` stop
+a project's projection. Sanitising would publish a file whose name is not the
+document's, which the importer would read back as a *different* document. Label
+values allow `.` and `_`; path segments do not.
+
+**Falsification, including a notable negative.** Lifting `IncludeRetracted`,
+rendering from the snippet, dropping the sort, and making a bad name fatal each
+go red. Removing `LatestPer` **or** the nameless-row guard **alone** does not —
+the §E boundary is double-defended and `LatestPer` is the real lock. Reported as
+such rather than claimed as two independent guards.
+
+**Live Postgres ran, it did not skip** — a throwaway pgvector container, removed
+afterwards, and the live retraction case was falsified red before restoring.
+
+---
+
+### DI15 (G8/G9) — the local branch must be fast-forwarded in THREE places, and a crash can wedge it
+
+The importer reads the **remote** tip and deliberately never moves the local
+branch (DI10). Nothing else did either, so the first human push left the local
+clone behind and **every subsequent push would be rejected as non-fast-forward,
+permanently** — correctly, and with no resolution that does not destroy someone's
+work. Fast-forward now happens at three points, and all three are needed:
+
+- **On boot, for every project with a repo configured** — including one whose
+  watermark is already caught up, which would otherwise never see the human's
+  commit at all.
+- **Before each render**, so our commit lands on top of theirs, never beside it.
+- **In the push loop**, which is where a remote that moved since boot is noticed.
+
+Still fast-forward-only everywhere: a genuinely split history is logged once and
+left for a person. Nothing is merged, rebased, reset or forced.
+
+🔴 **A crash between "write the files" and "commit" leaves a staged index that
+blocks a fast-forward for ever.** That leftover is discarded — safe, because the
+render is a pure function of the database and is simply redone — and then the
+fast-forward proceeds. Tested.
+
+**A per-project in-process work lock** now serialises fetch → fast-forward →
+render → commit. `gitproj.Repo`'s per-method mutex was not enough: a push loop's
+`merge --ff-only` could land between a `WriteTree` and its `Commit`. The lock is
+**released before the network push**, so kill #5 still holds and a hanging remote
+cannot wedge a render.
+
+**Both trailers are unconditional** in `commitTrailers`, with a test that the map
+is never empty — DI4's forgery defence only holds while the trailer block is
+non-empty, and DI10's importer requires both trailers plus the fixed author to
+recognise our own commits.
+
+---
+
+### DI16 (G10) — backfill must run BEFORE Reconcile, and historical documents are "now"
+
+🔴 **Ordering, and it is unrecoverable if wrong.** `main.go` must call
+`BackfillPending` **before** the render loop's `Reconcile`. `Reconcile` answers
+"this project is behind the log" with **one lumped commit** of current state.
+For a project that has never rendered, that discards the entire history backfill
+exists to produce — and it cannot be repaired afterwards without deleting the
+repo, because the watermark will already claim the project is caught up.
+
+**Historical memory documents render as they are NOW**, and the reasoning matters
+more than the choice. The fold replays *configuration*, not memories, so there is
+no historical document state to recover. Rendering none would leave the final
+backfilled tree **unequal** to what the live renderer produces — so the watermark
+("the tree reflects seq N") would be a lie, and documents would stay missing
+until some unrelated config change happened to fire. Rendering current documents
+means the content is real, appears in exactly one commit, and never changes
+again: no fabricated history is written. A test pins the "touched by exactly one
+commit" property.
+
+**An unrenderable event STOPS the backfill** rather than being skipped. Skipping
+it would build every later commit on a state that never existed. Falsified: the
+skip-instead-of-stop variant goes red.
+
+**Resumability is tested in the real crash window** — the commit landed, the
+watermark write failed — and a third run is a no-op.
+
+**`sortedKeys` has now collided twice** in `package agentd` with
+`sessioncontext_test.go`'s. Both agents renamed their own. Worth knowing before a
+third.
+
+---
+
+### DI17 (G16) — the console can show almost everything, and two things it cannot
+
+`GET /agent/git-projection` takes its project from `Identity.Customer` **only** —
+no path, query or body parameter — and 404s a session-scoped embed token. States:
+`off`, `ok`, `unknown`, `push_failing`, `diverged`, `unrenderable`,
+`quarantined`, `failing`. The remote's `user:token@` userinfo is stripped
+server-side.
+
+**No secret reaches the DOM, and it is falsified.** `unrenderable` is the one
+state that deliberately does **not** echo `last_error`. Both tests feed an error
+message that *does* carry a Slack webhook URL and assert it is absent from
+`container.innerHTML`; appending `last_error` to the detail turns both red.
+
+🔴 **Quarantine and ignored are not persisted** — see **ticket G23**. They exist
+for one run in memory. The route carries them, so the moment they are stored the
+console shows them, but until then those two lists are empty on any real
+deployment.
+
+**Health is classified by matching sentinel error TEXT**, because the state row
+stores `err.Error()` with no code — also G23. A test pins it against
+`UnrenderableError.Error()` and `ErrNotFastForward` and goes red on a reword.
+Honest, but a tripwire rather than a design.
+
+**The doc's claim that the state table is created by `AutoMigrate` is stale** —
+`go/agentdb/gitprojection.go` plus **migration 048** landed from G20-G22
+mid-ticket, so DI13's complaint is already resolved and the seam auto-fills from
+`AgentDB` like every other store.
+
+**Two pre-existing `ProjectSettingsPage` tests broke** on the added fetch —
+request ordering, and a duplicated 501 message. Fixed inside G16's own files: the
+settings load fires first, and a 404/501 is treated as *route not wired* so the
+panel **hides entirely** rather than reporting an error. That matters for the
+sqlite fallback, where the whole product layer is silently inert.
 
 ---
 

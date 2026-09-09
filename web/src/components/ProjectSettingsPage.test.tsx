@@ -189,6 +189,59 @@ describe('budget/cap fields', () => {
   })
 })
 
+describe('git projection fields (G24)', () => {
+  it('presents an empty repository as projection being off', async () => {
+    render(<ProjectSettingsPage />)
+    const remote = await screen.findByLabelText(/repository/i)
+    expect(remote).toHaveValue('')
+    expect(screen.getByText(/git projection is off/i)).toBeInTheDocument()
+  })
+
+  it('says projection is on once a repository is typed', async () => {
+    render(<ProjectSettingsPage />)
+    const remote = await screen.findByLabelText(/repository/i)
+    await userEvent.type(remote, 'https://github.com/acme/orange')
+    expect(await screen.findByText(/renders to this repository/i)).toBeInTheDocument()
+  })
+
+  it('flags an invalid git_token_env inline, without needing a save attempt', async () => {
+    render(<ProjectSettingsPage />)
+    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
+    fireEvent.change(tokenEnv, { target: { value: '1-not-valid' } })
+    expect(await screen.findByText(/not a valid environment variable name/i)).toBeInTheDocument()
+  })
+
+  it('accepts a valid git_token_env with no error', async () => {
+    render(<ProjectSettingsPage />)
+    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
+    fireEvent.change(tokenEnv, { target: { value: 'GIT_PUSH_TOKEN' } })
+    expect(screen.queryByText(/not a valid environment variable name/i)).not.toBeInTheDocument()
+  })
+
+  it('flags a git_subfolder that is not a single path segment', async () => {
+    render(<ProjectSettingsPage />)
+    const subfolder = await screen.findByLabelText(/subfolder/i)
+    fireEvent.change(subfolder, { target: { value: '../escape' } })
+    expect(await screen.findByText(/single path segment/i)).toBeInTheDocument()
+  })
+
+  it('sends the git fields on save, whole-object', async () => {
+    render(<ProjectSettingsPage />)
+    const remote = await screen.findByLabelText(/repository/i)
+    await userEvent.type(remote, 'https://github.com/acme/orange')
+    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
+    await userEvent.type(tokenEnv, 'GIT_PUSH_TOKEN')
+    await explain()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect(puts()[0]!.body).toMatchObject({
+      git_remote: 'https://github.com/acme/orange',
+      git_token_env: 'GIT_PUSH_TOKEN',
+    })
+  })
+})
+
 describe('dirty tracking', () => {
   it('disables save until something changes, and again after saving', async () => {
     render(<ProjectSettingsPage />)

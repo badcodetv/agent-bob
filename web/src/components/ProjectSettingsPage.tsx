@@ -28,12 +28,21 @@ import {
   Typography,
 } from '@mui/material'
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
+import { useCallback, useRef, useState } from 'react'
 import useProjectSettings, { type UseProjectSettingsOptions } from '../useProjectSettings.js'
+import { looksUnwired, useConfigApi } from '../configApi.js'
+import {
+  coerceGitProjectionStatus,
+  GIT_PROJECTION_ENDPOINT,
+  type GitProjectionStatus,
+} from '../gitProjection.js'
+import GitProjectionPanel from './GitProjectionPanel.js'
 import {
   describeNumericSetting,
   PROJECT_SETTING_NUMERICS,
   validateProjectBriefing,
   type NumericSettingSpec,
+  type ProjectSettings,
 } from '../projectSettings.js'
 import JsonObjectEditor from './JsonObjectEditor.js'
 
@@ -46,7 +55,22 @@ export default function ProjectSettingsPage({
   title = 'Project settings',
   ...options
 }: ProjectSettingsPageProps) {
-  const s = useProjectSettings(options)
+  // Re-read the projection after a save: turning a repository on (or off) is a
+  // settings edit, and a panel still saying "not published" underneath the
+  // field that just enabled it is the kind of small lie that makes an operator
+  // distrust the whole screen. The indirection through a ref is so the settings
+  // load still goes first — this page's contract is that it GETs its own row
+  // before anything else.
+  const refreshProjection = useRef<() => void>(() => {})
+  const s = useProjectSettings({
+    ...options,
+    onSaved: (saved) => {
+      refreshProjection.current()
+      options.onSaved?.(saved)
+    },
+  })
+  const projection = useGitProjectionStatus(options)
+  refreshProjection.current = projection.refresh
 
   if (s.loading) {
     return (
@@ -128,10 +152,28 @@ export default function ProjectSettingsPage({
 
         <Divider />
 
+        <GitProjectionFields draft={s.draft} onChange={s.update} />
+
+        <Divider />
+
         <ProjectBriefing
           entries={s.draft.briefing}
           onChange={(briefing) => s.update({ briefing })}
         />
+
+        {/* A deployment with no projection route mounted gets no panel at
+            all, rather than an error about a feature it does not have. */}
+        {!projection.unwired && (
+          <>
+            <Divider />
+            <GitProjectionPanel
+              status={projection.status}
+              loading={projection.loading}
+              error={projection.error}
+              onRefresh={projection.refresh}
+            />
+          </>
+        )}
 
         <Divider />
 
@@ -189,6 +231,56 @@ export default function ProjectSettingsPage({
       </Stack>
     </Box>
   )
+}
+
+/**
+ * The git projection's status, read once on mount and again after a save.
+ *
+ * A load failure here is deliberately NOT fatal to the page: this is a status
+ * panel beside a form, and a deployment that has not wired the route (501)
+ * must not stop anybody editing their project settings. The error is shown
+ * inside the panel, in the server's own words, and everything else keeps
+ * working.
+ */
+function useGitProjectionStatus(options: UseProjectSettingsOptions) {
+  const { request } = useConfigApi(options)
+  const [status, setStatus] = useState<GitProjectionStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [unwired, setUnwired] = useState(false)
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    try {
+      setStatus(coerceGitProjectionStatus(await request<unknown>(GIT_PROJECTION_ENDPOINT)))
+      setError(null)
+      setUnwired(false)
+    } catch (err) {
+      // A 404/501 is not a failure to report: it is a deployment without the
+      // route, and the whole panel disappears. Anything else is a real error
+      // and is shown in the server's own words.
+      if (looksUnwired(err)) {
+        setUnwired(true)
+        setError(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'failed to read the git projection status')
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [request])
+
+  // Render-phase ref-guard rather than useEffect — the convention this package
+  // already follows in useProjectSettings, and for the same reason: a host that
+  // inlines `getAuthToken` changes `request`'s identity every render, which a
+  // `[request]` effect would turn into an unbounded GET loop.
+  const didLoad = useRef(false)
+  if (!didLoad.current) {
+    didLoad.current = true
+    void refresh()
+  }
+
+  return { status, loading, error, unwired, refresh: () => void refresh() }
 }
 
 /** One numeric setting: the input plus the sentence that applies to the value
@@ -309,6 +401,119 @@ function ProjectBriefing({
           project&rsquo;s label rulebook in front of every worker.
         </FormHelperText>
       )}
+    </Box>
+  )
+}
+
+// G24: editors for the four git-projection fields (design
+// 2026-09-09-git-projection.md §D). GitProjectionPanel above this section is
+// read-only status; these are the only way to point a project at a repository
+// at all.
+//
+// `git_token_env` and `git_subfolder` get their own regexes, duplicated from
+// go/agentdb/project_settings.go's gitTokenEnvPattern/gitSubfolderPattern
+// rather than imported (this is a browser bundle, the engine is Go) — kept in
+// sync by eye the same way projectSettings.ts already says it keeps the
+// numeric defaults in sync. The point is to catch the mistake as it is typed,
+// not to replace the server's own check.
+const GIT_TOKEN_ENV_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+const GIT_SUBFOLDER_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+
+function GitProjectionFields({
+  draft,
+  onChange,
+}: {
+  draft: ProjectSettings
+  onChange: (patch: Partial<ProjectSettings>) => void
+}) {
+  const remoteSet = draft.git_remote.trim() !== ''
+  const tokenEnvError =
+    draft.git_token_env.trim() !== '' && !GIT_TOKEN_ENV_PATTERN.test(draft.git_token_env)
+      ? 'not a valid environment variable name (letters, digits, underscore; cannot start with a digit)'
+      : null
+  const subfolderError =
+    draft.git_subfolder.trim() !== '' && !GIT_SUBFOLDER_PATTERN.test(draft.git_subfolder)
+      ? 'must be a single path segment: lowercase letters, digits and hyphens only — no slashes, no ".."'
+      : null
+
+  return (
+    <Box data-testid="git-projection-fields">
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Git repository
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        Where this project&rsquo;s configuration renders to as markdown. These four fields are{' '}
+        <strong>never imported</strong> — commit access to the repository cannot redirect a
+        project&rsquo;s own projection or its credential.
+      </Typography>
+
+      <Stack spacing={2.5}>
+        <Box>
+          <TextField
+            label="Repository"
+            fullWidth
+            size="small"
+            value={draft.git_remote}
+            placeholder="(empty — git projection is off)"
+            onChange={(e) => onChange({ git_remote: e.target.value })}
+          />
+          <FormHelperText>
+            {remoteSet
+              ? 'Configuration renders to this repository on every change.'
+              : 'Empty on purpose: git projection is off. Setting a repository URL here turns it on.'}
+          </FormHelperText>
+        </Box>
+
+        <Box>
+          <TextField
+            label="Branch"
+            fullWidth
+            size="small"
+            value={draft.git_branch}
+            placeholder="main"
+            onChange={(e) => onChange({ git_branch: e.target.value })}
+          />
+          <FormHelperText>
+            Optional. Left empty, the engine renders to its own default branch (shown as the
+            placeholder above) rather than one stored here.
+          </FormHelperText>
+        </Box>
+
+        <Box>
+          <TextField
+            label="Subfolder"
+            fullWidth
+            size="small"
+            value={draft.git_subfolder}
+            placeholder="orange"
+            error={subfolderError !== null}
+            onChange={(e) => onChange({ git_subfolder: e.target.value })}
+          />
+          <FormHelperText error={subfolderError !== null}>
+            {subfolderError ??
+              'Optional. A single path segment inside the repository that Orange owns (default shown as the placeholder). No slashes, no "..", nothing that could land outside it.'}
+          </FormHelperText>
+        </Box>
+
+        <Box>
+          <TextField
+            label="Push token — environment variable name"
+            fullWidth
+            size="small"
+            value={draft.git_token_env}
+            placeholder="e.g. GIT_PUSH_TOKEN"
+            error={tokenEnvError !== null}
+            onChange={(e) => onChange({ git_token_env: e.target.value })}
+          />
+          <FormHelperText error={tokenEnvError !== null}>
+            {tokenEnvError ??
+              'The NAME of an environment variable already set on agentd, never the token itself. ' +
+                'agentd reads the push token from that variable at render time — do not paste a ' +
+                'credential into this field, it would be written to the database and then refused ' +
+                'at render rather than published.'}
+          </FormHelperText>
+        </Box>
+      </Stack>
     </Box>
   )
 }

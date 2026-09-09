@@ -706,6 +706,18 @@ func (im *gitImporter) planSkill(ctx context.Context, project string, ch gitproj
 				return nil, nil, err
 			}
 			next.InstallSh = s
+		case "visibility":
+			s, err := fmString(k, v)
+			if err != nil {
+				return nil, nil, err
+			}
+			next.Visibility = s
+		case "requires_build":
+			b, err := fmBool(k, v)
+			if err != nil {
+				return nil, nil, err
+			}
+			next.RequiresBuild = b
 		}
 	}
 	if ch.BodyChanged {
@@ -715,7 +727,9 @@ func (im *gitImporter) planSkill(ctx context.Context, project string, ch gitproj
 		return nil, nil, fmt.Errorf("skill %q: the markdown body is required", ch.Name)
 	}
 	if current != nil && next.Description == current.Description && next.InstallSh == current.InstallSh &&
-		next.Markdown == current.Markdown && reflect.DeepEqual(map[string]string(next.Labels), map[string]string(current.Labels)) {
+		next.Markdown == current.Markdown && next.Visibility == current.Visibility &&
+		next.RequiresBuild == current.RequiresBuild &&
+		reflect.DeepEqual(map[string]string(next.Labels), map[string]string(current.Labels)) {
 		return nil, nil, nil
 	}
 	sk := next
