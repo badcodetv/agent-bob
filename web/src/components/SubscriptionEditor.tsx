@@ -60,6 +60,13 @@ export interface SubscriptionEditorProps {
   /** Known worker names for the picker. Free text without them. */
   workerOptions?: string[]
   /**
+   * The worker a NEW subscription is for, prefilled into the draft. Same
+   * reasoning as ScheduleEditor's: opened from a worker's own Triggers tab the
+   * answer is already on screen, and asking again kept Save disabled (DI9).
+   * Ignored when editing an existing subscription.
+   */
+  defaultWorker?: string
+  /**
    * Recent events, used for the "would this have matched?" preview. Read-only
    * and local: the preview is a pure function over data already fetched, and
    * never posts anything.
@@ -79,10 +86,12 @@ export default function SubscriptionEditor({
   error = null,
   saving = false,
   workerOptions = [],
+  defaultWorker = '',
   recentEvents = [],
   compileFilterDescription = compileEnvelopeFilter,
 }: SubscriptionEditorProps) {
-  const seed = () => (subscription ? { ...subscription } : newSubscriptionDraft())
+  const seed = () =>
+    subscription ? { ...subscription } : { ...newSubscriptionDraft(), worker: defaultWorker }
   const [draft, setDraft] = useState<SubscriptionDraft>(seed)
   const [filterText, setFilterText] = useState(() => formatJsonObject(seed().filter))
   const [filterError, setFilterError] = useState<string | null>(null)

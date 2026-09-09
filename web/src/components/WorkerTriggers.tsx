@@ -200,6 +200,7 @@ export default function WorkerTriggers({
             onDelete={creating === 'subscription' ? undefined : removeSubscription}
             saving={saving}
             workerOptions={workerOptions}
+            defaultWorker={workerName}
             recentEvents={events.events}
           />
         ) : creating === 'schedule' || currentSched ? (
@@ -210,6 +211,7 @@ export default function WorkerTriggers({
             onDelete={creating === 'schedule' ? undefined : removeSchedule}
             saving={saving}
             workerOptions={workerOptions}
+            defaultWorker={workerName}
           />
         ) : (
           // The definition sentence, so an empty pane teaches rather than shrugs.

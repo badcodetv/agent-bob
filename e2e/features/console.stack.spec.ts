@@ -218,13 +218,15 @@ test.describe('operator console', () => {
     // "Instruction" does not contain "input", and the reason field is called
     // Rationale. Another consequence of the UNRUN note at the top of this
     // file; see the plan's DI8.
-    // The editor does NOT prefill the worker, even opened from that worker's
-    // own Triggers tab — `WorkerTriggers` passes `schedule={null}` and knows
-    // `workerName` but does not hand it over, and `validateSchedule` refuses
-    // to enable the save button without one. Neither editor prefills, so it
-    // is a consistent gap rather than an inconsistency; reported in the plan's
-    // findings rather than changed from a fixtures ticket.
-    await page.getByLabel(/^Worker$/).first().fill(WRITER)
+    // FIXED (plan DI9). This line used to type the worker's name in by hand,
+    // with a note explaining why it had to: the editor did not prefill the
+    // worker even when opened from that worker's own Triggers tab.
+    // `WorkerTriggers` passed `schedule={null}` while holding `workerName` and
+    // never handed it over, and `validateSchedule` keeps the save button
+    // disabled without one — so the form asked which worker it was for while
+    // displaying the answer two inches away. Both editors now take a
+    // `defaultWorker`, and the hand-fill has become the assertion that they do.
+    await expect(page.getByLabel(/^Worker$/).first()).toHaveValue(WRITER)
     await page.getByLabel(/cron/i).first().fill('0 9 * * 1-5')
     await page.getByLabel(/^Instruction$/).first().fill('Write the morning blurb.')
     await page.getByLabel(/^Rationale$/).first().fill('the catalogue goes out at nine')
