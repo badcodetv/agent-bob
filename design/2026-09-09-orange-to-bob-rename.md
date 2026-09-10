@@ -6,7 +6,7 @@
 > see "Why now" below. Each phase ends with a verification gate; do not start
 > the next phase with a red gate.
 
-Status: **Phase 0 done (two items wait on Kai); Phases 1–5 not started.**
+Status (superseded for execution by `design/2026-09-10-bob-migration-master-plan.md`): **Phase 0 done (two items wait on Kai); Phases 1–5 not started.**
 PR #1 merged into `main` as `5f343cc` on 2026-09-10, so the hold is lifted.
 **Re-verified against `main` `5f343cc` on 2026-09-10**; see "What changed
 since 2026-09-09" below. Run it against `main`, never a feature branch.
