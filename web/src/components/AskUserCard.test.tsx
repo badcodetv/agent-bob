@@ -18,7 +18,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import React from 'react'
 import AskUserCard from './AskUserCard.js'
 import { agentEventReducer, initialAgentEventState } from '../agentEventReducer.js'
-import { buildAskUserPayload } from '../../../sandbox/src/tools/builtin/ask_user.js'
+import { buildAskUserPayload } from '../../../sandbox/src/tools/builtin/ask_user_payload.js'
 import type { AskUserQuestionInfo } from '../types.js'
 
 function question(overrides: Partial<AskUserQuestionInfo> = {}): AskUserQuestionInfo {
