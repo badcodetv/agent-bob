@@ -209,7 +209,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W5.2 Tamper's 'exactly one of the two provenance fields is non-empty' clause
 
 - **Plan said:** § 'Shared shapes': 'exactly one of the two provenance fields is non-empty'.
-- **Assumed:** AT LEAST one. Verified against Orange: caller.SessionID is always set for anything written inside a container and caller.Worker is set as well whenever the session has a worker (go/cmd/agentd/mcpserver.go:534) — so every researcher tick AND every interview session writes both. The captured fixture detail-2b3c4d5e carries both fields non-empty. A test asserts the fixture fact directly and the store's doc comment records the correction.
+- **Assumed:** AT LEAST one. Verified against Bob: caller.SessionID is always set for anything written inside a container and caller.Worker is set as well whenever the session has a worker (go/cmd/agentd/mcpserver.go:534) — so every researcher tick AND every interview session writes both. The captured fixture detail-2b3c4d5e carries both fields non-empty. A test asserts the fixture fact directly and the store's doc comment records the correction.
 - **Reversibility:** trivial
 
 ### W5.3 The content format of a kind=hypothesis memory, specifically where the owner's full email address lives
@@ -292,14 +292,14 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 
 ### W5.16 Fixture scenario design — which ids, which attacks, which owners
 
-- **Plan said:** Only 'Orange response bodies captured verbatim from a running O11 build'.
+- **Plan said:** Only 'Bob response bodies captured verbatim from a running O11 build'.
 - **Assumed:** Four hypotheses: 1a2b3c4d (clean), 2b3c4d5e (forged newer row by researcher-2b3c4d5e/sess-b31f0c9a), 3c4d5e6f (hostile retraction by sess-77c1e2d5), 4d5e6f70 (Wolf's own retraction with a hostile one stacked on top — the B5 resurrection case). Plus three snippet-boundary rows and six sessions including one non-hypothesis (settings-chat) and one researcher-worker session.
 - **Reversibility:** moderate
 
 ### W5.17 How to capture provenance-bearing rows, given no HTTP route can write them
 
 - **Plan said:** Nothing — it assumes such bodies are capturable.
-- **Assumed:** Seed them with agentdb.Store.CreateMemory (the exact call mcp_memory.go:322-328 makes, with the same CreatedByWorker/CreatedBySession fields) from a scratch Go program using a replace directive, then READ them back over real HTTP from the running agentd. The response bodies are therefore genuinely Orange's; only the write of those two fields bypassed HTTP, because a session token from inside a container is the only credential that can set them. Documented prominently in the fixtures README.
+- **Assumed:** Seed them with agentdb.Store.CreateMemory (the exact call mcp_memory.go:322-328 makes, with the same CreatedByWorker/CreatedBySession fields) from a scratch Go program using a replace directive, then READ them back over real HTTP from the running agentd. The response bodies are therefore genuinely Bob's; only the write of those two fields bypassed HTTP, because a session token from inside a container is the only credential that can set them. Documented prominently in the fixtures README.
 - **Reversibility:** moderate
 
 ### W5.18 How to run 'a running O11 build' without docker compose (house rule 9 forbids compose up/down)
@@ -317,13 +317,13 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W5.20 The 120-session pagination test's data
 
 - **Plan said:** 'A test asserts 120 sessions across three pages all appear in the index.'
-- **Assumed:** Synthetic: 120 rows cloned from a CAPTURED row with only id and name varied. Creating 120 real sessions is not something a unit test may do. The test comment says so explicitly, and the field shape is still Orange's.
+- **Assumed:** Synthetic: 120 rows cloned from a CAPTURED row with only id and name varied. Creating 120 real sessions is not something a unit test may do. The test comment says so explicitly, and the field shape is still Bob's.
 - **Reversibility:** trivial
 
 ### W5.21 Whether to keep the fixture bodies raw or pretty-printed
 
 - **Plan said:** 'captured verbatim … not hand-shaped'
-- **Assumed:** Raw, byte-for-byte, compact with the trailing newline Orange emits (W6b's FRED fixtures were re-serialised for readability; I judged 'verbatim' to outrank diff readability here, and the README says so).
+- **Assumed:** Raw, byte-for-byte, compact with the trailing newline Bob emits (W6b's FRED fixtures were re-serialised for readability; I judged 'verbatim' to outrank diff readability here, and the README says so).
 - **Reversibility:** trivial
 
 ### W5.22 Test file/name organisation
@@ -359,13 +359,13 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W5.27 Which body the test stub returns for a board read that omits include_retracted
 
 - **Plan said:** Nothing — the plan has no stub design.
-- **Assumed:** The stub answers the flagged and unflagged board reads from DIFFERENT config fields, the way Orange does, and the unflagged one defaults to the empty page. That makes every board test in the file fail if the flag is ever dropped, rather than only the resurrection ones.
+- **Assumed:** The stub answers the flagged and unflagged board reads from DIFFERENT config fields, the way Bob does, and the unflagged one defaults to the empty page. That makes every board test in the file fail if the flag is ever dropped, rather than only the resurrection ones.
 - **Reversibility:** trivial
 
 ### W5.28 Whether the pre-existing 'exactly one provenance field is non-empty' deviation could be closed in this round
 
 - **Plan said:** § "Shared shapes" pins 'exactly one of the two provenance fields is non-empty'.
-- **Assumed:** It cannot be closed by a worker: real Orange sets BOTH for any session that has a worker (recorded twice now — detail-2b3c4d5e, and my own capture's researcher-1a2b3c4d/sess-c0ffee11), so 'exactly one' is unsatisfiable, and correcting the plan is the orchestrator's act, not mine (house rule 1). Left relaxed to 'at least one', documented in the file header, in a recorded-fact test and in the commit body.
+- **Assumed:** It cannot be closed by a worker: real Bob sets BOTH for any session that has a worker (recorded twice now — detail-2b3c4d5e, and my own capture's researcher-1a2b3c4d/sess-c0ffee11), so 'exactly one' is unsatisfiable, and correcting the plan is the orchestrator's act, not mine (house rule 1). Left relaxed to 'at least one', documented in the file header, in a recorded-fact test and in the commit body.
 - **Reversibility:** moderate
 
 ## W12 — 13 guesses
@@ -379,7 +379,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W12.2 How to check worker-already-correct state for idempotency, since W2's 22-route client list has putWorker/deleteWorker but no GET /agent/workers/{name} or list-workers route, and the ticket's idempotency criterion requires zero PUT calls on a second run
 
 - **Plan said:** 'the project-settings read-merge-write helper, worker create and schedule create must come from W2 — do not hand-roll a second HTTP client here'; silent on how worker reads (which W2 doesn't expose) should work
-- **Assumed:** wrote one narrowly-scoped raw fetch (readWorker in bootstrap-project.ts) hitting Orange's real GET /agent/workers/{name} route directly (confirmed to exist server-side at go/httpapi/workers.go:77, just not wrapped by W2's client), used only for this one read, not a second general-purpose client
+- **Assumed:** wrote one narrowly-scoped raw fetch (readWorker in bootstrap-project.ts) hitting Bob's real GET /agent/workers/{name} route directly (confirmed to exist server-side at go/httpapi/workers.go:77, just not wrapped by W2's client), used only for this one read, not a second general-purpose client
 - **Reversibility:** moderate
 
 ### W12.3 Schedule idempotency match key: match by worker name alone ('critic'), ignoring whether the existing schedule's cron equals the currently-configured WOLF_CRITIC_CRON
@@ -397,10 +397,10 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W12.5 WOLF_CRITIC_CRON validation strictness: I implemented only a shape check (exactly 5 whitespace-separated fields, no '@' nickname), not per-field range/grammar validation
 
 - **Plan said:** 'Never a nickname: go/agentdb/schedules.go:827 refuses @weekly' — no other cron-validation detail specified
-- **Assumed:** a full cron grammar validator is out of scope; Orange's own schedule store is the authority on field-range validity and will reject a truly malformed cron at POST /agent/schedules time — config.ts's job is only to catch the nickname/field-count class of error before that HTTP round-trip
+- **Assumed:** a full cron grammar validator is out of scope; Bob's own schedule store is the authority on field-range validity and will reject a truly malformed cron at POST /agent/schedules time — config.ts's job is only to catch the nickname/field-count class of error before that HTTP round-trip
 - **Reversibility:** trivial
 
-### W12.6 Worker PUT bodies for interviewer/critic set only systemPrompt+enabled+rationale, leaving description/image/maxInstances/briefing/mcpConfig unset (Orange defaults apply: image inherits the project's base_image, maxInstances=1, frozen=false)
+### W12.6 Worker PUT bodies for interviewer/critic set only systemPrompt+enabled+rationale, leaving description/image/maxInstances/briefing/mcpConfig unset (Bob defaults apply: image inherits the project's base_image, maxInstances=1, frozen=false)
 
 - **Plan said:** 'worker interviewer, prompt = prompts/interviewer.md verbatim, enabled' / same for critic — no mention of the other PutWorkerParams fields
 - **Assumed:** leaving them unset is correct: per-worker mcp_config is unnecessary since the wolf MCP server is registered at project-settings level and compose.go merges project+worker mcp_config at job-composition time; per-worker image override is unnecessary since project base_image is already set to WOLF_BASE_IMAGE
@@ -409,7 +409,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W12.7 The 'rationale' string content on every write (project-settings PUT, worker PUTs, schedule POST) — not pinned by the ticket
 
 - **Plan said:** nothing specific beyond 'PUT is a whole-object replace' and (for critic.md's own future writes, not the bootstrap's) 'requires a rationale on every worker_prompt_write'
-- **Assumed:** wrote a short descriptive rationale naming the ticket/design doc for traceability in Orange's config-event log; exact wording is mine
+- **Assumed:** wrote a short descriptive rationale naming the ticket/design doc for traceability in Bob's config-event log; exact wording is mine
 - **Reversibility:** trivial
 
 ### W12.8 scripts/bootstrap-project.ts's shebang/run mechanism (npx tsx) and that it deliberately isn't wired into package.json's own scripts (no 'yarn bootstrap' added)
@@ -424,7 +424,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 - **Assumed:** added a defensive negative test ('the method body contains no marker line of its own') and fixed a first draft that had accidentally quoted the marker inside researcher-method.md's own prose (caught by that test failing) — treated any occurrence in method.md as a bug
 - **Reversibility:** trivial
 
-### W12.10 How to execute the loader script's DinD happy path (the ticket's Validation #2/#3) when the Orange compose stack is down and house rule 9 forbids `docker compose` up/down
+### W12.10 How to execute the loader script's DinD happy path (the ticket's Validation #2/#3) when the Bob compose stack is down and house rule 9 forbids `docker compose` up/down
 
 - **Plan said:** "with agent-bob's stack up: ./scripts/load-image-into-dind.sh" — the plan assumes the stack is running and says nothing about what to do when it is not
 - **Assumed:** That a throwaway DinD daemon started with a plain `docker run -d --rm --privileged --name w12-fix-dind docker:27-dind` (the exact image compose uses, same server version 27.5.1), seeded with the host's REAL agentkit-sandbox:dev via docker save|load, and driven through the script's own BOB_DIND_CONTAINER variable, is a faithful stand-in for agent-bob-dind-1. It exercises everything the criterion names except the literal default container NAME. Nothing was fabricated: the sandbox base is a real image built from this repo's sandbox/, core and wolf were really built inside the DinD daemon, and the import really ran.

@@ -76,7 +76,7 @@ The residual exposure that decision accepts, precisely:
   host of the model's choosing. `connect-src 'none'` raises the bar but does **not** close this —
   a `<script src="https://…?d=…">` query string is sufficient. Do not let a later reader believe
   otherwise.
-- **Out of reach:** the operator's Wolf session, their Orange session, their Google identity, and
+- **Out of reach:** the operator's Wolf session, their Bob session, their Google identity, and
   Wolf's own API key. This holds because the document is forced into an **opaque origin** and
   because **no credential is ever placed inside the frame** — the series data is injected
   server-side.
@@ -324,7 +324,7 @@ All three are appended with `embed: false`. Report HTML routinely exceeds the 24
 ceiling, and O7 returns **400** for `embed: true` above it (main plan § O7). None of them is
 semantically searchable, so nothing is lost.
 
-### Orange routes consumed — no Go changes
+### Bob routes consumed — no Go changes
 
 This feature adds nothing to agent-bob, but it consumes **four** routes, not two:
 
@@ -541,7 +541,7 @@ different files owned by different tickets, so read both before writing either.
 
 ### R1: Report vocabulary, trusted-kind set, and the store reads   [Status: pending | Model: opus]
 - **Scope:** The four memory kinds as types and label builders, the corrected trusted-kind rule,
-  the full-content Orange reads the frame route needs, and the store functions that read templates
+  the full-content Bob reads the frame route needs, and the store functions that read templates
   and reports. No routes, no rendering, no sanitising.
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/kinds.ts`, `api/src/report/kinds.test.ts`; modify
@@ -570,7 +570,7 @@ different files owned by different tickets, so read both before writing either.
     own provenance is non-empty**, exactly as W5 does — a template hidden by a hostile retraction
     must surface as `tamper`, never as absence.
 - **TDD:** yes.
-- **Validation:** `cd api && yarn test src/report/kinds src/hypothesis/store src/orange/client && yarn typecheck`
+- **Validation:** `cd api && yarn test src/report/kinds src/hypothesis/store src/bob/client && yarn typecheck`
 - **Depends on:** W5, O11
 - [ ] done
 - Notes:

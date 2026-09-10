@@ -103,7 +103,7 @@ Per project, in **Project settings → Git repository** (or `PUT /agent/project-
 | --- | --- |
 | `git_remote` | the repository URL. **Empty means projection is off** — a deliberate state, not a broken one |
 | `git_branch` | default `main` when empty |
-| `git_subfolder` | the folder Orange owns; default `orange` when empty. A single path segment |
+| `git_subfolder` | the folder Bob owns; default `bob` when empty. A single path segment |
 | `git_token_env` | the **name** of an environment variable holding the push token — never the token |
 | `git_webhook_secret_env` | the **name** of an environment variable holding the webhook secret |
 
@@ -142,7 +142,7 @@ fresh database and an upgraded one. A test greps for the `AutoMigrate` call so i
 ## 4. What renders, and what deliberately does not
 
 ```
-orange/
+bob/
   README.md              generated; skipped by the importer
   settings.md            project prompt as body, settings as frontmatter
   workers/<name>.md      system prompt as body, the rest as frontmatter
@@ -199,9 +199,9 @@ with a reason. Default to `Never` when unsure.
 ## 6. Memory documents
 
 A memory carrying a `name=` label is the substrate's existing "current value of X" convention. The
-**newest** such memory renders to `orange/memory/<name>.md`.
+**newest** such memory renders to `bob/memory/<name>.md`.
 
-- **Memories stay immutable.** A human editing `orange/memory/message-board.md` produces a **new**
+- **Memories stay immutable.** A human editing `bob/memory/message-board.md` produces a **new**
   memory with the same `name=`, exactly as an agent's write does. Nothing is mutated, and every
   version keeps its stamp and stays searchable — git history is not searchable by label or meaning.
 - **Concurrent writers should use `memory_create`'s `if_current`**: "append only if the newest memory

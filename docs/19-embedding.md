@@ -7,7 +7,7 @@ patterns for keeping state between runs.
 
 The driving use case is **Agent Wolf** — a product with its own UI, its own vocabulary
 ("hypotheses", not "sessions") and its own user allowlist, which stores none of the agent state
-itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf owns the page.
+itself. Bob owns prompts, sessions, schedules, memories and artifacts; Wolf owns the page.
 
 > **Read [§ Known hazards](#known-hazards) before you ship.** Several of them are live, deliberate
 > and shipping-as-documented — in particular, an embed token carries more authority than its name
@@ -32,7 +32,7 @@ itself. Orange owns prompts, sessions, schedules, memories and artifacts; Wolf o
 | --- | --- | --- | --- | --- |
 | **Project API key** | Long-lived; rotated by editing an env var and restarting | `agentd`'s environment, named by the project map. **Server-side only** | `X-API-Key: <raw>` | Full API access to one project |
 | **Embed token** | 900s by default, clamped to `[60, 3600]` | The browser, in memory, arriving in a URL **fragment** | `Authorization: Bearer <jwt>` | One session on session-by-id routes — **but read hazard H1 below** |
-| **Console JWT** | 12h | `localStorage` on the Orange origin (unchanged) | `Authorization: Bearer <jwt>` | Full API access to **one** project |
+| **Console JWT** | 12h | `localStorage` on the Bob origin (unchanged) | `Authorization: Bearer <jwt>` | Full API access to **one** project |
 | **Dataset download token** — *minted by agentd, never held by you* | 300s by default, clamped to `[60, 900]` | Inside a session container, in a URL agentd handed the agent | `?token=<jwt>` **in the query string** | One dataset's bytes on one route — **and read hazard H14 below** |
 
 **The three in the title are the three you hold and mint.** The fourth row is agentd's own and is
@@ -126,8 +126,8 @@ WOLF_API_KEY=$(openssl rand -base64 24)
 
 `allowed_origins` drives **`Content-Security-Policy: frame-ancestors`**, not CORS. There is no CORS
 anywhere in Go, by design: every hop is arranged so the browser never makes a cross-origin request
-to `agentd` (the embed page is served by Orange, so its calls are same-origin; your backend →
-Orange is server-to-server; artifact bytes are proxied by your backend to your own origin).
+to `agentd` (the embed page is served by Bob, so its calls are same-origin; your backend →
+Bob is server-to-server; artifact bytes are proxied by your backend to your own origin).
 
 ---
 
@@ -309,7 +309,7 @@ the code around it is correct.)*
 
 ```html
 <iframe
-  src="https://orange.badcode.dev/embed/session/hypothesis-a#token=eyJ…"
+  src="https://bob.badcode.tv/embed/session/hypothesis-a#token=eyJ…"
   style="width:100%;height:640px;border:0"
   title="hypothesis-a"></iframe>
 ```
@@ -378,7 +378,7 @@ Response headers on a successful byte read (`artifacts_download.go:198-217`):
 | `Content-Disposition` | `attachment; filename="<basename of FilePath>"` |
 
 `attachment` is a security decision, not a UX one: an agent can write an artifact containing HTML,
-and rendering it inline on Orange's origin would be scripting with the console's session in reach.
+and rendering it inline on Bob's origin would be scripting with the console's session in reach.
 There is no `Content-Length` — `FileSize` is metadata written by a different call than the bytes,
 and a stale value would truncate the response.
 
@@ -447,7 +447,7 @@ across the product surface, so read the field's own note rather than assuming.
 
 This is how an embedding application holds state of its own. Until it shipped, the only write
 surface was `memory_create` on the core MCP server, authenticated by a **session token an embedder
-does not hold** — so an application embedding Orange could hold no authoritative state at all.
+does not hold** — so an application embedding Bob could hold no authoritative state at all.
 
 ```http
 POST /agent/memories
@@ -623,7 +623,7 @@ session, name the worker explicitly: `session_list(worker: "reviewer-a")`.
 
 ## 9. Identity: `POST /auth/verify-google`
 
-If your app already uses Google Sign-In, Orange will verify an ID token for you rather than making
+If your app already uses Google Sign-In, Bob will verify an ID token for you rather than making
 you duplicate the verification logic and the client id.
 
 ```http
@@ -645,7 +645,7 @@ X-API-Key: $WOLF_API_KEY
   shipped an unauthenticated verification oracle.
 - Every failure — bad signature, wrong audience, unverified address — is one `401
   invalid credential`.
-- It **mints nothing, grants nothing, and creates no user row.** Orange is not becoming an identity
+- It **mints nothing, grants nothing, and creates no user row.** Bob is not becoming an identity
   provider: your app owns its allowlist.
 
 ---

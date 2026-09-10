@@ -66,7 +66,7 @@ Everything this needs already exists and must **not** be rebuilt:
   a container, via the `memory_get` / `memory_current` MCP tools. **T18 adds the full-content
   read route** — without it Wolf cannot render a hypothesis summary of any real length.
 
-Wolf must not vendor Orange's code. It integrates over three seams:
+Wolf must not vendor Bob's code. It integrates over three seams:
 
 1. a **project API key** for its backend,
 2. an **iframe** rendering a live session chat, and
@@ -104,7 +104,7 @@ platform must keep supporting both; an application-layer builder picks.
   sidebar (`examples/web/src/App.tsx:49-292`).
 - **No CORS anywhere in Go**, and no framing headers anywhere (neither `X-Frame-Options`
   nor CSP). Framing is not blocked; it is simply unusable because tokens live in
-  `localStorage` on the Orange origin with no handoff mechanism.
+  `localStorage` on the Bob origin with no handoff mechanism.
 - **Tenancy is not enforced on session-by-ID routes.** `Stream` (`go/httpapi/stream.go:36-40`),
   `Reconnect` (`stream.go:65-69`), `SendMessage` (`stream.go:96+`), `Status`
   (`go/httpapi/lifecycle.go:40-44`), `Cancel` (`lifecycle.go:70-74`), `Messages`
@@ -118,7 +118,7 @@ platform must keep supporting both; an application-layer builder picks.
 After this plan: ops sets `WOLF_API_KEY` in `agentd`'s environment and names it in the
 project map. Wolf's backend creates a session named `hypothesis-a`, attaches a daily
 session-mode schedule to it, embeds `<iframe src=".../embed/session/hypothesis-a#token=…">`,
-and fetches `summary.md` by name to render on its own page. No Orange code is vendored,
+and fetches `summary.md` by name to render on its own page. No Bob code is vendored,
 no database table is added for keys, and no key-management UI exists.
 
 ## Architecture
@@ -127,10 +127,10 @@ no database table is added for keys, and no key-management UI exists.
    ┌─────────────────────── browser ───────────────────────┐
    │  Agent Wolf UI (wolf.badcode.dev)                     │
    │   hypothesis page                                     │
-   │    ├─ <iframe src=orange/embed/session/hyp-a#token=…> │
+   │    ├─ <iframe src=bob/embed/session/hyp-a#token=…> │
    │    └─ markdown/img from wolf's own /api/artifact/…    │
    └───────┬───────────────────────────────┬───────────────┘
-           │ wolf's own session cookie     │ iframe loads from Orange origin
+           │ wolf's own session cookie     │ iframe loads from Bob origin
            ▼                               ▼
    ┌────────────────────┐          ┌──────────────────────────┐
    │  Wolf backend      │          │  Agent Bob (singleton)│
@@ -142,7 +142,7 @@ no database table is added for keys, and no key-management UI exists.
    └────────────────────┘          │   └ artifacts (blob)     │
            │                       └──────────────────────────┘
            └── POST /auth/verify-google ──────────▲
-               (Orange verifies the Google ID token and
+               (Bob verifies the Google ID token and
                 returns {email}; Wolf decides access)
 ```
 
@@ -152,7 +152,7 @@ no database table is added for keys, and no key-management UI exists.
 | --- | --- | --- | --- |
 | **Project API key** | Long-lived, rotated by ops | `agentd` env var, named by the project map. Server-side only — never in a browser | Full API access to one project |
 | **Embed token** | Minutes (default 15m) | Browser, in memory, arrives via URL fragment | Read/stream/message on **exactly one session** |
-| **Console JWT** | 12h | `localStorage` on the Orange origin (unchanged) | Full API access to the projects the user's email maps to |
+| **Console JWT** | 12h | `localStorage` on the Bob origin (unchanged) | Full API access to the projects the user's email maps to |
 
 `jwtAuthMiddleware` (`go/cmd/agentd/auth.go:35-64`) becomes `apiAuthMiddleware`: it tries
 API key first (constant-time compare), then JWT. Both paths produce the same `principal`;
@@ -189,14 +189,14 @@ characters is a boot error (weak keys are worse than none).
 Every cross-origin hop is arranged so the browser never makes a cross-origin request to
 `agentd`:
 
-- The **embed page is served by Orange**, so its API calls are same-origin.
-- **Wolf's backend → Orange** is server-to-server; CORS does not apply.
+- The **embed page is served by Bob**, so its API calls are same-origin.
+- **Wolf's backend → Bob** is server-to-server; CORS does not apply.
 - **Artifact bytes** are proxied by Wolf's backend to Wolf's own origin.
 
 `allowed_origins` therefore drives **`Content-Security-Policy: frame-ancestors`** on the
-embed page — the header that actually controls who may frame Orange — not
+embed page — the header that actually controls who may frame Bob — not
 `Access-Control-Allow-Origin`. Rejected alternative: adding CORS middleware plus signed
-download URLs so Wolf's browser could hit Orange directly. It is strictly more code, puts
+download URLs so Wolf's browser could hit Bob directly. It is strictly more code, puts
 credentials in the browser, and buys nothing at markdown/CSV/PNG scale.
 
 ### Rejected alternatives (recorded)
@@ -207,7 +207,7 @@ credentials in the browser, and buys nothing at markdown/CSV/PNG scale.
   idempotent firing, restore-on-fire and busy-session handling is platform capability;
   every embedding app would otherwise rebuild it.
 - **Wolf runs its own Google OAuth.** Rejected: duplicates the verification logic and
-  client id. Orange exposes verification only (`POST /auth/verify-google` returns an
+  client id. Bob exposes verification only (`POST /auth/verify-google` returns an
   email and nothing else) — it does **not** become an identity provider with users,
   sessions or refresh tokens.
 - **`postMessage` token handshake** instead of the URL fragment. Deferred: the fragment
@@ -293,7 +293,7 @@ scheduler Tick (10s poll, per-minute eval — unchanged)
 ### Embedding and artifacts
 
 ```
-Wolf backend                     Orange
+Wolf backend                     Bob
   POST /agent/embed-token  ──▶   validate X-API-Key → project
    {session:"hyp-a", ttl}   ◀──  {token, expires_at}   JWT{sid, customer,
                                                         scope:"session:<id>"}
@@ -302,7 +302,7 @@ Wolf HTML
        fragment never leaves the browser — no server logs, no Referer
                     │
                     ▼
-  Orange embed page: reads location.hash, clears it, holds the token in memory,
+  Bob embed page: reads location.hash, clears it, holds the token in memory,
   renders <AgentChatProvider><AgentChat/></AgentChatProvider> — no sidebar,
   no login gate, no project picker. Served with frame-ancestors from the
   project's allowed_origins.
@@ -484,7 +484,7 @@ type Schedule struct {
 
 - **Any Agent Wolf code.** This plan changes only Agent Bob. Wolf's backend, UI,
   hypothesis model and user allowlist are a separate project.
-- **A users table, sessions table, or refresh tokens in Orange.** `verify-google` returns
+- **A users table, sessions table, or refresh tokens in Bob.** `verify-google` returns
   an email; it does not create or track users.
 - **API-key management UI, self-serve key creation, or key rotation tooling.** Ops edits
   the project map and env vars.

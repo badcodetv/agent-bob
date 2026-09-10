@@ -53,7 +53,7 @@ everything else is mock-proven, which proves transmission and never discovery. I
 
 always-pass detector kept downstream scores competitive), and arXiv 2606.20695 finds seven of ten
 
-published multi-agent coordination results fall below a measured noise floor. Read together: Orange
+published multi-agent coordination results fall below a measured noise floor. Read together: Bob
 
 currently has no way to distinguish 'the loop works' from 'practice helps regardless of the loop',
 
@@ -71,7 +71,7 @@ grows, the opposite of the natural intuition. But the same study measures struct
 
 protocols at +4.3/+6.3 versus freeform at +1.6, and sequential topologies at +0.5 to +24.0 versus
 
-Independent at -0.5 to -16.0. Orange's typed config, byte-pinned preamble and event-as-first-message
+Independent at -0.5 to -16.0. Bob's typed config, byte-pinned preamble and event-as-first-message
 
 are on the winning side of that; its flat fan-outs are on the losing side.
 
@@ -83,7 +83,7 @@ position paper names in-flight self-editing of topology as an OPEN problem with 
 
 a society of agents self-edit its topology while a dialogue is still in flight, without creating
 
-instability or runaway costs?'). Orange's durable worker rows, durable subscription edges and
+instability or runaway costs?'). Bob's durable worker rows, durable subscription edges and
 
 transactional config log are genuinely off the literature's map. That is the thing to defend and the
 
@@ -115,13 +115,13 @@ and personas (67.71%) beat sixteen identical agents (65.34%). In a 146-PR produc
 
 findings were caught by exactly ONE of four reviewers and all four never once converged on a line.
 
-Concretely for Orange: `max_instances > 1` is nearly always the wrong spend, and a second
+Concretely for Bob: `max_instances > 1` is nearly always the wrong spend, and a second
 
 differently-briefed worker is nearly always the right one — but the top rung of the diversity ladder
 
 (different model backbones) is closed by non-goal (iv).
 
-**C6.** APPEND-ONLY DOES NOT REMOVE WRITE CONFLICTS, IT RELOCATES THEM TO READ TIME. Orange is
+**C6.** APPEND-ONLY DOES NOT REMOVE WRITE CONFLICTS, IT RELOCATES THEM TO READ TIME. Bob is
 structurally
 
 immune to lost updates and dirty reads — a real and uncommon win that Letta's own concurrency table
@@ -163,7 +163,7 @@ enforcement and shrinks the injection surface, and ComposeJob builds the first m
 
 one place. Everything else proposed here is either userland or should wait.
 
-**C9.** ORANGE'S HEADLINE CAPABILITY IS, MECHANICALLY, A PUBLISHED ATTACK. Rehberger's Cross-Agent
+**C9.** BOB'S HEADLINE CAPABILITY IS, MECHANICALLY, A PUBLISHED ATTACK. Rehberger's Cross-Agent
 Privilege
 
 Escalation is exactly 'one injected agent edits a peer's configuration, the peer executes it on next
@@ -172,7 +172,7 @@ invocation with its own privileges, then edits the first agent's config back'. E
 
 responds by DENYING the capability: a message from another agent is never consent, never a reason to
 
-change configuration, and (in auto mode) is classifier-reviewed before delivery. Orange grants the
+change configuration, and (in auto mode) is classifier-reviewed before delivery. Bob grants the
 
 capability by design and gates it with nothing — the config log is forensics, not a gate. The three
 
@@ -182,14 +182,14 @@ to the event's `source` in the preamble, nonce the §6.2.4 fence, and neutralise
 
 harness-impersonation patterns in transcripts and memory content before they reach a prompt.
 
-**C10.** TERMINATION IS UNSOLVED EVERYWHERE, AND ORANGE HAS THE WEAKEST ANSWER OF THE SUBSTRATES
+**C10.** TERMINATION IS UNSOLVED EVERYWHERE, AND BOB HAS THE WEAKEST ANSWER OF THE SUBSTRATES
 SURVEYED. A
 
 curated RL survey found NO published training method for the stopping decision as of May 2026; of
 
 four canonical Kafka multi-agent patterns only the market one has a stated completion rule;
 
-Anthropic lists explicit terminators as a REQUIREMENT for shared-state coordination. Orange has
+Anthropic lists explicit terminators as a REQUIREMENT for shared-state coordination. Bob has
 
 depth-8 and MaxFiringsPerHour, both local. The three answers that fit: silence-as-termination
 
@@ -797,7 +797,7 @@ supervisor@v1 and any 'ask everyone who can do X' pattern into one primitive.
 
 **Evidence.** Letta ships `send_message_to_agents_matching_all_tags` as its documented
 supervisor-worker primitive. Dapr Agents binds a topic to a durable workflow with schema validation
-at the boundary — the closest published architecture to Orange's subscription table.
+at the boundary — the closest published architecture to Bob's subscription table.
 
 **What is missing.** `Labels LabelSet` on agentdb.Worker plus the migration — go/agentdb/workers.go
 and go/agentdb/migrations/; a wake tool registered in go/cmd/agentd/main.go:568 (a new
@@ -1094,7 +1094,7 @@ subscription, no gateway and no marshal in the path.
 
 ### 2.3 Handoff payload: what actually crosses the edge
 
-> Orange's worker-to-worker edge carries the predecessor's ENTIRE rendered transcript, uncapped and
+> Bob's worker-to-worker edge carries the predecessor's ENTIRE rendered transcript, uncapped and
 > verbatim, as the successor's first user message — and every measured improvement in this area in
 > 2025-26 came from carrying less, carrying something typed, or scanning what crosses before it lands.
 
@@ -1236,7 +1236,7 @@ attacker-influenceable transcript text does not reach the successor at all.
 
 **Against the seeds.** New, and it is the missing counterpart to the briefing selector: briefing
 controls what a worker READS from memory, and nothing controls what it receives from the edge. Every
-framework surveyed has this knob and Orange has none.
+framework surveyed has this knob and Bob has none.
 
 **Evidence.** OpenAI Agents SDK `input_filter` / `nest_handoff_history` / prebuilt
 `remove_all_tools`; langgraph-supervisor `output_mode="last_message"` and
@@ -1401,7 +1401,7 @@ deliberately put into memory or its own transcript. Memory is the obvious equiva
 is the one workers write on purpose.
 
 **Evidence.** Claude Code v2.1.210+ ships exactly this scan and documents its limits. Rehberger's
-Cross-Agent Privilege Escalation is Orange's architecture with a hostile prompt in it: an injected
+Cross-Agent Privilege Escalation is Bob's architecture with a hostile prompt in it: an injected
 agent edits a peer's config, the peer executes it with its own privileges, then edits the first
 agent's config back — 'a self-reinforcing loop of compromised agents, each reinfecting the other'.
 Block's red team landed code execution via a shared config artifact whose content is appended to the
@@ -1433,7 +1433,7 @@ message.
 
 ### 2.4 Memory as the coordination substrate: supersession, retraction, accumulation, decay
 
-> Append-only immunises Orange against lost updates — a real and uncommon win — but it relocates the
+> Append-only immunises Bob against lost updates — a real and uncommon win — but it relocates the
 > problem to read time: nothing detects contradiction, nothing can be withdrawn, briefings return only
 > the newest single match, and a poisoned row is permanent and reachable forever.
 
@@ -1534,7 +1534,7 @@ DMR, up to 18.5% improvement on LongMemEval, ~90% latency reduction — the mech
 is the invalidation step, not the graph. Governed Shared Memory (arXiv 2606.24535) measured its
 detector at 100% (90/90) when both writes are admitted but 49% (98/200) overall — because a
 pre-commit >90%-similarity dedup gate rejected exactly the contradictory pairs the detector existed
-to catch. ORDERING WARNING FOR ORANGE: if dedup is ever added to memory writes, it must sit AFTER
+to catch. ORDERING WARNING FOR BOB: if dedup is ever added to memory writes, it must sit AFTER
 contradiction detection.
 
 **What is missing.** read-time invalidation: a supersession row changes nothing in SearchMemories
@@ -1651,7 +1651,7 @@ a claim in the existing `TestComposeJobCorePreambleContract` clause list and re-
 budget (the preamble is byte-pinned, so this is a deliberate, reviewed edit rather than a drive-by).
 
 **Against the seeds.** Not a topology at all — a one-line change with a published effect size,
-targeted at the exact failure mode Orange's blackboard, briefing and playbook patterns all create.
+targeted at the exact failure mode Bob's blackboard, briefing and playbook patterns all create.
 
 **Evidence.** arXiv 2509.26354 ('Misevolution'): memory evolution alone dropped refusal rate 46.3%
 -> 11.9% and raised attack success 53.1% -> 75.0% with NO adversary present. The prompt instruction
@@ -1791,7 +1791,7 @@ re-ranking to consult.
 
 > The dominant production failure of 2026 is not the model being wrong — it is no termination
 > predicate, no per-cascade budget, and monitoring pointed at product metrics while two agents
-> ping-ponged for eleven days; Orange's depth-8 cap and per-subscription rate limit are both local and
+> ping-ponged for eleven days; Bob's depth-8 cap and per-subscription rate limit are both local and
 > neither detects that.
 
 | Pattern | Substrate | Worth | Verdict |
@@ -1945,7 +1945,7 @@ as a single commit unit. COMMIT/ABORT: on pass, promote and release approved row
 and seal an audit record. Recovery rule: pending effects stay pending after a crash; the system
 never auto-releases on restart.
 
-**In our primitives.** Capability partition, using the one restraint Orange actually has — MCPConfig
+**In our primitives.** Capability partition, using the one restraint Bob actually has — MCPConfig
 is a per-worker UNION, so only the workers you give a tool to hold it. Ordinary workers hold NO
 outward MCP server; they write `kind=effect-proposal,sink=<email|crm|slack>,task=<uuid>,idem=<key>`
 memories with the payload. A single `publisher` worker holds the outward MCP servers in its
@@ -2013,7 +2013,7 @@ DECISION, miss runs the model. LAYER 2, effect level: the side effect gets its o
 so at-least-once delivery cannot double-charge even if the decision differs. Split an immutable
 decision log from the read model, and write the idempotency record and the state change atomically.
 
-**In our primitives.** Orange already has the message half: `EnsureDelivery` is unique on (event_id,
+**In our primitives.** Bob already has the message half: `EnsureDelivery` is unique on (event_id,
 subscription_id) and `ClaimDelivery` is an atomic pending→running claim, so one event cannot start
 two jobs. The MISSING half is effect-level: every `kind=effect-proposal` carries
 `idem=<sha256(sink|task|payload)>`, and the `publisher` above refuses to release a proposal whose
@@ -2188,7 +2188,7 @@ an hourly cron issues N corrections against belief state that is N-1 completions
 
 ### 2.6 The human boundary and durable work objects: interrupts, barriers, declination, continuation
 
-> Orange has one human primitive (request_human_attention → awaiting_human) and no unit-of-work object
+> Bob has one human primitive (request_human_attention → awaiting_human) and no unit-of-work object
 > at all — no join, no declined-as-outcome, no continuation, no typed interrupt — so several of the
 > most useful cooperative shapes have to be reconstructed from memory rows and self-created schedules.
 
@@ -2217,7 +2217,7 @@ absorbs what the human changed so the same correction is not needed twice.
 the webhook receives `{message, session_url}` and routes by prefix: NOTIFY to a low-priority channel
 with no reply expected, QUESTION and REVIEW to a channel where a human opens the permalink and types
 into the ordinary chat thread. The absorb-the-correction half is the other half of the pattern and
-is what Orange currently misses: after the human replies, the worker's prompt must require it to
+is what Bob currently misses: after the human replies, the worker's prompt must require it to
 `memory_create{kind:"correction", worker:"<self>", topic:"<slug>"}` and its own briefing must select
 `kind=correction,worker=<self>` — otherwise the same question is asked forever. That single loop is
 the difference between an escalation and a learning escalation.
@@ -2282,7 +2282,7 @@ hanging. Non-negotiable in production: set a timer at every handoff point, decla
 action explicitly (escalate / auto-approve / auto-reject) if no signal arrives inside the SLA, and
 make signal handlers idempotent — otherwise a failed notification delivery means waiting forever.
 
-**In our primitives.** Orange already emits the timeout: `request_human_attention{expires_in: 3600}`
+**In our primitives.** Bob already emits the timeout: `request_human_attention{expires_in: 3600}`
 and a per-minute sweep produce ONE `human.attention.timeout` event, source core, depth 0, carrying
 the worker and session, whose text is the permalink plus the original ask. NO SHIPPED SEED
 SUBSCRIBES TO IT. So: `subscription_create{event_type:"human.attention.timeout",
@@ -2482,7 +2482,7 @@ AMBIENT RESUME: before finishing, it calls `schedule_create{cron:"*/10 * * * *",
 worker:"investigator", input:"resume incident <id> if new context has landed"}` FOR ITSELF, and on a
 later firing where `memory_search{selector:"kind=incident-context,incident=<id>"}` has grown, it
 proceeds; when it concludes, it calls `schedule_delete` on that row. A SELF-CREATED, SELF-DELETED
-SCHEDULE IS THE CONTINUATION PRIMITIVE ORANGE ACTUALLY HAS. Safety rails: the schedule id must be
+SCHEDULE IS THE CONTINUATION PRIMITIVE BOB ACTUALLY HAS. Safety rails: the schedule id must be
 recorded as `kind=continuation,incident=<id>,schedule=<id>` so a `wiring-marshal` can reap orphans;
 a schedule whose firings fail to START a job 5 consecutive times disables itself, which is a free
 backstop.
@@ -2540,7 +2540,7 @@ survives eviction is durable state; what is lost is in-memory variables, timers 
 The escalation ladder runs keep-alive (minutes) → checkpointed fiber (minutes-plus) → durable
 workflow (hours-plus).
 
-**In our primitives.** Orange's archive loop snapshots a session idle past
+**In our primitives.** Bob's archive loop snapshots a session idle past
 `AGENTKIT_SESSION_IDLE_TIMEOUT` (default 30m) and restores it on the next message — the CONTAINER is
 preserved but the model is told nothing about where it was, and a job's composed prompt is frozen
 for its lifetime. Userland fix: a long worker's prompt requires `memory_create{kind:"checkpoint",
@@ -2613,21 +2613,21 @@ otherwise have reached for.
 | Plain blackboard / stigmergy | Duplicate of blackboard@v1 — the event spine plus append-only labelled memory IS a blackboard, as the repo's own doc 10 says. Only the VOLUNTEERING variant (post a need, capable workers self-select, silence terminates) adds a mechanism, and it is kept in routing-and-allocation. |
 | Self-organizing pool with worker_create | Duplicate of self-organizing@v1. New evidence sharpens the caution rather than the design: self-organizing LLM teams consistently FAIL to match their best individual member (losses up to 41.1% on ML benchmarks) even when explicitly told which agent is the expert, because they perform 'integrative compromise' rather than deferring — and it worsens with team size. The same consensus-seeking makes them robust to adversarial members, so it is a genuine trade-off, not a bug to fix. |
 | Slow strategist rewriting fast operators' prompts | Duplicate of temporal-hierarchy@v1. What it needs is not a new seed but two guard rails already listed elsewhere: the delayed-verifier stability rule (a slow corrector must be WEAKER, not harsher) and drift-auditor telemetry on prompt growth. |
-| Handoff-as-tool-call: transfer control and continue the same conversation | Not expressible and arguably not wanted. Every framework surveyed has `transfer_to_<agent>` / `Command(goto=..., graph=Command.PARENT)` / a persisted `active_agent`, where the successor INHERITS THE CONVERSATION. Orange composes a fresh container and a fresh session per job with the event as first user message; there is no transcript-continuation primitive and adding one would be a new session-lifecycle concept, not a topology. The Orange-native substitute is per-subscription payload projection plus the handle-and-brief convention. |
+| Handoff-as-tool-call: transfer control and continue the same conversation | Not expressible and arguably not wanted. Every framework surveyed has `transfer_to_<agent>` / `Command(goto=..., graph=Command.PARENT)` / a persisted `active_agent`, where the successor INHERITS THE CONVERSATION. Bob composes a fresh container and a fresh session per job with the event as first user message; there is no transcript-continuation primitive and adding one would be a new session-lifecycle concept, not a topology. The Bob-native substitute is per-subscription payload projection plus the handle-and-brief convention. |
 | Agents-as-tools: run_worker(name, input) -> output within one job | Already deferred as L32 in the landscape catalogue, and it is the one primitive that would let a supervisor loop on a subordinate's result inside its own turn. Re-proposing it without new evidence is rediscovery. Note also that it would create a synchronous blocking call in a system whose whole capacity model (max_instances, max_concurrent_jobs, one host port per session) assumes jobs do not wait on each other. |
 | Approval queues, draft states, plan-approval round trips | Explicit non-goal §10 (vii): 'No approval queues, draft queues, or approval UI — request_human_attention plus the ordinary chat thread is the ENTIRE human-review surface.' Also §9's stated design position that review-before-apply is a WORKER ARRANGEMENT (a proposer writing kind=prompt-proposal memories, a gatekeeper applying them), which is exactly what the effect-outbox-publisher pattern encodes without re-growing the machinery. |
-| Per-worker MCP tool allowlist / capability attenuation along the delegation chain | Explicit non-goal §10 (vi): 'No per-worker visibility filtering of project MCP tools, and NO roles/authorization inside a project.' The 2026 identity work all makes the CHAIN the unit (ID-JAG audience binding, child AllowedScopes as a strict subset of parent, per-invocation tool/disallowedTools) and Orange deliberately has none of it: core servers merge LAST and win every collision, so every dispatched worker holds all 27 tools including worker_prompt_write. The frozen-worker precedent was granted for MEASUREMENT ISOLATION specifically, not as a general permission system. The legal expression of the same intent is capability partition by which worker holds which OUTWARD MCP server. |
+| Per-worker MCP tool allowlist / capability attenuation along the delegation chain | Explicit non-goal §10 (vi): 'No per-worker visibility filtering of project MCP tools, and NO roles/authorization inside a project.' The 2026 identity work all makes the CHAIN the unit (ID-JAG audience binding, child AllowedScopes as a strict subset of parent, per-invocation tool/disallowedTools) and Bob deliberately has none of it: core servers merge LAST and win every collision, so every dispatched worker holds all 27 tools including worker_prompt_write. The frozen-worker precedent was granted for MEASUREMENT ISOLATION specifically, not as a general permission system. The legal expression of the same intent is capability partition by which worker holds which OUTWARD MCP server. |
 | Prompt fragments, templates, {{placeholder}} interpolation against named memories | Explicit non-goal §10 (ii), re-examined 2026-07-25 with named memories in hand and REJECTED AGAIN: in-prompt interpolation makes a prompt unreadable without running the resolver and breaks wholesale-rewrite self-improvement. The sanctioned routes to the same effect are already there — runtime lookup via memory_current, and briefing label selectors injected at composition time. |
 | Warm per-worker durable workshop container | Explicit non-goal §10 (iii): the 2026-07-25 ambient-durable-workshop design was rejected because it loses to filesystem contention between concurrent jobs and unauditable drift. Environment continuity is deliberate only (image_create + labels). Cloudflare's fiber-checkpoint pattern is the legitimate relative and is kept as job-checkpoint-resume, which stores a phase MARKER rather than accumulating filesystem state. |
 | Per-worker spend meters and per-worker model-tier routing | Explicit non-goal §10 (iv): 'no roles/staff tables, per-worker model-tier routing, per-worker spend meters' — each was built once and removed. This is why the top rung of the diversity ladder (different backbones per worker) is unavailable and why AgentCARD's role-model heterogeneity result (up to 44% accuracy, 12x cheaper) cannot be applied here as published. The per-project two-tier daily budget is explicitly not that meter re-grown. |
 | Core-enforced cascade budget, stuck detector, or schedule-recursion guard in the dispatch gate | Explicit non-goal §10 (v): no runtime loop-safety governors beyond the depth-8 floor, concurrency floors and the daily budget — the L1/L2/L4 rejections. Flagging rather than silently proposing: the stated revisit condition was LIVE EVIDENCE, and the 2026 corpus now supplies it ($47k/11 days, $48k/14 hours, $4,200/63 hours, all from unbounded recursion with no termination predicate). The userland forms — cascade-marshal and loop-marshal workers — are kept in loop-safety-and-economics because a worker enforcing a policy is exactly what P1 prescribes. |
 | Hierarchical memory scopes / per-worker private scratchpads | Rejected in the landscape catalogue §4, and structurally absent: the store exposes only CreateMemory/GetMemory/NewestMemory/SearchMemories with no namespaces and no ACLs, so no worker can keep anything from another in the same project. GateMem's finding is the honest summary — across diverse baselines and backbones NO method simultaneously achieves strong utility, robust access control AND reliable forgetting. Any claim that a label convention gives isolation is unsupported by anything in the field. |
-| CRDT-backed shared artifact with optimistic work-claiming | Needs a mutable shared document and a compare-and-set; Orange's memory is append-only with no CAS, so a claim can be shadowed but never released. Also the honest result: CodeCRDT achieved 100% convergence and zero character-level conflicts and STILL measured a 5-10% SEMANTIC conflict rate in the same runs. Strong eventual consistency buys a well-defined document and nothing about whether it makes sense. The collector-barrier pattern is the substrate-appropriate substitute. |
+| CRDT-backed shared artifact with optimistic work-claiming | Needs a mutable shared document and a compare-and-set; Bob's memory is append-only with no CAS, so a claim can be shadowed but never released. Also the honest result: CodeCRDT achieved 100% convergence and zero character-level conflicts and STILL measured a 5-10% SEMANTIC conflict rate in the same runs. Strong eventual consistency buys a well-defined document and nothing about whether it makes sense. The collector-barrier pattern is the substrate-appropriate substitute. |
 | Compare-and-swap memory writes (Letta memory_replace) | Requires an update path the store deliberately does not have, and the failure it prevents (lost updates) is already structurally absent under append-only. The residual problem — two workers appending contradicting facts under the same labels with nothing noticing — is answered by supersession-registrar and retraction-rows, which preserve P8. |
-| Adopting A2A, MCP tasks, or AP2 mandates as the inter-agent protocol | Wrong boundary and unverified adoption. A2A's headline design is a REFUSAL (no shared memory, no direct tool invocation, no synchronous blocking) — the exact inverse of Orange, and legitimately so inside one trust domain. Its production footprint is unverified: 150+ supporting organisations, Linux Foundation governance, and no published deployment counts or named production users. The Task FSM is worth copying (it is, in declined-as-outcome); the wire format is not urgent. Nothing crosses a project boundary in Orange anyway. |
-| Automated topology search / learned org-chart generation (ADAS, AFlow, MaAS, DyLAN, ARG-Designer) | Measured worse than plain CoT-SC at ~10x cost across GPQA-Diamond, HLE-Maths, SWE-Bench Lite and BrowseComp-Plus, with structural collapse in the generated systems (unanimous consensus in >90% of GPT-5 cases; 50% of AFlow workflows degenerate; MAS-Zero's verifier picks the first block in >45% of instances). Also requires an offline labelled topology-collection phase Orange has no way to produce. Human-authored decomposition beat all of them by ~40 points at comparable cost. |
+| Adopting A2A, MCP tasks, or AP2 mandates as the inter-agent protocol | Wrong boundary and unverified adoption. A2A's headline design is a REFUSAL (no shared memory, no direct tool invocation, no synchronous blocking) — the exact inverse of Bob, and legitimately so inside one trust domain. Its production footprint is unverified: 150+ supporting organisations, Linux Foundation governance, and no published deployment counts or named production users. The Task FSM is worth copying (it is, in declined-as-outcome); the wire format is not urgent. Nothing crosses a project boundary in Bob anyway. |
+| Automated topology search / learned org-chart generation (ADAS, AFlow, MaAS, DyLAN, ARG-Designer) | Measured worse than plain CoT-SC at ~10x cost across GPQA-Diamond, HLE-Maths, SWE-Bench Lite and BrowseComp-Plus, with structural collapse in the generated systems (unanimous consensus in >90% of GPT-5 cases; 50% of AFlow workflows degenerate; MAS-Zero's verifier picks the first block in >45% of instances). Also requires an offline labelled topology-collection phase Bob has no way to produce. Human-authored decomposition beat all of them by ~40 points at comparable cost. |
 | Simultaneous prompt optimisation across several workers | Measured negative and mechanically explained: uncoordinated prompt revisions erase one another's gains because credit assigned to A's rewrite includes B's simultaneous rewrite. Independent topology average -0.5 (worst case -16.0); the whole technique inverts past n≈8. Optimise ONE worker at a time, on tool-shaped locally-checkable work, in a sequential topology — which is a constraint on how the existing acceptance loop should be run, not a new pattern. |
-| Full saga rollback / compensation as the default failure response | Render's explicit anti-pattern: 'unwinding all effects when only some failed is usually worse than recording successes and stopping.' Orange has no compensation primitive and adding one (a `compensates` field on the worker row plus an unwind coordinator) would be substantial work for a failure mode nobody here has hit. The effect-outbox-publisher pattern is the cheaper answer: never perform the effect until it is validated, so there is nothing to unwind. |
+| Full saga rollback / compensation as the default failure response | Render's explicit anti-pattern: 'unwinding all effects when only some failed is usually worse than recording successes and stopping.' Bob has no compensation primitive and adding one (a `compensates` field on the worker row plus an unwind coordinator) would be substantial work for a failure mode nobody here has hit. The effect-outbox-publisher pattern is the cheaper answer: never perform the effect until it is validated, so there is nothing to unwind. |
 | Cross-project / federated topologies | Structurally impossible and deliberately so (P5). Every store method takes the project as a mandatory parameter, rows of another project read as not-found, and no MCP tool has a project argument at all since the project is the session token's `customer` claim applied in code. |
 
 ---
@@ -2667,12 +2667,12 @@ pass. Coordination: shared state (memory) plus the config log; the human is only
 
 **Why it was missed.** The catalogue's acceptance bucket has an accept/reject bit
 (sealed-exogenous-audit), an anchor for rollback (locked-anchor), and a concurrent control
-(twin-arm) — but no STAGED DEPLOYMENT. Orange's self-improvement loop rewrites a live worker's
+(twin-arm) — but no STAGED DEPLOYMENT. Bob's self-improvement loop rewrites a live worker's
 prompt in place, in one transaction, with every in-flight and future job immediately composed from
 the new text and no window in which the change is observed-but-not-live. Every published 2026
 rollout discipline says the first stage must be zero-blast-radius mirroring with outputs scored and
 discarded, and that promotion must be gated on a statistic with an armed automatic reversal. Two
-fetched results make this specifically urgent for Orange rather than generically nice: SEAGym's
+fetched results make this specifically urgent for Bob rather than generically nice: SEAGym's
 replay diagnostics show a self-evolving agent going 34/80 -> 43/80 overall while COLLAPSING at epoch
 4 and recovering, i.e. 'useful intermediate states can later regress' — so gating on the final state
 alone is unsound; and 2605.30621's 2x2 (evolved harness x evolved tasks) finds that applying an
@@ -2691,7 +2691,7 @@ already sanctions for effect-outbox-publisher, reused as a blast-radius control.
 than its output quality. Declare a steady-state hypothesis as two selector queries with thresholds
 before injecting anything (e.g. `kind=outcome,decision=accept` fraction >= 0.9 over 24h;
 `kind=contract-violation` count == 0). `chaos-drill` worker runs on a low-frequency cron (weekly)
-and injects exactly ONE fault per window, drawn from the MAS-FIRE taxonomy and mapped to Orange's
+and injects exactly ONE fault per window, drawn from the MAS-FIRE taxonomy and mapped to Bob's
 three real injection surfaces: (a) MEMORY FAULT — write a memory that is subtly wrong but plausible
 under a watched selector, tagged `kind=<normal-kind>` plus a hidden `drill=<uuid>` label; (b)
 INSTRUCTION FAULT — post an external event whose text carries a logically conflicting or
@@ -2715,7 +2715,7 @@ return-boundary-sanitisation, group-blast-radius) and a measurement discipline (
 removal-attribution-sweep) but nothing that TESTS the defences on a live org — no standing drill, no
 injected fault, no detection latency metric, and none of the 14 seeds contains an adversary.
 MAS-FIRE supplies both the taxonomy (15 fault types across planning/memory/reasoning/action and
-configuration/instruction/communication) and the three non-invasive injection mechanisms Orange can
+configuration/instruction/communication) and the three non-invasive injection mechanisms Bob can
 actually reproduce (prompt modification, response rewriting, message-routing manipulation), plus the
 result that makes drilling worth the cost: under BLIND TRUST (a corrupted upstream instruction),
 robustness scores collapse to 0-31.68% on a linear pipeline and to 0% on bilateral negotiation,
@@ -2738,7 +2738,7 @@ cross-agent through shared channels — all failures of detection, not of capabi
 #### Repeat-and-compare: run-to-run disagreement as the defer signal (selective action without a calibration set)
 
 **Mechanism.** Run the SAME worker with the SAME composed prompt on the SAME event k times and use
-the spread of the results as the confidence estimate. Mechanically in Orange: the ingress posts the
+the spread of the results as the confidence estimate. Mechanically in Bob: the ingress posts the
 event once; k subscriptions on that event type point at `<x>-run1..runk`, which are byte-identical
 worker rows (same prompt, same image, same briefing selectors) — identical on purpose, which is the
 opposite of the diversity rule and is why it is a distinct pattern. Each run ends by writing
@@ -2765,7 +2765,7 @@ the fetched paper reports that the same agent on identical inputs produces 2.3-4
 sequences per 10 runs; tasks where at most 2 unique paths appear reach 82-87% accuracy while tasks
 with 4+ paths reach only 41-65%; and answering only when k=3 runs agree gives 87-88% accuracy at
 54-62% coverage, a 6-14pp gain over single-run, MATCHING a split-conformal baseline without needing
-a held-out calibration set — which matters here because Orange projects have no labelled calibration
+a held-out calibration set — which matters here because Bob projects have no labelled calibration
 data and the catalogue's every other gate presupposes one. Independently, budgeted act-or-defer work
 formalises the same act/defer decision with conformal coverage guarantees and reports deferral
 concentrated on hard instances. Two further reasons this belongs: it is the ONE legitimate use of
@@ -2801,7 +2801,7 @@ breaks every job of that worker at once and the failure is a container failure, 
 `config_history{entity:"worker:<x>"}`. Coordination: shared state for diagnosis, config mutations
 for the change, human only on rollback.
 
-**Why it was missed.** This is the largest hole in the catalogue. Orange's configuration surface has
+**Why it was missed.** This is the largest hole in the catalogue. Bob's configuration surface has
 five atoms — workers, memory, subscriptions/schedules, IMAGES and SKILLS — and the catalogue's ~40
 patterns plus all 14 topology seeds touch the first three and never once touch the last two, despite
 `image_create` and `skill_create` being registered core MCP tools (go/cmd/agentd/main.go:570-571,
@@ -2813,7 +2813,7 @@ out-of-distribution transfer +6.3 points, against skill-library building (ACE) a
 +2.5 and experience-store updating (TF-GRPO) at +17.1 validation but MINUS 2.5 OOD, i.e. pure
 overfit. The catalogue cites those figures once, as a counterweight to make delta-playbook look
 weak, and never proposes the pattern they actually argue for. SEAGym also reports harness edits are
-the only lever available in deployment since the weights are fixed — which is precisely Orange's
+the only lever available in deployment since the weights are fixed — which is precisely Bob's
 situation, and doubly so given per-worker model-tier routing is an explicit non-goal, closing the
 only other lever. The honest caveat to carry with it, from the same corpus, is 2605.30621's finding
 that much of the measured benefit of self-evolution comes from task-level adaptation rather than the
@@ -2885,7 +2885,7 @@ normalised operands, digests, no raw content and no model trace — as a first-c
 same guarantees as the config log. Downstream, every reviewing/critiquing/blaming/auditing worker
 briefs on the ATTESTATION STREAM rather than on the producer's transcript: `blame-analyst`,
 `contract-checker`, `drift-auditor` and the sampled-oversight sampler all read attestations, and
-their prompts forbid inferring behaviour from narration. In Orange the cheapest today-tier is the
+their prompts forbid inferring behaviour from narration. In Bob the cheapest today-tier is the
 memory-only version: the `publisher` worker (the catalogue's effect-outbox holder) refuses any
 `kind=effect-proposal` that lacks a well-formed explanation object and writes
 `kind=effect-attestation,idem=<key>,disposition=<allow|review|deny>,reason=<predicate>` — which
@@ -2907,7 +2907,7 @@ all 32 soft cases routed to review; a draft-only integration over 68 tasks forwa
 cases past the gate; a median verification time of 0.33 ms, which is what makes it viable on every
 call rather than on a sample; and on an AgentDojo transfer, it converted a generic 'review'
 diagnosis into a specific deny via task-intent contradiction. It also covers exactly the attacks
-Orange's design invites, per the catalogue's own crosscutting note: tool/resource mismatches
+Bob's design invites, per the catalogue's own crosscutting note: tool/resource mismatches
 introduced by prompt injection, effect expansion behind a fluent but false explanation, omission of
 untrusted context dependencies, and stale evidence replayed after a policy change — the last being
 precisely what happens when a worker rewrites another worker's prompt mid-flight.
@@ -3002,7 +3002,7 @@ requests per day by month two and degrading into batched approvals by month six;
 (irreversibility, model confidence, behavioural anomaly such as attempting 400 emails when the norm
 is 5-10, regulatory class) rather than action categories; reviewer routing by expertise; and
 mandatory declared timeout behaviour. The fetched audit-programme source supplies the sampling
-design Orange can copy directly, including the deterministic seeded-hash selection rule that makes a
+design Bob can copy directly, including the deterministic seeded-hash selection rule that makes a
 sample defensible and reproducible, the risk strata (high-value actions, denials, overrides,
 anomalies, first executions after each release, cross-agent delegations, incidents, vendor/model
 changes), the 100%-then-taper rule for a new agent's first 50-100 outputs, the per-record evidence

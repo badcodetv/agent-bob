@@ -1,4 +1,4 @@
-<img src="docs/assets/agent-bob.svg" alt="Agent Bob" width="100%">
+Agent Bob (formerly Agent Orange).
 
 **Give a project a goal. It works out what team it needs, asks you to confirm, builds that team, and
 remembers everything it learns.**
@@ -283,7 +283,7 @@ If you are an **agent** working in this repo, read [`CLAUDE.md`](CLAUDE.md) firs
 |---|---|
 | [docs/18-workers-memory-events.md](docs/18-workers-memory-events.md) | **Operating the product layer** — workers, memory, events, schedules, the core tools |
 | [docs/workflows.md](docs/workflows.md) | **Workflows** — how to express yours here, and the six where the answer is to use something else |
-| [docs/19-embedding.md](docs/19-embedding.md) | Embedding Orange in another application — credentials, named sessions, embed tokens, and a hazard list |
+| [docs/19-embedding.md](docs/19-embedding.md) | Embedding Bob in another application — credentials, named sessions, embed tokens, and a hazard list |
 | [docs/product/17-product-spec.md](docs/product/17-product-spec.md) | The authoritative spec: goal, atoms, binding principles P1–P8, non-goals |
 | [docs/product/10-topology-library.md](docs/product/10-topology-library.md) | The 15 seeded org charts and the evidence behind each |
 | [docs/product/25-cooperative-patterns.md](docs/product/25-cooperative-patterns.md) | 38 cooperative patterns from the wider world, judged against this code |

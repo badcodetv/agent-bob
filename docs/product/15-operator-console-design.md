@@ -107,10 +107,9 @@ asking you a question.
 | `rose` | `#A6376A` | `#DF7BA4` | **it wants you** — `awaiting_human`, open attention requests |
 | `fault` | `#8F2B2B` | `#D96C6C` | failed deliveries, disabled-by-failure schedules |
 
-Notes on the choices. `ember` is a burnt ochre, not a safety orange — the product is called Agent
-Orange and refusing the hue entirely would be coy, but near-black-plus-one-acid-accent is the
-default look of every agent tool shipped this year, so the warm hue is demoted to a *marking* and
-the cold `steel` carries equal weight. `rose` exists because "a worker is waiting for you" is not
+Notes on the choices. `ember` is a burnt ochre, not a safety orange — near-black-plus-one-acid-accent
+is the default look of every agent tool shipped this year, so the warm hue is demoted to a
+*marking* and the cold `steel` carries equal weight. `rose` exists because "a worker is waiting for you" is not
 an error and must never be red: `awaiting_human` is a pause, and the current
 `deliveryStatusSeverity` maps it to MUI `warning`, which puts it in the same visual bucket as a
 rate limit. It is not the same thing.

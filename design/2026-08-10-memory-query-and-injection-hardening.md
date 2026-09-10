@@ -771,7 +771,7 @@ HTTP (`go/httpapi/memories.go`): `GET /agent/memories` gains `?since=`, `?until=
   that performs the effect, not in the model's prompt — the model calls the tool,
   the server holds the effect until a human releases it, and no injected text can
   route around a decision that is not in the model's loop. Note that this does not
-  conflict with the spec's "no approval queues" non-goal, because Orange never
+  conflict with the spec's "no approval queues" non-goal, because Bob never
   learns an approval happened. **The moderator:** screening untrusted text before
   it reaches a worker has exactly two honest placements — at the ingress, in
   whatever posts external events (outside the project, therefore out of a
