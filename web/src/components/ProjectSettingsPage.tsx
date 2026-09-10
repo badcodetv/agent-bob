@@ -490,13 +490,13 @@ function GitProjectionFields({
             fullWidth
             size="small"
             value={draft.git_subfolder}
-            placeholder="orange"
+            placeholder="bob"
             error={subfolderError !== null}
             onChange={(e) => onChange({ git_subfolder: e.target.value })}
           />
           <FormHelperText error={subfolderError !== null}>
             {subfolderError ??
-              'Optional. A single path segment inside the repository that Orange owns (default shown as the placeholder). No slashes, no "..", nothing that could land outside it.'}
+              'Optional. A single path segment inside the repository that Bob owns (default shown as the placeholder). No slashes, no "..", nothing that could land outside it.'}
           </FormHelperText>
         </Box>
 

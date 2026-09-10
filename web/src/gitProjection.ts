@@ -215,7 +215,7 @@ export function describeGitProjection(status: GitProjectionStatus): GitProjectio
         headline: 'The remote has diverged — this will not resolve on its own',
         detail:
           `Someone rewrote history on ${branch}, so a fast-forward push is refused. ` +
-          'Orange will never force, rebase or merge to get past this. The local commits are intact ' +
+          'Bob will never force, rebase or merge to get past this. The local commits are intact ' +
           'and will publish the moment the remote is reconciled — but until then every change made ' +
           'in the console stays invisible in git.',
         action: 'A human has to reconcile the remote branch by hand.',
