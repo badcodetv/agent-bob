@@ -17,6 +17,21 @@ re-derive with `git grep`).
 
 ---
 
+## 0. Guardrails — the executor re-checks these before S0 and obeys them throughout
+
+1. **Only renames.** Every change is an Orange→Bob rename from §4, or one of the small safeguards
+   listed there by name (the pin test, the compose `name:`, the two-prefix report check). Nothing
+   else is added, "improved" or tidied. Unrelated work found on the way is reported, not done.
+2. **Nothing is deleted except the S5 items, and only after Kai says go at STOP B.** Branches are
+   never deleted. Worktrees are removed only with `git worktree remove` (which refuses dirty ones).
+   The only other removals are the ones Kai decided: `docs/assets/` (the banner) and, only if T-LIC
+   runs, `migration-reference/`.
+3. **No force-push, no history rewrite, no `--force` anything.**
+4. **No billable runs.** Mock mode only; never `./stack start` without `mock`, never `./stack wolf up`
+   without `mock`.
+5. **Stop and ask** if a base commit differs from the plan, a gate is red after one fix attempt, or
+   anything needs a decision the plan doesn't already make.
+
 ## 1. Definition of done
 
 1. Engine repo is `github.com/badcodetv/agent-bob`, **public, MIT-licensed**.
@@ -52,7 +67,7 @@ re-derive with `git grep`).
 | D15 | Re-vendor `@agentkit/chat-ui` into Wolf as **0.1.3** (the 0.1.2 tarball has old strings compiled in) | ops session |
 | D16 | Fruit placeholders stay (`apples-oranges`, `acme/orange`, the Zorblatt fixture) | ops session |
 | D17 | `.gitignore`'s `oranged-data/` is dead (the `oranged` component was deleted 2026-07-15) — delete the line | ops session |
-| D18 | Merge agent commit `d9371a6` (stronger prompt-delivery test, applies cleanly); delete branch `feat/phase-a-board` (built on code deleted 2026-07-15) | ops session |
+| D18 | **Rename only**: do NOT merge agent commit `d9371a6` and do NOT delete `feat/phase-a-board`. Remove the agent's worktree only; its commit stays on branch `worktree-agent-a4f9f16dcf7d0ab40`. Both are separate decisions for later | Kai's sanity rule, 2026-09-10 |
 
 **Cleared false alarms** (research agents assumed these; all checked live 2026-09-10): no k8s
 deployment exists (`namespace agent-orange` NotFound); no real git-projection repository
@@ -137,6 +152,9 @@ S5  IRREVERSIBLE      coordinator                              ~10 min
                                                    total ≈ 3–3.5 h wall
 ```
 
+**Execution order:** S0 → S1 → S2 → STOP A → S3 → STOP B → S5 → S4. (S4 goes last because it
+moves the folder the executing session lives in.)
+
 Parallelism lives in S1b (seven disjoint file sets) and S1c; S2's Go/JS/Wolf suites run
 concurrently; the two e2e rigs share Docker and run one after the other.
 
@@ -150,15 +168,15 @@ concurrently; the two e2e rigs share Docker and run one after the other.
    → a local file outside both repos.
 3. **Wolf:** fast-forward `main` to `dev-workflow-and-ux` (`c17ba7d`, 6 commits, `main` has not
    moved — a pure fast-forward).
-4. **Orange:** merge `ops-and-rename` (the two playbooks, this plan, the k8s boot-crash fixes) and
-   cherry-pick `d9371a6` into `main`; delete `feat/phase-a-board` (D18).
+4. **Orange:** merge `ops-and-rename` (the two playbooks, this plan, the k8s boot-crash fixes) into
+   `main`. Do not merge `d9371a6` or delete any branch (D18).
 5. **Pin the protocol constants** (playbook §1.2a): add `go/cmd/agentd/protocolconstants_test.go`
    pinning the *outputs* — `configChangedNamespace`'s UUID value, and the session key derived
    from a fixed test secret, as hex. Commit on `main`.
 6. Create branches `rename/orange-to-bob` in both repos from their `main`.
 
 **Gate S0:** `go test ./cmd/agentd -run TestProtocolConstantsNeverChange` green; Wolf `main` ==
-`c17ba7d`; Orange `main` contains `ops-and-rename` and `d9371a6`.
+`c17ba7d`; Orange `main` contains `ops-and-rename`.
 
 ### S1a — Mechanical sweep (coordinator, scripted)
 
@@ -217,13 +235,14 @@ fully reversible. Old bucket holds 44 bytes and images are rebuildable, so there
 6. End to end, one after the other (both mock, free): Orange `./e2e/run-stack-e2e.sh run mock`,
    then Wolf `BOB_REPO=/home/kai/projects/badcode/agent-orange ./e2e/run.sh`.
 
-**STOP A — report to Kai:** gate results, diff stats per repo, reviewer findings. Proceed on his go.
+**STOP A — checkpoint:** report gate results, diff stats per repo and reviewer findings to Kai. If every
+gate is green and no reviewer finding is unresolved, **continue**; if anything is red, stop and ask.
 
 ### S3 — Land and go outward (coordinator)
 
 1. Merge `rename/orange-to-bob` into `main` in both repos (the rename lands **before** any project
    gets a real `git_remote` — playbook ordering rule).
-2. **T-LIC** (D6): add `LICENSE` (MIT, `Copyright (c) 2026 BadCode`), `"license": "MIT"` in the
+2. **T-LIC** (D6) — **HELD until Kai confirms the rights position (§8); skip this step otherwise.** Add `LICENSE` (MIT, `Copyright (c) 2026 BadCode`), `"license": "MIT"` in the
    three `package.json` files, and replace the three "bayesprice-owned / private use" statements
    (`README.md:251`, `MIGRATION.md:15`, `CLAUDE.md:39`). **Remove `migration-reference/`** from
    the tree: it is Platinum code (139 files, bayesprice URLs, a theme using Channel 4's proprietary
@@ -237,18 +256,24 @@ fully reversible. Old bucket holds 44 bytes and images are rebuildable, so there
 **Gate S3:** `git remote -v` names `badcodetv` in both; `gh repo view badcodetv/agent-bob` shows
 MIT; the new registry lists `session-base`, `session-core`, `session-wolf`, `agentd`, `web`.
 
-### S4 — Folder (the executing session's last act)
+### S4 — Folder (runs LAST, after S5; the folder move is done by Kai after the session exits)
+
+The executing session lives inside `/home/kai/projects/badcode/agent-orange` and writes its
+transcript under `~/.claude/projects/-home-kai-projects-badcode-agent-orange`, so it cannot move
+either safely. It prepares everything, then hands Kai three commands.
 
 1. Stop every stack (`./stack stop`, `./e2e/run-stack-e2e.sh down --purge`, Wolf `./e2e/run.sh --down`).
-2. Remove the remaining worktrees (`agent-orange-ops`, `.claude/worktrees/agent-a4f9f16dcf7d0ab40`)
-   — both merged by now — so nothing needs repair.
-3. `mv /home/kai/projects/badcode/agent-orange /home/kai/projects/badcode/agent-bob`.
-4. Rename **both** Claude Code project dirs so memory follows:
-   `~/.claude/projects/-home-kai-projects-badcode-agent-orange` → `…-agent-bob`, and
-   `…-agent-orange-go` → `…-agent-bob-go`.
-5. Delete the orphaned e2e volumes `agent-orange-stack-e2e_*` (disposable).
-6. New session in `/home/kai/projects/badcode/agent-bob`: `./stack start mock` comes up;
-   Wolf `./e2e/run.sh` passes without `BOB_REPO`.
+2. Remove the remaining worktrees with `git worktree remove`: `agent-orange-ops` (its branch is
+   merged by now) and `.claude/worktrees/agent-a4f9f16dcf7d0ab40` (its commit stays on its branch).
+3. Delete the orphaned e2e volumes `agent-orange-stack-e2e_*` (disposable test data).
+4. Print these for Kai to run **after exiting the session**:
+   ```sh
+   mv /home/kai/projects/badcode/agent-orange /home/kai/projects/badcode/agent-bob
+   mv ~/.claude/projects/-home-kai-projects-badcode-agent-orange    ~/.claude/projects/-home-kai-projects-badcode-agent-bob
+   mv ~/.claude/projects/-home-kai-projects-badcode-agent-orange-go ~/.claude/projects/-home-kai-projects-badcode-agent-bob-go
+   ```
+5. Kai then opens a new session in `/home/kai/projects/badcode/agent-bob` and checks:
+   `./stack start mock` comes up, and Wolf `./e2e/run.sh` passes without `BOB_REPO`.
 
 **Gate S4:** both repos `git worktree list | wc -l` = 1; G-FINAL still clean.
 
