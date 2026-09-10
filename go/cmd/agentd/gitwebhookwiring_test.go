@@ -272,19 +272,19 @@ func TestGitWebhookSecretEnvIsNotImportable(t *testing.T) {
 		SystemPrompt:        "The project.",
 		GitRemote:           "https://github.com/badcode/wolf.git",
 		GitBranch:           "main",
-		GitSubfolder:        "orange",
+		GitSubfolder:        "bob",
 		GitTokenEnv:         "WOLF_GITHUB_TOKEN",
 		GitWebhookSecretEnv: "WOLF_WEBHOOK_SECRET",
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/settings.md": file(strings.Join([]string{
+		"bob/settings.md": file(strings.Join([]string{
 			"base_image: wolf-base",
 			"git_webhook_secret_env: WOLF_WEBHOOK_SECRET",
 		}, "\n"), "The project."),
 	})
 	head := g.human("point verification at a secret I control", map[string]*string{
-		"orange/settings.md": file(strings.Join([]string{
+		"bob/settings.md": file(strings.Join([]string{
 			"base_image: wolf-next",
 			"git_webhook_secret_env: ATTACKER_SECRET",
 		}, "\n"), "The project."),
@@ -347,7 +347,7 @@ func TestGitProjectionTableDelegatesToTheStore(t *testing.T) {
 		t.Errorf("the text fallback must classify a divergence, got %q", spy.lastKind)
 	}
 	if err := table.PutNotes(ctx, "wolf", agentdb.GitProjectionNoteIgnored,
-		[]agentdb.GitProjectionNote{{Path: "orange/images/base.md", Reason: "images are not importable"}}); err != nil {
+		[]agentdb.GitProjectionNote{{Path: "bob/images/base.md", Reason: "images are not importable"}}); err != nil {
 		t.Fatalf("put notes: %v", err)
 	}
 	if len(spy.lastNotes) != 1 || spy.lastNotesKind != agentdb.GitProjectionNoteIgnored {

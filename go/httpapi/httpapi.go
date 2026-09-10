@@ -97,7 +97,7 @@ type Config struct {
 	//
 	// It used to say "read-only by design — memories are appended by workers,
 	// never by the UI", and that was the whole problem: an application embedding
-	// Orange had no way to hold state, because the only write surface was the
+	// Bob had no way to hold state, because the only write surface was the
 	// memory_create tool, authenticated by a session token it does not hold.
 	// POST /agent/memories (O7) is that write. It is still not an update and
 	// still not a delete, and its provenance is stamped EMPTY by the server —

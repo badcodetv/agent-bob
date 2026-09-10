@@ -47,7 +47,7 @@ func TestParseAgainstOnlyEnabledChanged(t *testing.T) {
 	next["enabled"] = false
 	edited := workerFile(t, next, body)
 
-	ch, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, edited)
+	ch, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, edited)
 	if err != nil {
 		t.Fatalf("ParseAgainst: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestParseAgainstBodyAndFields(t *testing.T) {
 			}
 			next := workerFile(t, values, tc.body)
 
-			ch, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, next)
+			ch, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, next)
 			if err != nil {
 				t.Fatalf("ParseAgainst: %v", err)
 			}
@@ -225,7 +225,7 @@ func TestParseAgainstFormattingIsNotAChange(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ch, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, []byte(tc.next))
+			ch, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, []byte(tc.next))
 			if err != nil {
 				t.Fatalf("ParseAgainst: %v", err)
 			}
@@ -253,7 +253,7 @@ func TestParseAgainstDropsGitFields(t *testing.T) {
 		"base_image":             "example",
 		"git_remote":             "https://github.com/badcode/wolf",
 		"git_branch":             "main",
-		"git_subfolder":          "orange",
+		"git_subfolder":          "bob",
 		"git_token_env":          "WOLF_GITHUB_TOKEN",
 		"git_webhook_secret_env": "WOLF_WEBHOOK_SECRET",
 	}
@@ -263,13 +263,13 @@ func TestParseAgainstDropsGitFields(t *testing.T) {
 		"base_image":             "other",
 		"git_remote":             "https://github.com/attacker/exfil",
 		"git_branch":             "steal",
-		"git_subfolder":          "orange",
+		"git_subfolder":          "bob",
 		"git_token_env":          "ATTACKER_TOKEN",
 		"git_webhook_secret_env": "ATTACKER_WEBHOOK_SECRET",
 	}
 	next := workerFile(t, nextValues, "Project prompt.\n")
 
-	ch, err := ParseAgainst("orange", "orange/settings.md", old, next)
+	ch, err := ParseAgainst("bob", "bob/settings.md", old, next)
 	if err != nil {
 		t.Fatalf("ParseAgainst: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestParseCreate(t *testing.T) {
 		"description": "",
 	}, "Edit ruthlessly.\n")
 
-	ch, err := Parse("orange", "orange/workers/editor.md", next)
+	ch, err := Parse("bob", "bob/workers/editor.md", next)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestParseCreate(t *testing.T) {
 
 func TestParseCreateEmptyBodyIsNotAPromptWrite(t *testing.T) {
 	next := workerFile(t, map[string]interface{}{"name": "editor"}, "")
-	ch, err := Parse("orange", "orange/workers/editor.md", next)
+	ch, err := Parse("bob", "bob/workers/editor.md", next)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestParseCreateEmptyBodyIsNotAPromptWrite(t *testing.T) {
 // unwise, prompt.
 func TestParseDeletion(t *testing.T) {
 	t.Run("explicit", func(t *testing.T) {
-		ch, err := ParseDelete("orange", "orange/workers/copywriter.md")
+		ch, err := ParseDelete("bob", "bob/workers/copywriter.md")
 		if err != nil {
 			t.Fatalf("ParseDelete: %v", err)
 		}
@@ -355,7 +355,7 @@ func TestParseDeletion(t *testing.T) {
 	})
 
 	t.Run("nil content", func(t *testing.T) {
-		ch, err := ParseAgainst("orange", "orange/workers/copywriter.md", []byte("---\nname: copywriter\n---\n\nhi\n"), nil)
+		ch, err := ParseAgainst("bob", "bob/workers/copywriter.md", []byte("---\nname: copywriter\n---\n\nhi\n"), nil)
 		if err != nil {
 			t.Fatalf("ParseAgainst: %v", err)
 		}
@@ -366,7 +366,7 @@ func TestParseDeletion(t *testing.T) {
 
 	t.Run("empty file is not a deletion", func(t *testing.T) {
 		old := []byte("---\nname: copywriter\n---\n\nthe old prompt\n")
-		ch, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, []byte(""))
+		ch, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, []byte(""))
 		if err != nil {
 			t.Fatalf("ParseAgainst: %v", err)
 		}
@@ -390,26 +390,26 @@ func TestParseErrors(t *testing.T) {
 	}{
 		{
 			name:   "malformed frontmatter names the file",
-			path:   "orange/workers/copywriter.md",
+			path:   "bob/workers/copywriter.md",
 			next:   []byte("---\nname: copywriter\n  bad: [unclosed\n---\n\nbody\n"),
-			wantIn: []string{"orange/workers/copywriter.md", "frontmatter"},
+			wantIn: []string{"bob/workers/copywriter.md", "frontmatter"},
 		},
 		{
 			name:   "unterminated frontmatter names the file",
-			path:   "orange/workers/copywriter.md",
+			path:   "bob/workers/copywriter.md",
 			next:   []byte("---\nname: copywriter\n\nbody with no closing fence\n"),
-			wantIn: []string{"orange/workers/copywriter.md", "unterminated"},
+			wantIn: []string{"bob/workers/copywriter.md", "unterminated"},
 		},
 		{
 			name:   "malformed previous version is not treated as a create",
-			path:   "orange/workers/copywriter.md",
+			path:   "bob/workers/copywriter.md",
 			old:    []byte("---\n\tname: [unclosed\n---\n\nbody\n"),
 			next:   []byte("---\nname: copywriter\n---\n\nbody\n"),
-			wantIn: []string{"orange/workers/copywriter.md", "previous version"},
+			wantIn: []string{"bob/workers/copywriter.md", "previous version"},
 		},
 		{
 			name:   "path traversal is refused, not guessed at",
-			path:   "orange/workers/../../.github/workflows/evil.md",
+			path:   "bob/workers/../../.github/workflows/evil.md",
 			next:   []byte("---\n---\n\nbody\n"),
 			wantIn: []string{".."},
 		},
@@ -421,21 +421,21 @@ func TestParseErrors(t *testing.T) {
 		},
 		{
 			name:   "unknown directory is refused",
-			path:   "orange/secrets/token.md",
+			path:   "bob/secrets/token.md",
 			next:   []byte("---\n---\n\nbody\n"),
 			wantIn: []string{"unknown directory"},
 		},
 		{
 			name:   "uppercase name is refused",
-			path:   "orange/workers/CopyWriter.md",
+			path:   "bob/workers/CopyWriter.md",
 			next:   []byte("---\n---\n\nbody\n"),
 			wantIn: []string{"invalid name"},
 		},
 		{
 			name:   "frontmatter name disagreeing with the filename is refused",
-			path:   "orange/workers/copywriter.md",
+			path:   "bob/workers/copywriter.md",
 			next:   []byte("---\nname: architect\n---\n\nbody\n"),
-			wantIn: []string{"orange/workers/copywriter.md", "does not match the filename"},
+			wantIn: []string{"bob/workers/copywriter.md", "does not match the filename"},
 		},
 	}
 
@@ -443,7 +443,7 @@ func TestParseErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sub := tc.subfolder
 			if sub == "" {
-				sub = "orange"
+				sub = "bob"
 			}
 			_, err := ParseAgainst(sub, tc.path, tc.old, tc.next)
 			if err == nil {
@@ -459,9 +459,9 @@ func TestParseErrors(t *testing.T) {
 }
 
 // TestParseSubfolderDefault pins DI3's read-time default: an empty subfolder
-// means `orange`, never the repository root.
+// means `bob`, never the repository root.
 func TestParseSubfolderDefault(t *testing.T) {
-	ch, err := ParseAgainst("", "orange/workers/copywriter.md", nil, []byte("---\nname: copywriter\n---\n\nbody\n"))
+	ch, err := ParseAgainst("", "bob/workers/copywriter.md", nil, []byte("---\nname: copywriter\n---\n\nbody\n"))
 	if err != nil {
 		t.Fatalf("ParseAgainst: %v", err)
 	}
@@ -479,17 +479,17 @@ func TestParsePathKinds(t *testing.T) {
 		kind Kind
 		name string
 	}{
-		{"orange/settings.md", KindSettings, ""},
-		{"orange/workers/copywriter.md", KindWorker, "copywriter"},
-		{"orange/skills/brand-voice.md", KindSkill, "brand-voice"},
-		{"orange/subscriptions/sub-1.md", KindSubscription, "sub-1"},
-		{"orange/schedules/daily.md", KindSchedule, "daily"},
-		{"orange/images/example.md", KindImage, "example"},
-		{"orange/memory/message-board.md", KindMemory, "message-board"},
+		{"bob/settings.md", KindSettings, ""},
+		{"bob/workers/copywriter.md", KindWorker, "copywriter"},
+		{"bob/skills/brand-voice.md", KindSkill, "brand-voice"},
+		{"bob/subscriptions/sub-1.md", KindSubscription, "sub-1"},
+		{"bob/schedules/daily.md", KindSchedule, "daily"},
+		{"bob/images/example.md", KindImage, "example"},
+		{"bob/memory/message-board.md", KindMemory, "message-board"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
-			ch, err := Parse("orange", tc.path, []byte("---\n---\n\n"))
+			ch, err := Parse("bob", tc.path, []byte("---\n---\n\n"))
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
 			}
@@ -548,12 +548,12 @@ func TestParseAgainstIsPure(t *testing.T) {
 	oldCopy := append([]byte(nil), old...)
 	nextCopy := append([]byte(nil), next...)
 
-	first, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, next)
+	first, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, next)
 	if err != nil {
 		t.Fatalf("ParseAgainst: %v", err)
 	}
 	for i := 0; i < 20; i++ {
-		again, err := ParseAgainst("orange", "orange/workers/copywriter.md", old, next)
+		again, err := ParseAgainst("bob", "bob/workers/copywriter.md", old, next)
 		if err != nil {
 			t.Fatalf("ParseAgainst (iter %d): %v", i, err)
 		}

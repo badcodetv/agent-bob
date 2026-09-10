@@ -338,7 +338,7 @@ func (f *fakeGitWebhookLister) ProjectsWithGitRemote(context.Context) ([]string,
 }
 
 func TestGitWebhookPollSweepsListedProjects(t *testing.T) {
-	lister := &fakeGitWebhookLister{projects: []string{"wolf", "orange"}}
+	lister := &fakeGitWebhookLister{projects: []string{"wolf", "acme"}}
 	importer := newFakeGitWebhookImporter()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -359,8 +359,8 @@ func TestGitWebhookPollSweepsListedProjects(t *testing.T) {
 			t.Fatalf("timed out; saw projects %v", seen)
 		}
 	}
-	if !seen["wolf"] || !seen["orange"] {
-		t.Fatalf("poll swept %v, want both wolf and orange", seen)
+	if !seen["wolf"] || !seen["acme"] {
+		t.Fatalf("poll swept %v, want both wolf and acme", seen)
 	}
 }
 

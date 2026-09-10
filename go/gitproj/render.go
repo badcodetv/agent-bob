@@ -91,7 +91,7 @@ type ProjectState struct {
 // function is `RenderTree` — which reads better beside Repo.WriteTree anyway.
 // If the const is later renamed (DecisionRender), this can go back to Render.
 //
-// subfolder is the single path segment Orange owns inside the repository. Empty
+// subfolder is the single path segment Bob owns inside the repository. Empty
 // falls back to the project's own ProjectSettings.GitSubfolder, and then to
 // agentdb.DefaultGitSubfolder — DI3's read-time defaulting rule, applied here
 // because the column is deliberately stored empty rather than defaulted on

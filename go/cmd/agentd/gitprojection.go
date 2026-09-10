@@ -797,7 +797,7 @@ func (p *gitProjector) logAgain(key string) {
 //     must never fire again: latching on for ever would block every subsequent
 //     render, which is a worse failure than the one it prevents.
 //  2. THE REMOTE'S SUBFOLDER HAS CONTENT. An empty remote, an unborn branch, a
-//     repository that simply has no `orange/` yet — the ordinary first-run
+//     repository that simply has no `bob/` yet — the ordinary first-run
 //     state of a brand-new project — is NOT this case and must render normally.
 //
 // The state read is a primary-key lookup and the git call happens only when

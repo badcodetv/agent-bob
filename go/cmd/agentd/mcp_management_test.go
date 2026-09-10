@@ -334,7 +334,7 @@ func (f *fakeAttention) Request(_ context.Context, in attentionRequestInput) (*a
 		return nil, f.err
 	}
 	return &attentionResult{
-		SessionURL: "https://orange.example.com/p/acme/s/" + in.SessionID,
+		SessionURL: "https://bob.example.com/p/acme/s/" + in.SessionID,
 		Message:    in.Message,
 		Channel:    "webhook",
 		Delivered:  true,
@@ -1158,7 +1158,7 @@ func TestManagementToolsRequestHumanAttentionIsAnAdapter(t *testing.T) {
 	if in.ExpiresIn != 3600 {
 		t.Fatalf("expires_in not forwarded: %+v", in)
 	}
-	if res["session_url"] != "https://orange.example.com/p/acme/s/sess-1" {
+	if res["session_url"] != "https://bob.example.com/p/acme/s/sess-1" {
 		t.Fatalf("the permalink must be echoed (§9): %v", res["session_url"])
 	}
 	// The adapter writes nothing itself — the service owns every side effect.

@@ -46,7 +46,7 @@ var gitSubfolderPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // GitSubfolder take when left empty (design/2026-09-09-git-projection.md).
 const (
 	DefaultGitBranch    = "main"
-	DefaultGitSubfolder = "orange"
+	DefaultGitSubfolder = "bob"
 )
 
 // ProjectSettings is the per-project configuration row (§5): one row per
@@ -99,8 +99,8 @@ type ProjectSettings struct {
 	// ("main") at render time — this column is not defaulted on write, the
 	// same way BaseImage and SystemPrompt aren't. NOT IMPORTABLE.
 	GitBranch string `json:"git_branch" gorm:"type:text"`
-	// GitSubfolder is the single path segment Orange owns inside the repo.
-	// Empty means DefaultGitSubfolder ("orange") at render time. Must be one
+	// GitSubfolder is the single path segment Bob owns inside the repo.
+	// Empty means DefaultGitSubfolder ("bob") at render time. Must be one
 	// valid path segment — no slashes, no `..`, no leading dot — see
 	// gitSubfolderPattern. NOT IMPORTABLE.
 	GitSubfolder string `json:"git_subfolder" gorm:"type:text"`

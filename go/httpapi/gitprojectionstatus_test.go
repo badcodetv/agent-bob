@@ -131,7 +131,7 @@ func TestGitProjectionStatusAppliesEngineDefaults(t *testing.T) {
 	if body["subfolder"] != agentdb.DefaultGitSubfolder {
 		t.Fatalf("subfolder = %v, want %q", body["subfolder"], agentdb.DefaultGitSubfolder)
 	}
-	want := "https://github.com/badcode/acme-org/tree/main/orange"
+	want := "https://github.com/badcode/acme-org/tree/main/bob"
 	if body["browse_url"] != want {
 		t.Fatalf("browse_url = %v, want %q", body["browse_url"], want)
 	}
@@ -252,7 +252,7 @@ func TestGitProjectionStatusHealth(t *testing.T) {
 		{
 			name:       "quarantined: a human's push was rejected wholesale",
 			state:      agentdb.GitProjectionState{LastRenderedSHA: "abc123", LastPushedSHA: "abc123"},
-			quarantine: []GitProjectionNote{{Path: "orange/workers/scout.md", Reason: "frontmatter is not a mapping"}},
+			quarantine: []GitProjectionNote{{Path: "bob/workers/scout.md", Reason: "frontmatter is not a mapping"}},
 			wantHealth: GitProjectionQuarantined,
 		},
 		{
@@ -299,8 +299,8 @@ func TestGitProjectionStatusReportsIgnoredEdits(t *testing.T) {
 			rows: map[string]*agentdb.GitProjectionState{"acme": {LastRenderedSHA: "a", LastPushedSHA: "a"}},
 		},
 		ignored: map[string][]GitProjectionNote{"acme": {
-			{Path: "orange/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
-			{Path: "orange/images/base.md", Reason: "images are not importable"},
+			{Path: "bob/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
+			{Path: "bob/images/base.md", Reason: "images are not importable"},
 		}},
 	}
 	h := newGitProjectionHandlers(t, settings, state, identityFor("acme"))
@@ -417,20 +417,20 @@ func TestGitBrowseURL(t *testing.T) {
 	cases := []struct {
 		remote, branch, sub, want string
 	}{
-		{"https://github.com/badcode/acme.git", "main", "orange",
-			"https://github.com/badcode/acme/tree/main/orange"},
-		{"git@github.com:badcode/acme.git", "prod", "orange",
-			"https://github.com/badcode/acme/tree/prod/orange"},
-		{"ssh://git@github.com/badcode/acme.git", "main", "orange",
-			"https://github.com/badcode/acme/tree/main/orange"},
+		{"https://github.com/badcode/acme.git", "main", "bob",
+			"https://github.com/badcode/acme/tree/main/bob"},
+		{"git@github.com:badcode/acme.git", "prod", "bob",
+			"https://github.com/badcode/acme/tree/prod/bob"},
+		{"ssh://git@github.com/badcode/acme.git", "main", "bob",
+			"https://github.com/badcode/acme/tree/main/bob"},
 		// A non-GitHub forge gets the repository root: guessing another host's
 		// path grammar lands an operator on a 404 mid-diagnosis.
-		{"https://gitlab.com/badcode/acme.git", "main", "orange",
+		{"https://gitlab.com/badcode/acme.git", "main", "bob",
 			"https://gitlab.com/badcode/acme"},
-		{"git@git.example.com:badcode/acme.git", "main", "orange",
+		{"git@git.example.com:badcode/acme.git", "main", "bob",
 			"https://git.example.com/badcode/acme"},
-		{"", "main", "orange", ""},
-		{"not a url at all", "main", "orange", ""},
+		{"", "main", "bob", ""},
+		{"not a url at all", "main", "bob", ""},
 	}
 	for _, tc := range cases {
 		if got := gitBrowseURL(tc.remote, tc.branch, tc.sub); got != tc.want {

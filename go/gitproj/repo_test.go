@@ -64,7 +64,7 @@ func newClone(t *testing.T, remote, name string) *Repo {
 func writeAndCommit(t *testing.T, r *Repo, files map[string][]byte, subject string) string {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := r.WriteTree(ctx, files, "orange"); err != nil {
+	if _, err := r.WriteTree(ctx, files, "bob"); err != nil {
 		t.Fatalf("write tree: %v", err)
 	}
 	sha, err := r.Commit(ctx, subject, "", map[string]string{"Bob-Seq": "1"})
@@ -84,7 +84,7 @@ func TestRepoCloneIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first clone: %v", err)
 	}
-	sha := writeAndCommit(t, first, map[string][]byte{"orange/settings.md": []byte("one\n")}, "first")
+	sha := writeAndCommit(t, first, map[string][]byte{"bob/settings.md": []byte("one\n")}, "first")
 
 	second, err := Clone(ctx, dir, remote, "main")
 	if err != nil {
@@ -145,23 +145,23 @@ func TestRepoWriteTreeDeletesDroppedFiles(t *testing.T) {
 	r := newClone(t, newBareRemote(t), "clone")
 
 	writeAndCommit(t, r, map[string][]byte{
-		"orange/workers/architect.md":  []byte("architect\n"),
-		"orange/workers/copywriter.md": []byte("copywriter\n"),
-		"orange/settings.md":           []byte("settings\n"),
+		"bob/workers/architect.md":  []byte("architect\n"),
+		"bob/workers/copywriter.md": []byte("copywriter\n"),
+		"bob/settings.md":           []byte("settings\n"),
 	}, "two workers")
 
 	// copywriter is gone from the render: the file must go with it.
 	changed, err := r.WriteTree(ctx, map[string][]byte{
-		"orange/workers/architect.md": []byte("architect\n"),
-		"orange/settings.md":          []byte("settings\n"),
-	}, "orange")
+		"bob/workers/architect.md": []byte("architect\n"),
+		"bob/settings.md":          []byte("settings\n"),
+	}, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !changed {
 		t.Fatal("dropping a file must report changed=true")
 	}
-	if _, err := os.Stat(filepath.Join(r.Path(), "orange/workers/copywriter.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(r.Path(), "bob/workers/copywriter.md")); !os.IsNotExist(err) {
 		t.Fatalf("dropped file still on disk: %v", err)
 	}
 	if _, err := r.Commit(ctx, "one worker", "", map[string]string{"Bob-Seq": "2"}); err != nil {
@@ -173,14 +173,14 @@ func TestRepoWriteTreeDeletesDroppedFiles(t *testing.T) {
 	}
 
 	// An untracked leftover inside the subfolder is swept too.
-	stray := filepath.Join(r.Path(), "orange/workers/stray.md")
+	stray := filepath.Join(r.Path(), "bob/workers/stray.md")
 	if err := os.WriteFile(stray, []byte("junk\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.WriteTree(ctx, map[string][]byte{
-		"orange/workers/architect.md": []byte("architect\n"),
-		"orange/settings.md":          []byte("settings\n"),
-	}, "orange"); err != nil {
+		"bob/workers/architect.md": []byte("architect\n"),
+		"bob/settings.md":          []byte("settings\n"),
+	}, "bob"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(stray); !os.IsNotExist(err) {
@@ -194,13 +194,13 @@ func TestRepoWriteTreeReportsNoChangeWhenIdentical(t *testing.T) {
 	r := newClone(t, newBareRemote(t), "clone")
 
 	files := map[string][]byte{
-		"orange/settings.md":          []byte("settings\n"),
-		"orange/workers/architect.md": []byte("architect\n"),
+		"bob/settings.md":          []byte("settings\n"),
+		"bob/workers/architect.md": []byte("architect\n"),
 	}
 	sha := writeAndCommit(t, r, files, "initial")
 
 	// This is the property that makes the import → render loop terminate.
-	changed, err := r.WriteTree(ctx, files, "orange")
+	changed, err := r.WriteTree(ctx, files, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,8 +219,8 @@ func TestRepoWriteTreeReportsNoChangeWhenIdentical(t *testing.T) {
 	}
 
 	// One byte of difference is a change.
-	files["orange/settings.md"] = []byte("settings changed\n")
-	changed, err = r.WriteTree(ctx, files, "orange")
+	files["bob/settings.md"] = []byte("settings changed\n")
+	changed, err = r.WriteTree(ctx, files, "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,12 +236,12 @@ func TestRepoWriteTreeRefusesPathsOutsideSubfolder(t *testing.T) {
 
 	for _, bad := range []string{
 		"../.github/workflows/evil.yml",
-		"orange/../../escape.md",
+		"bob/../../escape.md",
 		"/etc/passwd",
 		".github/workflows/evil.yml",
-		"orange/.git/config",
+		"bob/.git/config",
 	} {
-		if _, err := r.WriteTree(ctx, map[string][]byte{bad: []byte("x")}, "orange"); !errors.Is(err, ErrPathOutsideSubfolder) {
+		if _, err := r.WriteTree(ctx, map[string][]byte{bad: []byte("x")}, "bob"); !errors.Is(err, ErrPathOutsideSubfolder) {
 			t.Fatalf("path %q: want ErrPathOutsideSubfolder, got %v", bad, err)
 		}
 	}
@@ -252,7 +252,7 @@ func TestRepoCommitTrailersAndFixedAuthorRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	r := newClone(t, newBareRemote(t), "clone")
 
-	if _, err := r.WriteTree(ctx, map[string][]byte{"orange/workers/copywriter.md": []byte("prompt\n")}, "orange"); err != nil {
+	if _, err := r.WriteTree(ctx, map[string][]byte{"bob/workers/copywriter.md": []byte("prompt\n")}, "bob"); err != nil {
 		t.Fatal(err)
 	}
 	// The body is model-written text, and it tries to forge a trailer.
@@ -314,7 +314,7 @@ func TestRepoCommitRejectsForgedTrailerArguments(t *testing.T) {
 	requireGitBinary(t)
 	ctx := context.Background()
 	r := newClone(t, newBareRemote(t), "clone")
-	if _, err := r.WriteTree(ctx, map[string][]byte{"orange/settings.md": []byte("x\n")}, "orange"); err != nil {
+	if _, err := r.WriteTree(ctx, map[string][]byte{"bob/settings.md": []byte("x\n")}, "bob"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.Commit(ctx, "subject", "", map[string]string{"Bob-Actor-Worker": "architect\nBob-Seq: 9"}); err == nil {
@@ -334,7 +334,7 @@ func TestRepoPushFastForwardOnly(t *testing.T) {
 	remote := newBareRemote(t)
 
 	a := newClone(t, remote, "a")
-	writeAndCommit(t, a, map[string][]byte{"orange/settings.md": []byte("one\n")}, "first")
+	writeAndCommit(t, a, map[string][]byte{"bob/settings.md": []byte("one\n")}, "first")
 	if err := a.Push(ctx); err != nil {
 		t.Fatalf("first push: %v", err)
 	}
@@ -345,8 +345,8 @@ func TestRepoPushFastForwardOnly(t *testing.T) {
 	// A second writer (a human, or a second clone) moves the remote on.
 	b := newClone(t, remote, "b")
 	writeAndCommit(t, b, map[string][]byte{
-		"orange/settings.md": []byte("one\n"),
-		"orange/humans.md":   []byte("edited by a human\n"),
+		"bob/settings.md": []byte("one\n"),
+		"bob/humans.md":   []byte("edited by a human\n"),
 	}, "human edit")
 	if err := b.Push(ctx); err != nil {
 		t.Fatalf("second writer push: %v", err)
@@ -354,7 +354,7 @@ func TestRepoPushFastForwardOnly(t *testing.T) {
 
 	// a now diverges.
 	writeAndCommit(t, a, map[string][]byte{
-		"orange/settings.md": []byte("two\n"),
+		"bob/settings.md": []byte("two\n"),
 	}, "second")
 
 	// Without a fetch, a's local view still says fast-forward; the remote is the
@@ -407,17 +407,17 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 	r := newClone(t, newBareRemote(t), "clone")
 
 	base := writeAndCommit(t, r, map[string][]byte{
-		"orange/settings.md":           []byte("settings\n"),
-		"orange/workers/architect.md":  []byte("architect\n"),
-		"orange/workers/copywriter.md": []byte("copywriter\n"),
+		"bob/settings.md":           []byte("settings\n"),
+		"bob/workers/architect.md":  []byte("architect\n"),
+		"bob/workers/copywriter.md": []byte("copywriter\n"),
 	}, "base")
 
 	if _, err := r.WriteTree(ctx, map[string][]byte{
-		"orange/settings.md":          []byte("settings changed\n"), // modify
-		"orange/workers/architect.md": []byte("architect\n"),        // untouched
-		"orange/memory/goal.md":       []byte("the goal\n"),         // add
+		"bob/settings.md":          []byte("settings changed\n"), // modify
+		"bob/workers/architect.md": []byte("architect\n"),        // untouched
+		"bob/memory/goal.md":       []byte("the goal\n"),         // add
 		// copywriter.md dropped                                        // delete
-	}, "orange"); err != nil {
+	}, "bob"); err != nil {
 		t.Fatal(err)
 	}
 	head, err := r.Commit(ctx, "second", "", map[string]string{"Bob-Seq": "2"})
@@ -430,9 +430,9 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"orange/memory/goal.md",
-		"orange/settings.md",
-		"orange/workers/copywriter.md",
+		"bob/memory/goal.md",
+		"bob/settings.md",
+		"bob/workers/copywriter.md",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ChangedPaths = %v, want %v", got, want)
@@ -443,16 +443,16 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 3 || !strings.Contains(strings.Join(all, ","), "orange/memory/goal.md") {
+	if len(all) != 3 || !strings.Contains(strings.Join(all, ","), "bob/memory/goal.md") {
 		t.Fatalf("full tree listing = %v", all)
 	}
 
 	// A rename must read as a delete plus an add, never as a rename.
 	if _, err := r.WriteTree(ctx, map[string][]byte{
-		"orange/settings.md":        []byte("settings changed\n"),
-		"orange/workers/planner.md": []byte("architect\n"), // same bytes, new path
-		"orange/memory/goal.md":     []byte("the goal\n"),
-	}, "orange"); err != nil {
+		"bob/settings.md":        []byte("settings changed\n"),
+		"bob/workers/planner.md": []byte("architect\n"), // same bytes, new path
+		"bob/memory/goal.md":     []byte("the goal\n"),
+	}, "bob"); err != nil {
 		t.Fatal(err)
 	}
 	renamed, err := r.Commit(ctx, "third", "", map[string]string{"Bob-Seq": "3"})
@@ -463,7 +463,7 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got, ",") != "orange/workers/architect.md,orange/workers/planner.md" {
+	if strings.Join(got, ",") != "bob/workers/architect.md,bob/workers/planner.md" {
 		t.Fatalf("rename should surface as delete+add, got %v", got)
 	}
 }

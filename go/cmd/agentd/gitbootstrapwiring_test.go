@@ -165,7 +165,7 @@ func TestGitBootstrapWiringCreatesTheProject(t *testing.T) {
 	// ignore banners.
 	if err := rig.state.PutNotes(context.Background(), gitImportProject,
 		agentdb.GitProjectionNoteQuarantine,
-		[]agentdb.GitProjectionNote{{Path: "orange/workers/old.md", Reason: "stale"}}); err != nil {
+		[]agentdb.GitProjectionNote{{Path: "bob/workers/old.md", Reason: "stale"}}); err != nil {
 		t.Fatalf("seed quarantine: %v", err)
 	}
 

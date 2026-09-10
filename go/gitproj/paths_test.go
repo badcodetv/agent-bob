@@ -54,12 +54,12 @@ func TestPathConstructors(t *testing.T) {
 		n    string
 		want string
 	}{
-		{"worker", WorkerPath, "copywriter", "orange/workers/copywriter.md"},
-		{"skill", SkillPath, "email-triage", "orange/skills/email-triage.md"},
-		{"subscription", SubscriptionPath, "sub-123", "orange/subscriptions/sub-123.md"},
-		{"schedule", SchedulePath, "sched-9", "orange/schedules/sched-9.md"},
-		{"image", ImagePath, "core-v2", "orange/images/core-v2.md"},
-		{"memory", MemoryPath, "message-board", "orange/memory/message-board.md"},
+		{"worker", WorkerPath, "copywriter", "bob/workers/copywriter.md"},
+		{"skill", SkillPath, "email-triage", "bob/skills/email-triage.md"},
+		{"subscription", SubscriptionPath, "sub-123", "bob/subscriptions/sub-123.md"},
+		{"schedule", SchedulePath, "sched-9", "bob/schedules/sched-9.md"},
+		{"image", ImagePath, "core-v2", "bob/images/core-v2.md"},
+		{"memory", MemoryPath, "message-board", "bob/memory/message-board.md"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestPathConstructors(t *testing.T) {
 		})
 	}
 
-	if got := SettingsPath(""); got != "orange/settings.md" {
+	if got := SettingsPath(""); got != "bob/settings.md" {
 		t.Fatalf("SettingsPath: got %q", got)
 	}
 
@@ -93,13 +93,13 @@ func TestParsePathRoundTrip(t *testing.T) {
 		wantKind Kind
 		wantName string
 	}{
-		{"orange/settings.md", KindSettings, ""},
-		{"orange/workers/copywriter.md", KindWorker, "copywriter"},
-		{"orange/skills/email-triage.md", KindSkill, "email-triage"},
-		{"orange/subscriptions/sub-123.md", KindSubscription, "sub-123"},
-		{"orange/schedules/sched-9.md", KindSchedule, "sched-9"},
-		{"orange/images/core-v2.md", KindImage, "core-v2"},
-		{"orange/memory/message-board.md", KindMemory, "message-board"},
+		{"bob/settings.md", KindSettings, ""},
+		{"bob/workers/copywriter.md", KindWorker, "copywriter"},
+		{"bob/skills/email-triage.md", KindSkill, "email-triage"},
+		{"bob/subscriptions/sub-123.md", KindSubscription, "sub-123"},
+		{"bob/schedules/sched-9.md", KindSchedule, "sched-9"},
+		{"bob/images/core-v2.md", KindImage, "core-v2"},
+		{"bob/memory/message-board.md", KindMemory, "message-board"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
@@ -129,21 +129,21 @@ func TestParsePathRejections(t *testing.T) {
 		name string
 		path string
 	}{
-		{"dotdot traversal", "orange/workers/../../../etc/passwd"},
-		{"dotdot segment", "orange/../secrets.md"},
-		{"single dot segment", "orange/./workers/x.md"},
-		{"absolute path", "/orange/workers/copywriter.md"},
+		{"dotdot traversal", "bob/workers/../../../etc/passwd"},
+		{"dotdot segment", "bob/../secrets.md"},
+		{"single dot segment", "bob/./workers/x.md"},
+		{"absolute path", "/bob/workers/copywriter.md"},
 		{"outside subfolder", ".github/workflows/x.yml"},
-		{"uppercase name", "orange/workers/Copywriter.md"},
-		{"empty segment", "orange//x.md"},
-		{"trailing slash", "orange/workers/"},
-		{"name with slash smuggled via extra segment", "orange/workers/a/b.md"},
-		{"unknown directory", "orange/nope/x.md"},
-		{"missing extension", "orange/workers/copywriter"},
+		{"uppercase name", "bob/workers/Copywriter.md"},
+		{"empty segment", "bob//x.md"},
+		{"trailing slash", "bob/workers/"},
+		{"name with slash smuggled via extra segment", "bob/workers/a/b.md"},
+		{"unknown directory", "bob/nope/x.md"},
+		{"missing extension", "bob/workers/copywriter"},
 		{"empty path", ""},
-		{"name too long", "orange/workers/" + strings.Repeat("a", 64) + ".md"},
-		{"name with leading dash", "orange/workers/-bad.md"},
-		{"name with trailing dash", "orange/workers/bad-.md"},
+		{"name too long", "bob/workers/" + strings.Repeat("a", 64) + ".md"},
+		{"name with leading dash", "bob/workers/-bad.md"},
+		{"name with trailing dash", "bob/workers/bad-.md"},
 		{"not under subfolder at all", "elsewhere/settings.md"},
 	}
 	for _, tc := range tests {
@@ -163,10 +163,10 @@ func TestParsePathNeverEscapesSubfolder(t *testing.T) {
 	// that could write into e.g. .github/workflows in the project's own
 	// repo.
 	candidates := []string{
-		"orange/workers/copywriter.md",
-		"orange/workers/../workers/copywriter.md",
-		"orange/workers/%2e%2e/x.md",
-		"orange\\workers\\copywriter.md",
+		"bob/workers/copywriter.md",
+		"bob/workers/../workers/copywriter.md",
+		"bob/workers/%2e%2e/x.md",
+		"bob\\workers\\copywriter.md",
 	}
 	for _, path := range candidates {
 		kind, name, err := ParsePath("", path)
@@ -178,8 +178,8 @@ func TestParsePathNeverEscapesSubfolder(t *testing.T) {
 			if rerr != nil {
 				t.Fatalf("path %q parsed to unrejoinable name %q: %v", path, name, rerr)
 			}
-			if !strings.HasPrefix(rejoined, "orange/") {
-				t.Fatalf("path %q parsed to name %q which rejoins outside orange/: %q", path, name, rejoined)
+			if !strings.HasPrefix(rejoined, "bob/") {
+				t.Fatalf("path %q parsed to name %q which rejoins outside bob/: %q", path, name, rejoined)
 			}
 		}
 	}

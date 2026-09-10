@@ -46,7 +46,7 @@ func TestGitProjectionQuarantineSurvivesRestart(t *testing.T) {
 	s, dbPath := newGitProjectionNotesTestStore(t)
 
 	err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteQuarantine, []GitProjectionNote{
-		{Path: "orange/workers/copywriter.md", Reason: "frontmatter: cron is not a valid expression", NotedAt: 1000},
+		{Path: "bob/workers/copywriter.md", Reason: "frontmatter: cron is not a valid expression", NotedAt: 1000},
 	})
 	if err != nil {
 		t.Fatalf("put quarantine: %v", err)
@@ -64,7 +64,7 @@ func TestGitProjectionQuarantineSurvivesRestart(t *testing.T) {
 	if len(quarantine) != 1 {
 		t.Fatalf("want 1 quarantine note after a restart, got %d", len(quarantine))
 	}
-	if quarantine[0].Path != "orange/workers/copywriter.md" {
+	if quarantine[0].Path != "bob/workers/copywriter.md" {
 		t.Errorf("the note must name the FILE, got %q", quarantine[0].Path)
 	}
 	if !strings.Contains(quarantine[0].Reason, "cron is not a valid expression") {
@@ -94,8 +94,8 @@ func TestGitProjectionIgnoredNotesSurvive(t *testing.T) {
 	s, dbPath := newGitProjectionNotesTestStore(t)
 
 	err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteIgnored, []GitProjectionNote{
-		{Path: "orange/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
-		{Path: "orange/images/base.md", Reason: "images are not importable"},
+		{Path: "bob/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
+		{Path: "bob/images/base.md", Reason: "images are not importable"},
 	})
 	if err != nil {
 		t.Fatalf("put ignored: %v", err)
@@ -116,7 +116,7 @@ func TestGitProjectionIgnoredNotesSurvive(t *testing.T) {
 		paths = append(paths, n.Path)
 	}
 	sort.Strings(paths)
-	if paths[0] != "orange/images/base.md" || paths[1] != "orange/skills/research.md" {
+	if paths[0] != "bob/images/base.md" || paths[1] != "bob/skills/research.md" {
 		t.Errorf("both files must be named, got %v", paths)
 	}
 }
@@ -131,7 +131,7 @@ func TestGitProjectionNotesAreCapped(t *testing.T) {
 	notes := make([]GitProjectionNote, 0, over)
 	for i := 0; i < over; i++ {
 		notes = append(notes, GitProjectionNote{
-			Path:    "orange/workers/w" + itoaPad(i) + ".md",
+			Path:    "bob/workers/w" + itoaPad(i) + ".md",
 			Reason:  "did not parse",
 			NotedAt: int64(1000 + i), // ascending: the last entry is the newest
 		})
@@ -167,12 +167,12 @@ func TestGitProjectionNotesAreReplacedWholesale(t *testing.T) {
 	s, _ := newGitProjectionNotesTestStore(t)
 
 	if err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteQuarantine, []GitProjectionNote{
-		{Path: "orange/workers/copywriter.md", Reason: "did not parse"},
+		{Path: "bob/workers/copywriter.md", Reason: "did not parse"},
 	}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	if err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteIgnored, []GitProjectionNote{
-		{Path: "orange/images/base.md", Reason: "images are not importable"},
+		{Path: "bob/images/base.md", Reason: "images are not importable"},
 	}); err != nil {
 		t.Fatalf("put ignored: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestGitProjectionNotesAreProjectScoped(t *testing.T) {
 	s, _ := newGitProjectionNotesTestStore(t)
 
 	if err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteQuarantine, []GitProjectionNote{
-		{Project: "someone-else", Path: "orange/workers/a.md", Reason: "bad"},
+		{Project: "someone-else", Path: "bob/workers/a.md", Reason: "bad"},
 	}); err != nil {
 		t.Fatalf("put: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestGitProjectionNoteReasonIsTruncated(t *testing.T) {
 	s, _ := newGitProjectionNotesTestStore(t)
 	huge := strings.Repeat("x", 9000)
 	if err := s.PutGitProjectionNotes(ctx, "wolf", GitProjectionNoteQuarantine, []GitProjectionNote{
-		{Path: "orange/workers/a.md", Reason: huge, NotedAt: time.Now().Unix()},
+		{Path: "bob/workers/a.md", Reason: huge, NotedAt: time.Now().Unix()},
 	}); err != nil {
 		t.Fatalf("put: %v", err)
 	}

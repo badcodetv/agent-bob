@@ -246,7 +246,7 @@ var projectSettingsRules = []Rule{
 	{Field: "GitBranch", Key: "git_branch", Decision: Render, NotImportable: true,
 		Reason: "a branch name. NOT IMPORTABLE."},
 	{Field: "GitSubfolder", Key: "git_subfolder", Decision: Render, NotImportable: true,
-		Reason: "one path segment Orange owns in the repo. NOT IMPORTABLE — an import that could move it could write outside the subfolder, including .github/workflows."},
+		Reason: "one path segment Bob owns in the repo. NOT IMPORTABLE — an import that could move it could write outside the subfolder, including .github/workflows."},
 	{Field: "GitTokenEnv", Key: "git_token_env", Decision: Render, NotImportable: true,
 		Reason: "the NAME of an environment variable, never its value — the same api_key_env pattern as the project map. Safe to publish; the secret stays in agentd's environment. NOT IMPORTABLE."},
 	{Field: "GitWebhookSecretEnv", Key: "git_webhook_secret_env", Decision: Render, NotImportable: true,

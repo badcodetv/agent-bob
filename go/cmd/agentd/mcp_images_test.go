@@ -216,7 +216,7 @@ func TestImageToolsCreate(t *testing.T) {
 	if res["name"] != "marketing-tools" || res["version"] != float64(1) {
 		t.Fatalf("result must echo the stored {name, version}: %v", res)
 	}
-	if res["session_url"] != "https://orange.example.com/p/acme/s/sess-1" {
+	if res["session_url"] != "https://bob.example.com/p/acme/s/sess-1" {
 		t.Fatalf("session_url = %v", res["session_url"])
 	}
 	labels, _ := res["labels"].(map[string]any)
@@ -370,7 +370,7 @@ func TestImageToolsList(t *testing.T) {
 	if first["version"] != float64(2) {
 		t.Fatalf("newest first: want version 2 leading, got %v", first["version"])
 	}
-	if first["session_url"] != "https://orange.example.com/p/acme/s/sess-9" {
+	if first["session_url"] != "https://bob.example.com/p/acme/s/sess-9" {
 		t.Fatalf("session_url = %v", first["session_url"])
 	}
 }

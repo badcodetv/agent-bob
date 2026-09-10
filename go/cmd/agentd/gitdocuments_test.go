@@ -221,7 +221,7 @@ func TestGitDocumentNewestVersionRendersInFull(t *testing.T) {
 		t.Fatalf("want nothing skipped, got %+v", docs.Skipped)
 	}
 
-	const path = "orange/memory/message-board.md"
+	const path = "bob/memory/message-board.md"
 	got, ok := tree[path]
 	if !ok {
 		t.Fatalf("want %s in the tree, got %v", path, treePaths(tree))
@@ -275,7 +275,7 @@ func TestGitDocumentFullyRetractedNameDisappears(t *testing.T) {
 	if len(docs.Documents) != 0 {
 		t.Fatalf("want no documents, got %+v", docs.Documents)
 	}
-	if _, ok := tree["orange/memory/goal.md"]; ok {
+	if _, ok := tree["bob/memory/goal.md"]; ok {
 		t.Fatal("a name whose every version is retracted still rendered a file")
 	}
 }
@@ -298,7 +298,7 @@ func TestGitDocumentLogMemoriesDoNotRender(t *testing.T) {
 	if len(docs.Documents) != 1 || docs.Documents[0].ID != "d1" {
 		t.Fatalf("only the named document may load, got %+v", docs.Documents)
 	}
-	want := []string{"orange/README.md", "orange/memory/label-registry.md"}
+	want := []string{"bob/README.md", "bob/memory/label-registry.md"}
 	if got := treePaths(tree); !reflect.DeepEqual(got, want) {
 		t.Fatalf("the raw memory log leaked into the repo.\ngot:  %v\nwant: %v", got, want)
 	}
@@ -351,11 +351,11 @@ func TestGitDocumentUnrenderableNameIsSkipped(t *testing.T) {
 	// The rest of the project still projects — that is the whole point of
 	// skipping rather than refusing.
 	for _, want := range []string{
-		"orange/README.md",
-		"orange/settings.md",
-		"orange/workers/copywriter.md",
-		"orange/memory/label-registry.md",
-		"orange/memory/message-board.md",
+		"bob/README.md",
+		"bob/settings.md",
+		"bob/workers/copywriter.md",
+		"bob/memory/label-registry.md",
+		"bob/memory/message-board.md",
 	} {
 		if _, ok := tree[want]; !ok {
 			t.Fatalf("want %s in the tree, got %v", want, treePaths(tree))
@@ -501,7 +501,7 @@ func TestGitDocumentEndToEndEditAppendsANewMemory(t *testing.T) {
 	if len(docs.Documents) != 1 {
 		t.Fatalf("want one document to render, got %d", len(docs.Documents))
 	}
-	const path = "orange/memory/message-board.md"
+	const path = "bob/memory/message-board.md"
 	rendered, ok := tree[path]
 	if !ok {
 		t.Fatalf("want %s, got %v", path, treePaths(tree))
@@ -655,7 +655,7 @@ func TestGitDocumentLiveNewestPerNameAndRetraction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTree: %v", err)
 	}
-	want := []string{"orange/README.md", "orange/memory/label-registry.md", "orange/memory/message-board.md"}
+	want := []string{"bob/README.md", "bob/memory/label-registry.md", "bob/memory/message-board.md"}
 	if got := treePaths(tree); !reflect.DeepEqual(got, want) {
 		t.Fatalf("live tree: got %v, want %v", got, want)
 	}

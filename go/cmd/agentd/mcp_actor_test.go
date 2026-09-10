@@ -104,7 +104,7 @@ func TestConfigWriteRefusesAnUnidentifiedCaller(t *testing.T) {
 }
 
 // A human chat session is a first-class caller. Without this, a project with no
-// workers can never gain one by talking to Orange — the §8.8 bootstrap — because
+// workers can never gain one by talking to Bob — the §8.8 bootstrap — because
 // there is no worker to attribute the first worker_create to.
 //
 // The record it writes is a HUMAN edit (empty actor, §15.2) and not a guess:

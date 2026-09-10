@@ -4,7 +4,7 @@ package main
 // documents only (design/2026-09-09-git-projection.md §E, ticket G14).
 //
 // gitproj.RenderTree already knows how to render ProjectState.Documents, and
-// gitimport.go already knows how to turn an edited orange/memory/<name>.md back
+// gitimport.go already knows how to turn an edited bob/memory/<name>.md back
 // into a NEW memory carrying the same name= label. This file is the piece
 // between them: it reads "the newest non-retracted memory per distinct name=
 // label value" out of the store, in a deterministic order, ready to be assigned

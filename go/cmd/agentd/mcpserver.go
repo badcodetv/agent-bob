@@ -122,7 +122,7 @@ type mcpCaller struct {
 //
 // What that invariant does NOT require is that only workers may mutate. It
 // originally refused every empty Worker, which also locked out the human chat
-// session — and made "talk to Orange to set up your first worker" impossible,
+// session — and made "talk to Bob to set up your first worker" impossible,
 // since a project with no workers cannot produce a worker-attributed call. That
 // is the §8.8 bootstrap, so the restriction had the effect of forbidding the
 // first thing a new project needs to do.

@@ -67,7 +67,7 @@ package httpapi
 //
 // This file used to say memories were written by workers through their tools and
 // that there was therefore no POST counterpart. That was true, and it was also
-// the reason an application embedding Orange could hold no state of its own: the
+// the reason an application embedding Bob could hold no state of its own: the
 // only write surface was memory_create on the core MCP server, authenticated by
 // a session token an embedder does not hold.
 //

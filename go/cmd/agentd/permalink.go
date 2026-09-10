@@ -18,7 +18,7 @@ package main
 //
 // Config:
 //
-//	AGENTKIT_PUBLIC_BASE_URL=https://orange.example.com
+//	AGENTKIT_PUBLIC_BASE_URL=https://bob.example.com
 //
 // The externally-reachable base URL of the *web UI* — where a human clicking a
 // permalink should land. This is deliberately not AGENTKIT_SELF_URL: that one

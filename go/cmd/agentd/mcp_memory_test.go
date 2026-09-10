@@ -128,7 +128,7 @@ func (f *failingEmbedder) Embed(context.Context, string) ([]float32, error) {
 	return nil, errors.New("embedding endpoint unreachable")
 }
 
-func testPermalinker() permalinker { return permalinker{base: "https://orange.example.com"} }
+func testPermalinker() permalinker { return permalinker{base: "https://bob.example.com"} }
 
 func testMemoryTools(store memoryStore, emb embedding.Provider) *memoryTools {
 	return newMemoryTools(store, emb, testPermalinker())
@@ -242,7 +242,7 @@ func TestMemoryToolsCreate(t *testing.T) {
 	if store.createdV[0] == nil || len(store.createdV[0]) != embedding.Dim {
 		t.Fatalf("a configured provider must produce a %d-dim embedding on the write path", embedding.Dim)
 	}
-	if res["session_url"] != "https://orange.example.com/p/acme/s/sess-1" {
+	if res["session_url"] != "https://bob.example.com/p/acme/s/sess-1" {
 		t.Fatalf("session_url = %v", res["session_url"])
 	}
 	if res["embedded"] != true {
@@ -399,7 +399,7 @@ func TestMemoryToolsSearch(t *testing.T) {
 		t.Fatalf("results = %#v", res["results"])
 	}
 	hit, _ := results[0].(map[string]any)
-	if hit["session_url"] != "https://orange.example.com/p/acme/s/sess-9" {
+	if hit["session_url"] != "https://bob.example.com/p/acme/s/sess-9" {
 		t.Fatalf("session_url = %v — provenance is part of the result (§7.3)", hit["session_url"])
 	}
 	if hit["created_by_worker"] != "reviewer" || hit["snippet"] != "never promise a date" {
@@ -498,7 +498,7 @@ func TestMemoryCurrent(t *testing.T) {
 	if res["content"] != strings.Repeat("registry ", 200) {
 		t.Fatalf("memory_current must return full content, got %d chars", len(fmt.Sprint(res["content"])))
 	}
-	if res["session_url"] != "https://orange.example.com/p/acme/s/sess-7" {
+	if res["session_url"] != "https://bob.example.com/p/acme/s/sess-7" {
 		t.Fatalf("session_url = %v", res["session_url"])
 	}
 	// Exactly the sugar it claims to be: newest match of name=<name>, one query.
