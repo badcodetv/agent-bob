@@ -246,12 +246,21 @@ describe('git projection fields (G24)', () => {
 
   it('sends the git fields on save, whole-object', async () => {
     render(<ProjectSettingsPage />)
-    const remote = await screen.findByLabelText(/repository/i)
-    await userEvent.type(remote, 'https://github.com/acme/orange')
-    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
-    await userEvent.type(tokenEnv, 'GIT_PUSH_TOKEN')
-    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
-    await userEvent.type(webhookSecretEnv, 'GIT_WEBHOOK_SECRET')
+    // fireEvent.change rather than userEvent.type, as in the tests above: this is
+    // about what the save SENDS, not about typing. Typed a keystroke at a time,
+    // these three values were 62 re-renders of an eleven-field form that
+    // validates live; it took ~2s here and timed out at 5s on CI's slower
+    // runners. The typing behaviour itself is covered by "says projection is on
+    // once a repository is typed", above.
+    fireEvent.change(await screen.findByLabelText(/repository/i), {
+      target: { value: 'https://github.com/acme/orange' },
+    })
+    fireEvent.change(await screen.findByLabelText(/push token.*environment variable name/i), {
+      target: { value: 'GIT_PUSH_TOKEN' },
+    })
+    fireEvent.change(await screen.findByLabelText(/webhook secret.*environment variable name/i), {
+      target: { value: 'GIT_WEBHOOK_SECRET' },
+    })
     await explain()
     await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
 
