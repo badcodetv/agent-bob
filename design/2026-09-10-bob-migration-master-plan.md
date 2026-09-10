@@ -89,6 +89,10 @@ The final gate (§7 G-FINAL) is `git grep -n -i orange` minus exactly these:
 | `formerly Agent Orange` | `README.md`, `CLAUDE.md` | the one provenance line |
 | whole files | `design/2026-09-09-orange-to-bob-rename.md`, this plan | they are the record of the rename |
 | whole directory | `migration-reference/` **only if** T-LIC does not remove it | frozen third-party reference |
+| `agent-orange/experiments/compare-report` + its comment | `web/src/benchreport.ts` | D11: reports written before the rename still load (added in S2) |
+| `agentorange` role note | `README-stack.md` | tells an operator an old `pg-data` volume must be recreated (added in S2) |
+| `safety orange` | `docs/product/15-operator-console-design.md` | the colour, not the product (added in S2) |
+| `cmd/oranged/` | `docs/product/17-product-spec.md` | history: the path of a component deleted 2026-07-15 (added in S2) |
 
 Anything else that survives is a bug in the migration, not a judgment call.
 
