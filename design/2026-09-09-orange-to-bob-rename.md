@@ -6,7 +6,10 @@
 > see "Why now" below. Each phase ends with a verification gate; do not start
 > the next phase with a red gate.
 
-Status: **PLANNED — not started. On hold until the `git-projection` PR merges into `main`** (coordinated with the session landing it, 2026-09-10); the rename runs against the settled `main`, never this branch.
+Status: **Phase 0 done (two items wait on Kai); Phases 1–5 not started.**
+PR #1 merged into `main` as `5f343cc` on 2026-09-10, so the hold is lifted.
+**Re-verified against `main` `5f343cc` on 2026-09-10**; see "What changed
+since 2026-09-09" below. Run it against `main`, never a feature branch.
 Written 2026-09-09. Inventory verified against the live repos, the live GCP
 project and the live cluster on the same day.
 
@@ -28,6 +31,32 @@ rename **free**:
 
 Every week this waits, those get more expensive. After the first real deploy
 they become a migration.
+
+---
+
+## What changed since 2026-09-09
+
+Re-verified 2026-09-10 against `main` `5f343cc`, after the org-chart and
+git-projection work merged. The plan's shape still holds. Six things changed,
+and each is corrected in place below:
+
+1. 🔴 **Two values must NOT be renamed.** They are protocol constants, and
+   Class A's `sed` would change both without anyone noticing. See §3 "Class P".
+   The worst is `configchanged.go:80`: changing it makes **every past config
+   change fire `config.changed` again**.
+2. 🔴 **Agent Wolf is far bigger than the plan said.** Not 6 files but
+   **154 references in 56 files**, plus a whole internal vocabulary
+   (`OrangeClient`, `api/src/orange/`, `ORANGE_*` env vars) that Orange's
+   `./stack` passes values into. Phase 4 is rewritten.
+3. 🟡 **More stored values carry the name**: the git projection's folder
+   `orange`, a browser storage key, four report schema ids, and the Postgres
+   role. All are rename-together items in Class P.
+4. ✅ **Phase 0 is done**, apart from two decisions waiting on Kai (§1).
+5. 🟡 **Counts refreshed** (§1). The code grew; the method is unchanged.
+6. ✅ **Every file:line reference still resolves on `main`.** The git
+   projection lines did not move. GCP, the cluster and DNS are unchanged.
+
+Estimate: ~5 hours → **~6 hours**, almost all of the increase in Wolf.
 
 ---
 
@@ -59,37 +88,51 @@ If a later reader finds this confusing, the answer is a paragraph in
 
 ---
 
-## 1. Inventory — verified 2026-09-09
+## 1. Inventory — re-verified 2026-09-10 on `main` `5f343cc`
 
 ### In the Orange repo
 
+Counted with `git grep` over tracked files on `main`. The 2026-09-09 counts
+used `grep -r` over the working tree, which also read untracked files, so the
+bare-`orange` figure dropped because of the method, not because anything was
+removed.
+
 | Pattern | Files | Hits | Nature |
 | --- | --- | --- | --- |
-| `agent-orange` | 337 | 882 | mechanical |
-| `github.com/binocarlos/badcode-agent-orange` | — | 564 | the Go module path, mechanical |
-| `Agent Orange` (prose) | 48 | 108 | mechanical |
-| `agentorange` (Postgres role/db) | 14 | 47 | mechanical |
-| bare `orange`, not part of the above | — | **1629** | **needs eyes — see §3 class C** |
-| `agentkit` | 186 | 1139 | **DO NOT TOUCH** |
+| `agent-orange` | 363 | 885 | mechanical, **except Class P** |
+| `github.com/binocarlos/badcode-agent-orange` | 290 | 622 | the Go module path, mechanical |
+| `Agent Orange` (prose) | 53 | 112 | mechanical |
+| `agentorange` (Postgres role/db, bot email) | 15 | 47 | mechanical, see Class P |
+| bare `orange`, not part of the above | — | ~1200 | **needs eyes — see §3 class C** |
+| `AGENTKIT_` | 141 | 768 | **DO NOT TOUCH** |
 
-### Git worktrees — 35 to remove
+### Git worktrees — the Phase 0 result (2026-09-10)
 
-| Repo | Extra worktrees | Clean and merged | Need care |
-| --- | --- | --- | --- |
-| Orange | 12 | 10 | **2** |
-| Wolf | 23 | **23** | 0 |
+**33 removed**, 10 in Orange and 23 in Wolf, each with its branch deleted by
+`git branch -d` (which refuses unmerged work; nothing refused). The 17 empty
+`wave*` folders were removed too. **Wolf has zero extra worktrees.** Orange
+has two left:
 
-The two that need care, both in Orange:
+- **`agent-orange-ops`**: this plan's own branch (`ops-and-rename`). Remove it
+  after that branch merges.
+- **`.claude/worktrees/agent-a4f9f16dcf7d0ab40`**: commit `d9371a6`
+  (2026-07-26) strengthens `go/runner_systemprompt_test.go` and adds
+  `TestProviderResolutionCannotSupplyTheMarker`. It is **not in `main`**, and it
+  applies cleanly (`git apply --check`). **Kai to decide:** merge it
+  (recommended) or discard it.
 
-- **`agent-orange-phase-a`** — branch `feat/phase-a-board`, **1 uncommitted
-  file** and **2 commits not in `main`**. Last touched 2026-06-25. Real work.
-- **`.claude/worktrees/agent-a4f9f16dcf7d0ab40`** — clean, but **1 commit not in
-  `main`**. An agent's working copy.
+And one that needed no action:
 
-All 23 Wolf worktrees are clean, zero commits ahead of `main`, and safe to
-remove without inspection.
+- **`agent-orange-phase-a`** was already gone before Phase 0 ran; something
+  outside this plan removed it. Its 2 commits survive on the local-only branch
+  `feat/phase-a-board`. Its 1 uncommitted file did not survive. The commits
+  build on `go/orchestrator/board/`, which the 2026-07-15 reset deleted.
+  **Kai to decide:** delete the branch (recommended) or keep it.
 
-### External resources
+Outside "zero worktrees": about 30 old local branches remain in Orange with no
+checkout. Pruning them with `git branch -d` is optional.
+
+### External resources — unchanged on 2026-09-10
 
 | Resource | Current | Notes |
 | --- | --- | --- |
@@ -102,7 +145,8 @@ remove without inspection.
 | Project-level IAM | **none mentions orange** | grants are resource-level only: `objectAdmin` on the bucket, `artifactregistry.writer` on the repo. Two bindings, that is all. |
 | Kubernetes | nothing deployed | free |
 | DNS | `orange.badcode.tv` never created | free — create `bob.badcode.tv` instead |
-| Local folder | `/home/kai/projects/badcode/agent-orange` | rename breaks 35 worktree pointers; `git worktree repair` fixes it |
+| Local folder | `/home/kai/projects/badcode/agent-orange` | rename breaks the remaining worktree pointers; `git worktree repair` fixes it |
+| Local Docker volumes | only `agent-orange-stack-e2e_*`, the e2e rig's (Postgres 71.5 MB) | disposable test data; see Phase 5 |
 
 ---
 
@@ -128,7 +172,7 @@ remove without inspection.
 
 ---
 
-## 3. Four classes of hit, and why this is not one `sed`
+## 3. Six classes of hit, and why this is not one `sed`
 
 **Class A — compound tokens. Mechanical, safe, ~1000 hits.**
 `agent-orange` → `agent-bob`, `agentorange` → `agentbob`, `Agent Orange` →
@@ -196,8 +240,10 @@ the renderer's own commits as human edits:
    `bob@agentbob.local`;
 3. the importer's "is this ours?" check in `gitimport.go`: both
    `%(trailers:key=…)` fields **and** the author-email comparison;
-4. the e2e helper `e2e/helpers/gitprojection.ts` (`BOT_AUTHOR_EMAIL` and the
-   trailer names its specs assert).
+4. the browser suite: `e2e/helpers/gitprojection.ts` (`BOT_AUTHOR_NAME`,
+   `BOT_AUTHOR_EMAIL` and the trailer names) and
+   `e2e/features/git-projection.stack.spec.ts:307-308`, which assert the
+   bot's name and email on HEAD.
 
 Keep the DI4 rule while editing: trailers are parsed with **git's own parser
 over the last paragraph**, never by grepping the message.
@@ -214,6 +260,31 @@ a rename, and it belongs in its own ticket.
 **Also rename one file:** `deploy/k8s/20-agent-orange.yaml` → `20-agent-bob.yaml`.
 It is named in `deploy/k8s/apply.sh`'s file list and in a comment at
 `gitprojection.go:357`, so all three move together.
+
+**Class P — protocol constants. Two of them must NOT be renamed.**
+*Added 2026-09-10.* A protocol constant is a value that is stored, hashed or
+matched across versions, so changing it changes what happens to data that
+already exists. Class A's `sed` hits all of these, because each contains
+`agent-orange` or `agentorange`. Each gets a ruling:
+
+| Value | Where | If renamed | Ruling |
+| --- | --- | --- | --- |
+| `https://agent-orange.badcode.dev/events/config.changed` | `go/cmd/agentd/configchanged.go:80`: the UUIDv5 namespace that `configChangedEventID` derives from | Every config event already in a database gets a new derived id and **fires `config.changed` again**, so each subscribed worker wakes once per past change. The code comment says so. The local e2e database alone holds 1402 config events. | 🔴 **KEEP VERBATIM, forever.** It is an opaque seed, not a name anyone reads. |
+| `agent-orange/session-token/v1` | `go/cmd/agentd/sessionsecret.go:60`: the label the session-token signing key is derived with | Every live session token stops verifying at the core MCP server for up to its 1-hour lifetime (tokens are re-minted on provision and restore). The damage is bounded, and no user ever sees this string. | 🟡 **KEEP VERBATIM.** No benefit, and a real window of broken tools. |
+| `orange`, the git projection's folder | `go/gitproj/paths.go:12` (`DefaultSubfolder`), `go/agentdb/project_settings.go:49` (`DefaultGitSubfolder`), the README that `go/gitproj/render.go:324-351` writes, the `ProjectSettingsPage.tsx:493` placeholder | The projection writes to a different folder inside the repository. | ✅ **Rename to `bob`.** As with the trailers, this is safe only because no real projected repository exists. |
+| `agent-orange-auth` | `examples/web/src/auth.ts:33`: the browser `localStorage` key | Every browser is signed out once. | ✅ **Rename.** |
+| `agent-orange/triagelab/gauntlet-truths@1`, `agent-orange/hypolab/truths@1`, `agent-orange/triagelab/truths@1`, `agent-orange/experiments/compare-report@1` | `go/cmd/{gauntletgen,hypolabgen,triagelabgen}/main.go`; checked by prefix in `web/src/benchreport.ts:228` | The viewer rejects report files generated before the rename. Checked-in fixtures get renamed by the same `sed`. | ✅ **Rename.** Only the experiments rig uses these. |
+| `agentorange` Postgres role and database | `docker-compose.yml:72` defaults, `stack:377-382`, `dbconnect.go:58`, `deploy/k8s/10-postgres.yaml:79`, the k8s README | A Postgres volume created as `agentorange` will not connect as `agentbob`. | ✅ **Rename.** The only local volumes are the disposable e2e rig's (Phase 5). |
+
+**How to keep the two KEEP values safe:** pin their **outputs** in a test
+before any `sed` runs (Phase 1, step 1.2a). Pinning the strings themselves would
+not work: the `sed` rewrites a pinned string and its constant together, so the
+test stays green while the protocol changes.
+
+One stale example to fix by hand rather than by `sed`:
+`go/cmd/agentd/orgprompts_test.go:21` shows `mcp__agent-orange__memory_search`,
+but the server segment is `coreMCPServerName`, which is `"core"`. Make it
+`mcp__core__memory_search`.
 
 **Class D — external resources.** Phases 2 and 3. Nothing to `sed`.
 
@@ -235,7 +306,7 @@ than either extreme.
 
 ---
 
-## Phase 0 — Worktree cleanup
+## Phase 0 — Worktree cleanup — ✅ done 2026-09-10 (result in §1)
 
 **Do this first.** 35 worktrees means every later `sed` risks touching a stale
 copy, and the Phase 5 folder rename breaks all of their `.git` pointers at once.
@@ -318,6 +389,28 @@ cd go && go mod tidy && go build ./... && cd ..
 Build must be green before continuing. If it is not, nothing later will be
 interpretable.
 
+### 1.2a Pin the two protocol constants before any `sed`
+
+*Added 2026-09-10.* In `go/cmd/agentd/`, add one test that pins **outputs**,
+which the `sed` cannot touch:
+
+```go
+// TestProtocolConstantsNeverChange: these two values look like the product
+// name and are not. One seeds the UUIDv5 namespace behind config.changed ids,
+// the other domain-separates the session-token key. Changing the first
+// re-emits every past config.changed event; changing the second breaks every
+// live session token. The Orange→Bob rename left both alone on purpose.
+func TestProtocolConstantsNeverChange(t *testing.T) {
+	// 1. the namespace, by its UUID value (no product name in it)
+	// 2. the session key derived from a fixed test secret, as hex
+}
+```
+
+Print today's two values once, paste them in as literals, and commit the test
+on `main`'s code. Step 1.3's `sed` will then turn it **red**. Restore the two
+constant lines by hand (`configchanged.go:80`, `sessionsecret.go:60`) until it
+is green again.
+
 ### 1.3 Class A — compound tokens, longest first
 
 ```sh
@@ -352,8 +445,15 @@ grep -n 'coreMCPServerName' go/cmd/agentd/mcpserver.go   # must still say "core"
 ### 1.5 Rename files and directories carrying the name
 
 ```sh
-git ls-files | grep -i orange     # expect: the two design docs, and check for more
+git ls-files | grep -i orange
+# on 2026-09-10: deploy/k8s/20-agent-orange.yaml,
+#   design/2026-08-06-embeddable-agent-orange.md, docs/assets/agent-orange.svg
+#   (plus this plan and the deploy playbook once ops-and-rename merges)
 ```
+
+`docs/assets/agent-orange.svg`, the README banner, draws **AGENT ORANGE** as
+`<text>` in an orange palette. Changing the text is a one-line edit. Whether
+the look stays orange is Jack's call, not a `sed`'s.
 
 Rename `design/2026-09-09-kubernetes-deployment-playbook.md`'s references, and
 this file, last — they are the two documents describing the rename.
@@ -488,36 +588,74 @@ Each should show `bob` and no `orange`.
 
 ## Phase 4 — Agent Wolf
 
-**~1 hour.** Wolf is a separate repository at
-`/home/kai/projects/badcode/agent-wolf` (`api/`, `web/`, `docs/`, `e2e/`,
-`installations/`, its own `docker-compose.yml`). It **embeds** Bob as a service;
-it is not part of this repo and never was. Six files reference the old name:
+**~2.5 hours** (was ~1 hour). *Rewritten 2026-09-10: the original said six
+files, but the real figure is 154 references in 56 files, plus an internal
+vocabulary.* Wolf is a separate repository at
+`/home/kai/projects/badcode/agent-wolf` that **embeds** Bob as a service.
 
-| File | What it holds |
-| --- | --- |
-| `docker-compose.yml:22` | container name `agent-orange-dind-1` |
-| `docker-compose.yml:119` | network `agent-orange_default` |
-| `installations/wolf/Dockerfile:22` | base image `agent-orange-core` |
-| `package.json:5` | a reference in metadata |
-| `api/src/mcp/__fixtures__/README.md:11` | `agent-orange-postgres-1` |
-| `web/src/import-boundary.test.ts:123` | `agent-orange-mention` — **read this one before editing**; a boundary test asserting on a name behaves differently from a name in config |
+### 4.0 Settle Wolf's `main` first
 
-The container and network names are **derived from the Orange folder name**, so
-they only become correct after Phase 5. Do Phase 4's edits, then Phase 5, then
-verify together.
+Wolf is on `dev-workflow-and-ux`, **6 commits ahead of Wolf's `main`**, and its
+remote is still `binocarlos/agent-wolf`. Apply the same rule as Orange: merge
+into Wolf's `main`, then rename against `main`.
+
+### 4.1 What carries the name
+
+| Kind | What | Notes |
+| --- | --- | --- |
+| Cross-repo contract: env vars | `ORANGE_BASE_URL`, `ORANGE_PUBLIC_URL`, `VITE_ORANGE_PUBLIC_URL`, `ORANGE_DIND_CONTAINER`, `ORANGE_REPO`, `ORANGE_PROJECT`, `ORANGE_WEB_PORT`, `ORANGE_ENV` | Orange's `./stack` sets these when it starts Wolf (`stack:678-692`, `:791-792`). **Rename them in both repos in the same step**, or `./stack wolf up` starts Wolf with its config unset. `VITE_ORANGE_PUBLIC_URL` is baked into Wolf's web bundle at build time, so rebuild. |
+| Cross-repo contract: Docker names | `agent-orange-dind-1`, `agent-orange_default`, `agent-orange-postgres-1`, image tag `agent-orange-core:dev` | Derived from Orange's folder name (container, network), or built by Orange's stack inside DinD (image). They only become correct after Phase 5. |
+| Internal code vocabulary | `api/src/orange/` (client, types and their tests), `OrangeClient`, `createOrangeClient`, `CreateOrangeClientOptions`, `OrangeSession`, `OrangeRows`, `OrangeResponse`, `withOrange`, `web/src/components/OrangeChatFrame.tsx`, `e2e/orange-override.yml` | About 1440 case-insensitive `orange` hits in all. This is a refactor: `git mv` plus identifier renames, with `yarn typecheck` finding the stragglers. |
+| 🔴 A guard that checks for the name | `tools/import-boundary/src/index.ts:319` (`specifier.includes("agent-orange")`), `agentOrangeMentionViolations`, and the `import-boundary.test.ts` in `api/` and `web/` | After the rename this must check for `agent-bob`. A boundary check looking for a name that no longer exists **passes silently**, the R179 shape. Prove it still fires: plant an import containing `agent-bob`, watch the test go red, then remove it. |
+| Outbound | `api/src/marketdata/yahoo.ts:102`, `DEFAULT_USER_AGENT`, sent to Yahoo Finance | It points at `github.com/binocarlos/badcode-agent-orange`. Change it to `github.com/badcodetv/agent-bob`. |
+| Fixtures and docs | `gs://webkit-servers-agent-orange/…` in `artifacts.test.ts`, fixture READMEs, about 40 comments citing "(agent-orange repo)" | Mechanical. |
+
+No untracked Wolf `.env` carries an `ORANGE_*` key (checked 2026-09-10), and
+neither does Orange's `.stack-wolf-secrets.env`.
+
+### 4.2 Decision: how deep inside Wolf
+
+Kai's instruction was that everything named Orange becomes Bob.
+**Recommendation: go all the way**, including the internal vocabulary
+(`OrangeClient` → `BobClient`, `api/src/orange/` → `api/src/bob/`). The
+alternative is to rename only the cross-repo contract and the docs (about an
+hour) and keep the internal symbols, which leaves the client for Agent Bob
+called `OrangeClient` for good.
+
+### 4.3 Commands
 
 ```sh
 cd /home/kai/projects/badcode/agent-wolf
+git checkout main && git pull            # after 4.0
 git checkout -b rename/orange-to-bob
-grep -rIl 'agent-orange\|agentorange\|Agent Orange' . --exclude-dir=node_modules --exclude-dir=.git \
-  | xargs sed -i -e 's/Agent Orange/Agent Bob/g' -e 's/agent-orange/agent-bob/g' -e 's/agentorange/agentbob/g'
+
+# a) compound tokens, longest first (same rule as Phase 1)
+git grep -I -l -i -e 'agent-orange' -e 'agentorange' -e 'Agent Orange' -- . ':!**/node_modules/**' \
+  | xargs sed -i -e 's#binocarlos/badcode-agent-orange#badcodetv/agent-bob#g' \
+                 -e 's/Agent Orange/Agent Bob/g' -e 's/agent-orange/agent-bob/g' -e 's/agentorange/agentbob/g'
+
+# b) env vars: VITE_ first (\b does not match inside VITE_ORANGE_), and make
+#    the same change in Orange's ./stack in the same sitting
+git grep -I -l 'ORANGE_' -- . ':!**/node_modules/**' \
+  | xargs sed -i -e 's/VITE_ORANGE_/VITE_BOB_/g' -e 's/\bORANGE_/BOB_/g'
+
+# c) files, then symbols (typecheck lists every miss)
+git mv api/src/orange api/src/bob
+git mv web/src/components/OrangeChatFrame.tsx      web/src/components/BobChatFrame.tsx
+git mv web/src/components/OrangeChatFrame.test.tsx web/src/components/BobChatFrame.test.tsx
+git mv e2e/orange-override.yml e2e/bob-override.yml
 ```
+
+Prose such as "Orange unavailable" in log and error messages is Class C:
+review it, don't sweep it.
 
 ### ✅ Gate 4
 
 ```sh
 cd /home/kai/projects/badcode/agent-wolf
 yarn install --frozen-lockfile && yarn typecheck && yarn test
+git grep -n -i -e 'agent-orange' -e 'agentorange' -e 'ORANGE_' -e 'OrangeClient' -- . ':!**/node_modules/**'
+# expect: no output. Then prove the import-boundary guard still fires (4.1).
 ```
 
 ---
@@ -550,6 +688,18 @@ workspaces, `WOLF_REPO` if you set it, and the Claude Code project directory.
 > project path (`-home-kai-projects-badcode-agent-orange`). After the folder
 > rename, a new session opens against a new key and will not see the existing
 > memories until that directory is renamed to match.
+
+**Docker volumes follow the folder name.** `docker-compose.yml` has no
+top-level `name:`, so the compose project name *is* the folder name, and the
+volumes are named after it. After the `mv`, `docker compose up` creates **new,
+empty** volumes. On 2026-09-10 the only local volumes carrying the name are the
+e2e rig's, `agent-orange-stack-e2e_{pg-data,agentd-data,stack-e2e-dind}`
+(Postgres 71.5 MB). Their project name is a literal `-p agent-orange-stack-e2e`
+(in `.github/workflows/ci.yml` and `e2e/README.md`), which Phase 1's `sed`
+renames. They are disposable test data: stop that stack before the rename and
+`docker volume rm` them afterwards. Re-check with `docker volume ls | grep
+orange` on the day. If a real development database has appeared as
+`agent-orange_pg-data`, dump it first.
 
 ### ✅ Gate 5
 
@@ -620,14 +770,20 @@ registry.
 ## 12. Order of operations, in one screen
 
 ```
-Phase 0  worktrees          35 → 0        (2 need rescuing first)      ~20m
-Phase 1  engine repo        sed + review + 3 test suites               ~1.5h
+Phase 0  worktrees          ✅ 33 removed; 2 items wait on Kai        done
+Phase 1  engine repo        pin 2 constants, sed + review, 3 suites    ~1.5h
 Phase 2  GCP                create new, republish, DELETE LAST         ~45m
 Phase 3  GitHub             rename Bob, TRANSFER Wolf to badcodetv     ~20m
-Phase 4  Agent Wolf         6 files, its own repo                      ~1h
-Phase 5  local folder       mv + git worktree repair                   ~30m
+Phase 4  Agent Wolf         settle Wolf main; 56 files + vocabulary    ~2.5h
+Phase 5  local folder       mv + worktree repair + e2e volumes         ~30m
 ──────────────────────────────────────────────────────────────────────────
-                                                        total  ~4.5–5 hours
+                                                          total  ~6 hours
 ```
 
 Then the Kubernetes deploy, under the new names, with nothing to migrate.
+
+> **Note (2026-09-10):** the deploy playbook was written before the git
+> projection merged. Before it is run, it needs `AGENTKIT_GIT_CLONE_ROOT`
+> placed on the `agentd-data` volume (`design/2026-09-09-git-projection.md`)
+> and four line references refreshed (`main.go:543`→`599`, `:561`→`617`,
+> `googleauth.go:240`→`261`, `:597`→`620`).
