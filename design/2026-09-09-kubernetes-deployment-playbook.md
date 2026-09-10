@@ -104,7 +104,7 @@ All read-only, or server-side dry runs that wrote nothing.
 | GCS bucket | ✅ `webkit-servers-agent-bob`, `EUROPE-WEST1` |
 | Runtime service account | ✅ `agent-bob-runtime@webkit-servers.iam.gserviceaccount.com` (created by `deploy/gcp/setup.sh`; holds `roles/storage.objectAdmin` on the bucket and `roles/artifactregistry.writer` on the repo) |
 | Docker credential helpers | ✅ both `gcr.io` and `europe-west1-docker.pkg.dev` configured in `~/.docker/config.json` |
-| `orange.badcode.tv` | ❌ **NXDOMAIN** — the DNS record does not exist yet |
+| `bob.badcode.tv` | ❌ **NXDOMAIN** — the DNS record does not exist yet |
 | `secrets/gcp-key.json` | 🔴 **is an empty root-owned DIRECTORY**, not a key file (§2, D4) |
 
 **Read of that table:** every hard prerequisite the manifests name is already
@@ -244,7 +244,7 @@ Fill these in before you start. Everything in section 4 refers back to them.
 
 | # | Value | Recommendation | Why |
 | --- | --- | --- | --- |
-| 1 | **Public hostname** | `orange.badcode.tv` | Matches `forum.badcode.tv`, `n8n.badcode.tv`. Needs a DNS **A record → `104.155.75.230`**. Currently NXDOMAIN. |
+| 1 | **Public hostname** | `bob.badcode.tv` | Matches `forum.badcode.tv`, `n8n.badcode.tv`. Needs a DNS **A record → `104.155.75.230`**. Currently NXDOMAIN. |
 | 2 | **Registry** | `europe-west1-docker.pkg.dev/webkit-servers/agent-bob` | Artifact Registry, *not* `gcr.io`. The repo is already provisioned there, the runtime service account already has `artifactregistry.writer` **on that repo specifically**, the session images are already in it, and both publish scripts default to it. Using `gcr.io` (as `forum` does) would mean re-granting IAM for no gain. |
 | 3 | **Session base image** | `…/agent-bob/session-core:<tag>` | What a session container runs. Pin the **specific tag**, not `:latest` — Agent Bob records the digest each session launched from, and a moving tag makes that record the only way to tell two environments apart. |
 | 4 | **Login mode** | Google (`GOOGLE_CLIENT_ID` from your `.env`) | See D2. Password login grants every project in the map. |
@@ -276,14 +276,14 @@ what you repeat on every subsequent release (see §7 for the short form).
 An **A record** for your chosen hostname pointing at the ingress controller:
 
 ```
-orange.badcode.tv.   A   104.155.75.230
+bob.badcode.tv.   A   104.155.75.230
 ```
 
 Do this first: cert-manager will try to issue a Let's Encrypt certificate the
 moment the Ingress lands, and it needs the name to resolve. Verify:
 
 ```sh
-getent hosts orange.badcode.tv     # must print 104.155.75.230
+getent hosts bob.badcode.tv     # must print 104.155.75.230
 ```
 
 ### Step 2 — Apply the four fixes from section 2
@@ -297,7 +297,7 @@ D1 and D3 edit `deploy/k8s/00-namespace-and-config.yaml` and
 **`deploy/k8s/00-namespace-and-config.yaml`:**
 
 ```yaml
-  public-base-url: "https://orange.badcode.tv"
+  public-base-url: "https://bob.badcode.tv"
   base-image: "europe-west1-docker.pkg.dev/webkit-servers/agent-bob/session-core:<TAG from step 4>"
   gcp-project: "webkit-servers"        # already correct
   gcp-region: "europe-west1"           # already correct
@@ -514,7 +514,7 @@ describe certificate` names the ACME failure, and the usual cause is DNS.
 **5. Does the front door work?**
 
 ```sh
-curl -sS https://orange.badcode.tv/health
+curl -sS https://bob.badcode.tv/health
 ```
 
 Then open it in a browser and sign in.

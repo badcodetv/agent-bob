@@ -35,7 +35,7 @@ establish a lower bound.
 | Currently-passing assertions that are **decoration** — a test naming the parameter in its own title that cannot fail if the parameter is deleted | **2 tests / 2 assertions** (`marketdata/fred.test.ts:78`, `:94`) |
 | Zero-kill parameters with **no test claiming to cover them** ("none today") | **40** |
 | Fakes with at least one IGNORED production parameter that **no** request-shape assertion compensates for | **9 of 14** |
-| The other five | `orange/client.test.ts` ignores every parameter *by design* and asserts the URL; `routes/auth.test.ts` and `routes/embed.test.ts` ignore the request body in their answer but capture and assert it; `bootstrap/bootstrap-project.test.ts` is sent no parameters at all; `testing/undici-mock.smoke.test.ts` exercises no production code |
+| The other five | `bob/client.test.ts` ignores every parameter *by design* and asserts the URL; `routes/auth.test.ts` and `routes/embed.test.ts` ignore the request body in their answer but capture and assert it; `bootstrap/bootstrap-project.test.ts` is sent no parameters at all; `testing/undici-mock.smoke.test.ts` exercises no production code |
 | Fakes that carry a test of their **own** fidelity | **1 of 14** (`routes/report.test.ts`, 5 tests) |
 
 **The shape of the finding is not what R190 predicted.** The dominant failure is not "a test
@@ -66,7 +66,7 @@ The fourteen paths returned are **exactly** the fourteen the ticket names, with 
 omissions:
 
 `app` · `bootstrap/bootstrap-project` · `hypothesis/poller` · `hypothesis/provision` ·
-`hypothesis/store` · `marketdata/fred` · `marketdata/stooq` · `orange/client` · `routes/auth` ·
+`hypothesis/store` · `marketdata/fred` · `marketdata/stooq` · `bob/client` · `routes/auth` ·
 `routes/embed` · `routes/hypotheses` · `routes/report` · `routes/series` ·
 `testing/undici-mock.smoke`.
 
@@ -75,7 +75,7 @@ omissions:
 Reading a fake tells you what it parses, never what it is sent. So the production side was
 **captured**, not inferred: a second scratch copy of the tree was instrumented with a three-line
 probe at each of the three places `api/src` leaves the process —
-`orange/client.ts`'s `fetch` call, `marketdata/fred.ts`'s and `marketdata/stooq.ts`'s — appending
+`bob/client.ts`'s `fetch` call, `marketdata/fred.ts`'s and `marketdata/stooq.ts`'s — appending
 `{method, url, body}` to a JSONL file. Each of the fourteen test files was then run alone with the
 probe armed, and the captures aggregated into a per-file route/parameter inventory. **That
 inventory, not a reading of the fakes, is what §2's "parameter" column enumerates**, and it is the
@@ -119,8 +119,8 @@ implemented and what it caught.
 
    | Control | Mutation | Result |
    | --- | --- | --- |
-   | `CONTROL-open-A` | delete `user_email: "*"` from `orange/client.ts:646` | **RED, exit 1, 78 kills** across `orange/client.test.ts` (2), `hypothesis/store.test.ts` (41), `hypothesis/poller.test.ts` (1), `routes/hypotheses.test.ts` (34) |
-   | `CONTROL-open-B` | delete `query.include_retracted = 1` from `orange/client.ts:679` | **RED, exit 1, 39 kills** across `client.test.ts` (1), `store.test.ts` (27), `series.test.ts` (1), `hypotheses.test.ts` (6), `report.test.ts` (4) |
+   | `CONTROL-open-A` | delete `user_email: "*"` from `bob/client.ts:646` | **RED, exit 1, 78 kills** across `bob/client.test.ts` (2), `hypothesis/store.test.ts` (41), `hypothesis/poller.test.ts` (1), `routes/hypotheses.test.ts` (34) |
+   | `CONTROL-open-B` | delete `query.include_retracted = 1` from `bob/client.ts:679` | **RED, exit 1, 39 kills** across `client.test.ts` (1), `store.test.ts` (27), `series.test.ts` (1), `hypotheses.test.ts` (6), `report.test.ts` (4) |
 
    **Attribution (R146/R153(3) — a red you have not attributed is not evidence).** Control A's
    kill set is the session-index consumers: everything downstream of `readSessionIndex` — the
@@ -186,7 +186,7 @@ implemented and what it caught.
    **The fix is to assert the collected total, not the summary's presence.** A file that fails to
    collect contributes *zero* tests, so `failed + passed == 1696` is the sharpest single
    tripwire; the file count is asserted too, and `COLLECTION_FAILURE` is a fifth outcome, never
-   "no kills". **Self-check:** deliberately breaking `orange/client.ts` reproduces the summary
+   "no kills". **Self-check:** deliberately breaking `bob/client.ts` reproduces the summary
    above exactly and the harness now returns `COLLECTION_FAILURE`
    (`logs/HARNESS-selfcheck-collection.log`).
 
@@ -202,7 +202,7 @@ implemented and what it caught.
 
 ### 1.4 The fourth outcome, and the defect it exposed
 
-`M15` — delete `query.offset = params.offset` from `orange/client.ts:649` — **did not terminate**.
+`M15` — delete `query.offset = params.offset` from `bob/client.ts:649` — **did not terminate**.
 `readSessionIndex` (`hypothesis/store.ts:1253-1275`) walks pages until it sees a short one; with
 every request returning page zero, the walk never ends. The suite ran for over two minutes and
 2.8 GB of RSS before it was killed by hand, at which point a 180-second timeout was added to the
@@ -210,7 +210,7 @@ harness and the outcome `TIMED_OUT` introduced — **explicitly not "zero kills"
 the misreading this ticket says would manufacture a false finding.
 
 🔴 **That is a real production defect, found by the audit rather than by the audit's subject:
-`readSessionIndex`'s paging walk has no iteration cap and no page budget.** An Orange that ignores
+`readSessionIndex`'s paging walk has no iteration cap and no page budget.** A Bob that ignores
 `offset` — a bug, a proxy that strips it, a future route change — hangs every board read forever
 rather than failing. Reported, not fixed.
 
@@ -221,7 +221,7 @@ terminating program.
 `store.ts:1243` is `opts?.sessionPageSize ?? SESSION_PAGE_SIZE` — `??` only catches `null` and
 `undefined`, so a caller's **`0`** (or a negative) passes straight through; `:1271`'s
 `page.length < limit` is then never true and `:1272`'s `offset += limit` never advances. And the
-Orange side offers no backstop: `go/httpapi/history.go:107-110` parses `offset` with
+Bob side offers no backstop: `go/httpapi/history.go:107-110` parses `offset` with
 `strconv.Atoi` and **silently keeps 0 on any parse error** (`limit` likewise falls back to 50), so
 a malformed offset is never rejected — it is answered with page zero, forever.
 **Latent, not live — high blast radius, cheap to close.** The orchestrator is cutting it as its
@@ -261,7 +261,7 @@ breakdown says *where*. **request-shape** marks a kill that comes from asserting
 than the answer (R180(2)) — honest, but a test of intent, not of behaviour.
 
 Three parameters are shared by many fakes because they are sent by one chokepoint
-(`orange/client.ts`); their kill counts are therefore suite-wide and are given once, in §2.15.
+(`bob/client.ts`); their kill counts are therefore suite-wide and are given once, in §2.15.
 
 ### 2.1 `app.test.ts` — the declared answer-only stub
 
@@ -322,7 +322,7 @@ Fake body: `poller.test.ts:268-398`.
 | | `limit: SESSION_PAGE` *(the sweep, `poller.ts:373`)* | **IGNORED** | `:273-287` | `V10` **0** | 🔴 **none today** |
 | `GET /agent/memories` | `selector` | **IMPLEMENTED** | `:313-321` | — | — |
 | | `latest_per` | **IMPLEMENTED**, value-checked `=== "name"` | `:324-332` | — | — |
-| | `limit` | **IMPLEMENTED** | `:333`, `:336`; **defaults to 100 where Orange defaults to 20 and caps at 100** | `P33` **0** (`poller.ts:208`), `V30` **0** (`poller.ts:251`) | 🔴 **none today** — *both* of the poller's `ROW_LIMIT` sends can be deleted and nothing notices |
+| | `limit` | **IMPLEMENTED** | `:333`, `:336`; **defaults to 100 where Bob defaults to 20 and caps at 100** | `P33` **0** (`poller.ts:208`), `V30` **0** (`poller.ts:251`) | 🔴 **none today** — *both* of the poller's `ROW_LIMIT` sends can be deleted and nothing notices |
 | | `include_retracted` | 🔴 **IGNORED** | `:312-338` never reads it | `P01` **0**, `P02` **0** | 🔴 **none today** — and see below |
 | `GET /agent/memories/{id}` | — | n/a | `:304-310` | — | — |
 | `POST /agent/memories` | `labels`, `content` | **IMPLEMENTED** | `:295-301` | — | — |
@@ -362,7 +362,7 @@ Fake body: `provision.test.ts:234-...`.
 | | `status` | IMPLEMENTED `:382-383` | — | *never sent* | see note |
 | `GET /agent/sessions/by-name/{n}` | the name | **IGNORED** | `:269-274` answers one fixture for any name | — | none today |
 
-**Defect in a comment.** `:379-381` reads: "Orange filters on `?status=` server-side, and so does
+**Defect in a comment.** `:379-381` reads: "Bob filters on `?status=` server-side, and so does
 this stub: the drain asks for `pending` only". The probe says the drain sends
 `GET /agent/deliveries?limit=…` and nothing else; `provision.ts:562-564` filters for `pending`
 **in JavaScript** after the fact. The fake implements a parameter production does not send, and
@@ -415,7 +415,7 @@ entirely from the URL assertion; and `M07` (`DETAIL_LIMIT` → 3) kills the same
 confirming the *value* is asserted only on the URL.
 
 🔴 **`SESSION_PAGE_SIZE` and the paging tests.** `M14` (client stops sending `limit` on
-`/agent/sessions`) kills exactly one test, in `orange/client.test.ts` — **none** in this file,
+`/agent/sessions`) kills exactly one test, in `bob/client.test.ts` — **none** in this file,
 including `store_session_index: a page exactly the size of the limit costs one extra request`
 (`:537-549`) and `…: 120 sessions across three pages all appear in the index` (`:518-535`). The
 mechanism is simpler than a first pass of this document claimed, and the correction matters
@@ -424,7 +424,7 @@ those two tests **pass `sessionPageSize` explicitly** (`:529` passes 50, `:546` 
 never read `SESSION_PAGE_SIZE` at all. The board tests *do* reach the default — `readBoard` calls
 `readSessionIndex(opts)` with `opts` usually undefined — but no fixture in the tree holds anywhere
 near 200 sessions, so none of them can observe it either. `P32` (`SESSION_PAGE_SIZE` 200 → 3)
-kills **0**, and `M14` (the parameter not sent at all) kills only `orange/client.test.ts`. So the
+kills **0**, and `M14` (the parameter not sent at all) kills only `bob/client.test.ts`. So the
 paging tests are real tests of the *walk* and prove nothing about the *page size* — and 🔴 **no
 shared fake fixes that**: only a fixture with more than 200 sessions, or an assertion on the
 constant, would.
@@ -494,7 +494,7 @@ all six matchers discriminate only on the *path prefix* `/q/d/l/`; the regex is 
 string onward. The three that discriminate prove the request reached the right **route**, never
 that it carried the right **series**.
 
-### 2.8 `orange/client.test.ts` — the capture fake
+### 2.8 `bob/client.test.ts` — the capture fake
 
 Fake body: `client.test.ts:99-118`. It matches every path (`path: (p) => { captured.path = p;
 return true; }`), captures the raw path, the body and the `X-API-Key` header, and answers a canned
@@ -565,7 +565,7 @@ tests of its own (`:1599-1660`, five).
 | | `user_email` | 🔴 **IGNORED** | `:340-344` | 0 here | none today |
 | | `worker` | 🔴 **IGNORED** | `:340-344` | 0 here | none today |
 | `GET /agent/memories` | `selector` (all terms) | **IMPLEMENTED** | `:366-369`, `:389` | 36 here | — |
-| | `limit` | **IMPLEMENTED**, with Orange's real default 20 and cap 100 | `:381`, `:392` | `M10` 2 here — the **fixture self-tests** `:1636`, `:1649` | — |
+| | `limit` | **IMPLEMENTED**, with Bob's real default 20 and cap 100 | `:381`, `:392` | `M10` 2 here — the **fixture self-tests** `:1636`, `:1649` | — |
 | | `include_retracted` | **IMPLEMENTED** | `:387`, `:390` | `P05` 1, `P06b` 1 — behavioural | — |
 | | `latest_per` | **IGNORED**, and **never sent** through this fake | `:364-394` | — | unmeasurable here |
 | `POST /agent/memories` | `labels`, `content` | **IMPLEMENTED**, and the row is stored and re-readable | `:346-361` | — | — |
@@ -584,9 +584,9 @@ tests of its own (`:1599-1660`, five).
    `include_retracted` on `/agent/memories`; `version` on the download; `session` in the
    embed-token body). "Two" is true of one route, and the sentence is scoped to the file. It is
    **R184's own lesson one level down**: a route-scoped claim wearing a file-scoped shape.
-2. `:453` answers the embed-token mint with `expires_at_sec`. Orange's field — and
+2. `:453` answers the embed-token mint with `expires_at_sec`. Bob's field — and
    `routes/embed.test.ts:106`, which says so explicitly — is `expires_at`. `numField`
-   (`orange/client.ts:342-345`) returns `0` for a missing key, so in this file every minted token
+   (`bob/client.ts:342-345`) returns `0` for a missing key, so in this file every minted token
    carries `expiresAtSec: 0`. **Two fakes for one route disagree about the response field name**,
    which is the "no shared floor" of R184 in a single line of evidence.
 
@@ -610,9 +610,9 @@ Fake body: `series.test.ts:130-175`.
 passes through it**, which its own docstring states (`:9-12`). Zero rows; listed for completeness,
 because the ticket's rule is that an omitted fake is the failure mode.
 
-### 2.15 The shared chokepoint: suite-wide numbers for `orange/client.ts`
+### 2.15 The shared chokepoint: suite-wide numbers for `bob/client.ts`
 
-Every Orange parameter above is sent from one place, so its deletion is measurable once for the
+Every Bob parameter above is sent from one place, so its deletion is measurable once for the
 whole suite. This is the summary table for those mutations.
 
 | Mutation | Production line | Kills | Where |
@@ -700,7 +700,7 @@ reasoning generalises further than the four lines do.
 | 13 | `marketdata/stooq.ts:141` | `i=d` | the **daily** interval — the sampling frequency every condition is evaluated at | `M36` **0** |
 
 **Why `rationale` is evidence integrity and not cost.** These four write the *explanation* field of
-Orange's config log, which is written in the same transaction as every configuration mutation
+Bob's config log, which is written in the same transaction as every configuration mutation
 (`go/agentdb/config_events.go`). Dropped, the log still records **that** a worker and a schedule
 were destroyed and no longer records **why**. The record survives; its trustworthiness does not.
 
@@ -766,7 +766,7 @@ to class 2** — see there for the reasoning.)*
 | `hypothesis/provision.ts:725`, `:832`, `:939` | spec / verdict / re-spec appends | ⊕ ×3 |
 | *(`hypothesis/store.ts:1776` — `appendEvaluation` — is the ONE defended send: `V23` kills 2, both request-shape)* | | |
 
-Every one of these is an **Orange-side cost** control: an embedded row pays for an embedding
+Every one of these is an **Bob-side cost** control: an embedded row pays for an embedding
 Wolf never queries by vector. Seven of the eight can be deleted with the suite green.
 
 **Market data — 5 call sites, none defended**
@@ -784,7 +784,7 @@ for a parameter no test ever sends is a tautology, not a measurement; folding th
 total would be the same aggregation error §0 flags. They are listed because production *can* send
 them and a shared fake would still have to implement them.
 
-Also in this class, **defended only by a single URL assertion in `orange/client.test.ts`** and by
+Also in this class, **defended only by a single URL assertion in `bob/client.test.ts`** and by
 nothing on the consumer side: deliveries `limit`, the sessions `limit`, and both `rationale`
 parameters at the client level. Those client-level rows are the *same* parameters as the
 per-caller rows above; §2.15 gives the client-level number, this table gives the call sites.
@@ -851,7 +851,7 @@ board does at the boundary.
 
 ### 5.1 What a shared fake would have to implement to be a floor
 
-A single `api/src/testing/fake-orange.ts`, consumed by the Orange-facing files, would have to
+A single `api/src/testing/fake-bob.ts`, consumed by the Bob-facing files, would have to
 implement — for real, with the real defaults — the following. This list is derived from the probe
 inventory, so it is exactly what production sends and nothing speculative.
 
@@ -863,13 +863,13 @@ inventory, so it is exactly what production sends and nothing speculative.
   which is the whole reason production sends it (`store.ts:1371-1391`).
 - `latest_per`: honour the **value**, reducing to the newest row per that label. Presence-only
   checking is what makes `latest_per=kind` indistinguishable from `latest_per=name` today.
-- `limit`: default **20**, cap **100**, newest-first — Orange's real numbers
+- `limit`: default **20**, cap **100**, newest-first — Bob's real numbers
   (`report.test.ts:375-381` already records them). Two of today's fakes default to the *same
   number production sends*, which silently makes deletion of the parameter a no-op.
 - `retracted_by` travels with the row, so the trust rule can judge it.
 
 **`GET /agent/sessions`** — `user_email` (empty result unless matched), `worker`, `limit`
-(default 200 in Orange's shape), `offset`, and a short final page.
+(default 200 in Bob's shape), `offset`, and a short final page.
 
 **`GET /agent/datasets/{name}/download`** — `version`, answering **different bytes per version**
 and 404 for an absent one (`report.test.ts:413-421` is the model).
@@ -885,7 +885,7 @@ echo the labels back, honour `embed`, and answer **201** and only 201.
 
 **A request-count and request-shape surface**, because two of the three oracle kinds in this tree
 are not behavioural: the fake must record every request (path, body, headers) for assertion after
-the fact — `orange/client.test.ts:99-118` is the model — and expose a call counter, which is the
+the fact — `bob/client.test.ts:99-118` is the model — and expose a call counter, which is the
 only thing protecting the market-data cache (`mcp/seriesdownload.test.ts:246`, §2.16).
 
 And, critically, **one fidelity test suite over the shared fake**, in the `report_fixture` style
@@ -916,17 +916,17 @@ answers, a metadata-read that bumps a version mid-flight). The shared fake must 
 | `routes/hypotheses.test.ts` | `byName` answer sequences, `failMemoryById` (`:244-251`, `:280-281`) |
 | `hypothesis/store.test.ts` | `appendStatus` (`:216`) |
 
-**Keep bespoke (5)** — these are load-bearing in a way a shared Orange fake cannot serve:
+**Keep bespoke (5)** — these are load-bearing in a way a shared Bob fake cannot serve:
 
 | File | Why |
 | --- | --- |
-| `orange/client.test.ts` | 🔴 **its fake IS the request-shape oracle.** It must keep matching everything and capturing the raw path. Do not replace it; **label it** — it is the only place `state`, deliveries `limit` and both `rationale` parameters are checked at all |
+| `bob/client.test.ts` | 🔴 **its fake IS the request-shape oracle.** It must keep matching everything and capturing the raw path. Do not replace it; **label it** — it is the only place `state`, deliveries `limit` and both `rationale` parameters are checked at all |
 | `marketdata/fred.test.ts` | a different upstream with a different shape |
 | `marketdata/stooq.test.ts` | same |
 | `bootstrap/bootstrap-project.test.ts` | exact-path, one-shot, body-asserting — **already stricter than the proposed floor**, and its strictness is the point. Leave it |
-| `testing/undici-mock.smoke.test.ts` | tests the tool, not Orange |
+| `testing/undici-mock.smoke.test.ts` | tests the tool, not Bob |
 
-🔴 **The two market-data fakes need a different fix from the Orange twelve, and it must not be
+🔴 **The two market-data fakes need a different fix from the Bob twelve, and it must not be
 folded into the same wave.** Their problem is not a permissive route table; it is the **inertness
 rule** of §2.6 — a matcher-based fake defends nothing in any test whose expected outcome is the
 same as "no interceptor matched". The fix there is a rule, not a module: **every matcher-based
@@ -947,7 +947,7 @@ hand-rolled fakes and **1158** never make an HTTP call at all:
 | --- | ---: | --- | --- | ---: |
 | `hypothesis/store.test.ts` | 130 | | `routes/auth.test.ts` | 28 |
 | `routes/report.test.ts` | 76 | | `bootstrap/bootstrap-project.test.ts` | 25 |
-| `orange/client.test.ts` | 65 | | `routes/series.test.ts` | 22 |
+| `bob/client.test.ts` | 65 | | `routes/series.test.ts` | 22 |
 | `routes/hypotheses.test.ts` | 60 | | `marketdata/stooq.test.ts` | 17 |
 | `hypothesis/provision.test.ts` | 40 | | `marketdata/fred.test.ts` | 16 |
 | `hypothesis/poller.test.ts` | 32 | | `routes/embed.test.ts` | 15 |
@@ -955,7 +955,7 @@ hand-rolled fakes and **1158** never make an HTTP call at all:
 
 | Effect | Count | Basis |
 | --- | --- | --- |
-| Tests that **fail immediately** on adopting a strict shared fake | **0–5** | measured: `P32`, `M14`, `P33`, `P39`, `P40`, `P41`, `P42` all kill **0**, which is direct evidence that **no fixture in the tree exceeds any page cap production sends**. The one fixture in the tree that holds more than Orange's default page of 20 (`report.test.ts:1644`, 150 amendments) is in the one file whose fake already caps. The residual risk is `store.test.ts`'s three `latest_per` fixture bodies, which would start being reduced per name rather than returned whole |
+| Tests that **fail immediately** on adopting a strict shared fake | **0–5** | measured: `P32`, `M14`, `P33`, `P39`, `P40`, `P41`, `P42` all kill **0**, which is direct evidence that **no fixture in the tree exceeds any page cap production sends**. The one fixture in the tree that holds more than Bob's default page of 20 (`report.test.ts:1644`, 150 amendments) is in the one file whose fake already caps. The residual risk is `store.test.ts`'s three `latest_per` fixture bodies, which would start being reduced per name rather than returned whole |
 | Tests whose **meaning changes** — they keep passing but start proving what their name claims | 🔴 **a range, ~30–116, not a measurement** | The measured quantity is: deleting `selector` (`M12`) kills **152** tests — the set that actually depends on `GET /agent/memories` returning the right rows. Distribution: `store.test.ts` 42, `report.test.ts` 36, `hypotheses.test.ts` 24, `poller.test.ts` 23, `provision.test.ts` 21, `app.test.ts` 3, `client.test.ts` 2, `series.test.ts` 1. **Turning 152 into an answer needs an exclusion criterion, and the criterion sits on a continuum, not at a point** — which is why this is a bracket. Excluding only files whose fake is strict on **all three** parameters (`report.test.ts`) gives the **116** end. Excluding every file that already dispatches on the selector's `kind=` term — which `store.test.ts` (`:256-259`) and `hypotheses.test.ts` (`:292-295`) also do, they are merely not strict on `limit` and `include_retracted` — gives the **~30** end. 🔴 **The consolidation must not be scoped off 116 as though it were measured.** If one number is needed for planning, take the low end: ~30 tests change what they prove *about the selector*, and the rest change what they prove about the two parameters those files already partly honour |
 | Tests that must be **rewritten**, not merely re-run | **2** | `marketdata/fred.test.ts:78-92` and `:94-108` — their assertion is inert by construction and no shared fake fixes them |
 | Tests that must be **written** (they do not exist) | **≈ 13 for the security and integrity classes; ~25–30 to close class 3 as well** | Unchanged for classes 1 and 2: one behavioural retraction test each for the poller's two reads, provisioning's evaluation read, and the detail page's spec/evaluation/verdict reads (6); the board-boundary test R190 asks for plus its two siblings (3); a stooq URL assertion covering `s`/`i` (1); **one captured-path assertion covering all four `rationale` sends (1, added by the class-2 ruling)**; the shared fake's own fidelity suite (1 file, ~10 cases, counted as 1); an `attention state=open` assertion (1). 🔴 **Classes 2 and 3 together grew from 17 sends to 35 in the fix round**, and closing it needs roughly one assertion per remaining call site — the twelve memory page caps collapse into ~3 tests once the fake honours `limit`, the four `rationale` sends into 1, the seven `embed` sends into 1 |
@@ -969,7 +969,7 @@ hand-rolled fakes and **1158** never make an HTTP call at all:
    the whole consolidation and it does not depend on it.
 1b. 🔴 **Close class 2 next — it is now six sends, not two, and four of them need no fake at all.**
    The four `rationale` sends (owner ruling, §3 class 2) are defended by **one** assertion: a
-   captured `DELETE` path carrying `?rationale=`, in the style `orange/client.test.ts` already
+   captured `DELETE` path carrying `?rationale=`, in the style `bob/client.test.ts` already
    uses. It can be written today, against the existing fakes, before the consolidation starts.
    The two stooq rows need the matcher rule from step 4. Doing the `rationale` assertion early
    costs an hour and closes four of the six.

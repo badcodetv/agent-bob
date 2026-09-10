@@ -2,7 +2,7 @@
 
 > **Who this is for.** An application embedding Agent Bob that needs (a) somewhere to keep a
 > shared numeric time series that agents read and rewrite, and (b) a way to write state of its own
-> that an agent cannot forge. Those are the two things Orange could not do before
+> that an agent cannot forge. Those are the two things Bob could not do before
 > `design/2026-08-20-agent-wolf.md`, and this document is what shipped for them.
 >
 > Read [`19-embedding.md`](19-embedding.md) first for the credential model. Its § 1 tables the three
@@ -105,7 +105,7 @@ check a file gets.
 
 - **Cross-session artifact hand-off.** Works today with zero engine changes, but caps out on
   unbounded transcript growth in a session resumed daily for a year, and enforces a single writer.
-- **A blob store in the embedding application.** Keeps machinery out of Orange, but makes the
+- **A blob store in the embedding application.** Keeps machinery out of Bob, but makes the
   embedder a stateful service and produces nothing reusable for the next one.
 - **MCP tools that return bytes.** Defeats the purpose: an MCP result *is* model context.
 - **A cumulative-snapshot memory.** The whole series would cross the context window daily, and a
@@ -300,7 +300,7 @@ Both run on one ticker inside agentd, started only when `DATABASE_URL` is set.
 This is the mechanism an embedder holding authoritative state is expected to use. It is the reason
 `POST /agent/memories` exists.
 
-Orange's memory is a genuine shared bus: project-scoped, append-only, **no per-worker permissions and
+Bob's memory is a genuine shared bus: project-scoped, append-only, **no per-worker permissions and
 no origin check**, with labels chosen entirely by the caller. So an embedder cannot derive
 authoritative state from "the newest memory with these labels" — a worker, a chat session, or a
 prompt-injected web page read during research could write exactly that row.

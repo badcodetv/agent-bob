@@ -146,12 +146,12 @@ images, subscriptions, schedules, settings, project prompt) plus the named-
 document memories (§E). No git, no IO, no clock. This is what makes everything
 else testable and what makes the loop terminate.
 
-**Layout**, under a per-project configurable subfolder (default `orange/`):
+**Layout**, under a per-project configurable subfolder (default `bob/`):
 
 ```
-orange/
+bob/
   README.md                 generated; says "this folder is written by Agent
-                            Orange; edit it and the change is applied"
+                            Bob; edit it and the change is applied"
   settings.md               project prompt as body; renderable settings as frontmatter
   workers/<name>.md         system prompt as body; the rest as frontmatter
   skills/<name>.md          skill body; name, labels, revision as frontmatter
@@ -177,7 +177,7 @@ Bob-Actor-Worker: architect
 Bob-Actor-Session: sess-…
 ```
 
-Commit author is a fixed identity (`Agent Bob <orange@…>`), because the
+Commit author is a fixed identity (`Agent Bob <bob@agentbob.local>`), because the
 author field is the part humans trust by habit and it must not appear to
 attribute the change to a person. **Who** is in the trailers, derived.
 
@@ -282,7 +282,7 @@ with commit access could redirect a project's projection.
 - A memory carrying a `name=` label is the substrate's existing "current value
   of X" convention (`docs/product/03-memory.md` §7.1, `NewestMemory`,
   `memory_current`). The **newest** such memory renders to
-  `orange/memory/<name>.md`. That is the message-board, the label registry, the
+  `bob/memory/<name>.md`. That is the message-board, the label registry, the
   goal — the things a human wants to read and diff.
 - Every other memory — summaries, lessons, verdicts, retractions,
   prompt-revisions — does **not** render in v1. They are written once and never
@@ -297,7 +297,7 @@ starts with a brain-state, not a past. That is the intended trade: the repo is a
 current-state export, not an archive, and the archive stays in the database
 where it is ordered, stamped and searchable.
 
-**Immutability stays.** A human editing `orange/memory/message-board.md`
+**Immutability stays.** A human editing `bob/memory/message-board.md`
 produces a **new** memory carrying the same `name=`, with the commit message as
 context — the same thing an agent does. Nothing is mutated, history stays
 *searchable* (git history is not), and every version keeps its stamp.
@@ -532,7 +532,7 @@ the winning id.
 writers wins and the loser is told who won.
 
 ### G14: named-document memory rendering   [Status: done | Model: sonnet]
-Newest-per-`name=` renders to `orange/memory/<name>.md`; an imported edit becomes
+Newest-per-`name=` renders to `bob/memory/<name>.md`; an imported edit becomes
 a new memory. Depends on G4, G11.
 **Validation:** `go test ./gitproj/ ./cmd/agentd/ -run Document`.
 
@@ -752,7 +752,7 @@ place, and fail loudly with a message naming both candidates when neither
 resolves, rather than attempting an unauthenticated push.
 
 **2. Defaults are not written, only declared.** `GitBranch` and `GitSubfolder`
-stay empty in the database rather than being forced to `main` / `orange` on
+stay empty in the database rather than being forced to `main` / `bob` on
 write — matching how `BaseImage` and `SystemPrompt` behave. G7 supplied
 `DefaultGitBranch` and `DefaultGitSubfolder` consts to be applied **at read
 time**. **G4 (Render) and G8 (the projection worker) must apply them.** An
@@ -846,7 +846,7 @@ The Interfaces sketch could not be built as written and the shipped shape differ
 - **Signature.** `ParseAgainst(subfolder, path string, old, next []byte) (Change, error)`,
   with `Parse(...)` the create case (`old == nil`) and an explicit
   `ParseDelete(subfolder, path)`. `subfolder` is required because G1's
-  `ParsePath` needs it; empty means `orange` (DI3's read-time default), so a
+  `ParsePath` needs it; empty means `bob` (DI3's read-time default), so a
   root-level path is refused rather than accepted. The old bytes are required
   because "what changed" cannot be answered without them — which is the whole
   DI2 defence.
@@ -921,7 +921,7 @@ from `Never` to `Render`. All four go red.
 1. **`Render` could not compile.** The name was already a `Decision` const in
    `allowlist.go`. Shipped as **`RenderTree`**, which reads well beside
    `Repo.WriteTree`. Interfaces sketch corrected above.
-2. 🔴 **`ParsePath` rejects `orange/README.md`** — the renderer's own generated
+2. 🔴 **`ParsePath` rejects `bob/README.md`** — the renderer's own generated
    file is not an entity shape. **The importer MUST skip it explicitly.** Without
    that, every push touching the README quarantines the whole project, and the
    renderer rewrites the README, so the project would be permanently stuck. G11
@@ -1332,7 +1332,7 @@ files, **before any import or bootstrap can run** — and the push loop may publ
 the deletion. Spotted, not verified, and not something to leave for someone to
 discover with a real repository.
 
-**Two smaller corrections.** `Orange-Actor-*` trailers are **absent for
+**Two smaller corrections.** `Bob-Actor-*` trailers are **absent for
 console/API writes** (empty actor is the encoding for a human edit), so the
 trailer list in §B holds in full only for MCP-driven writes; the spec asserts
 against the config event itself, so it is true either way. And G23's own text
@@ -1348,7 +1348,7 @@ HEAD really is the remote) and **before** anything writes. Condition: no
 `last_imported_sha`, no `last_rendered_sha`, `last_rendered_seq == 0`, **and**
 `git ls-tree` shows content under the subfolder. Any git error answers "no
 content", so an unborn HEAD — an empty remote, or one with history but no
-`orange/` — renders normally, which is the ordinary first run.
+`bob/` — renders normally, which is the ordinary first run.
 
 🔴 **The part the ticket did not name, and it would have re-armed the bug.**
 `PushProject` marks a project pushed whenever `remoteHead == head` — which is
@@ -1360,7 +1360,7 @@ check, and `last_pushed_sha` is deliberately **excluded** from the adoption set.
 A guard that another loop quietly erases is not a guard.
 
 **Falsified:** removing the block makes the regression test fail with
-`orange/project.yaml is GONE from the remote` — the deletion reaches the **bare
+`bob/project.yaml is GONE from the remote` — the deletion reaches the **bare
 remote**, which confirms the push publishes it rather than it staying local.
 
 **The noisy-forever leak is closed in two halves**, and the second is a recovery

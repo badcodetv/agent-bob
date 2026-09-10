@@ -212,11 +212,11 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 
 ### W8.9 What to do with a 200 carrying email_verified:false
 
-- **Plan said:** nothing (Orange only ever returns true today)
+- **Plan said:** nothing (Bob only ever returns true today)
 - **Assumed:** 403 forbidden, no cookie.
 - **Reversibility:** trivial
 
-### W8.10 How to map Orange's 403 on /auth/verify-google ('project api key required')
+### W8.10 How to map Bob's 403 on /auth/verify-google ('project api key required')
 
 - **Plan said:** only 200/401/404 are enumerated
 - **Assumed:** misconfigured naming WOLF_API_KEY — it is Wolf's own credential being refused, and reporting it as forbidden would blame the person signing in.
@@ -228,7 +228,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 - **Assumed:** 200 with { email } (the lowercased address), so the UI can render who is signed in without a separate route.
 - **Reversibility:** trivial
 
-### W8.12 Detecting Orange's 401 on verify-google
+### W8.12 Detecting Bob's 401 on verify-google
 
 - **Plan said:** '401 → forbidden'
 - **Assumed:** Checked err.status === 401 rather than err.kind: the W2 client's classifyStatus has no 401 case, so a 401 arrives as kind 'internal' with status 401 preserved. (Reported as a discovered issue.)
@@ -249,7 +249,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 ### W8.15 What counts as 'leaving creating'
 
 - **Plan said:** 'until the status leaves creating'
-- **Assumed:** status 'error' → unavailable 503 with create_error verbatim; ANY other non-'creating' status (Orange writes 'running') → success.
+- **Assumed:** status 'error' → unavailable 503 with create_error verbatim; ANY other non-'creating' status (Bob writes 'running') → success.
 - **Reversibility:** trivial
 
 ### W8.16 The HTTP status for the port-pool refusal arriving on the POST (not the poll)
@@ -261,7 +261,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 ### W8.17 The error payload shape for the two 409s
 
 - **Plan said:** '409 session name already taken → conflict; 409 worker … is disabled → conflict'
-- **Assumed:** One conflict error naming the session, carrying Orange's body in details.upstream and upstreamBody (they need different fixes, so the upstream text is preserved rather than branched on).
+- **Assumed:** One conflict error naming the session, carrying Bob's body in details.upstream and upstreamBody (they need different fixes, so the upstream text is preserved rather than branched on).
 - **Reversibility:** trivial
 
 ### W8.18 The details payload of the 404 no-worker error
@@ -363,7 +363,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 ### W8.34 Which attention requests to list
 
 - **Plan said:** 'read from GET /agent/attention-requests'
-- **Assumed:** state:'open' (Orange's own default) — an answered or timed-out ask is not actionable on a detail page.
+- **Assumed:** state:'open' (Bob's own default) — an answered or timed-out ask is not actionable on a detail page.
 - **Reversibility:** trivial
 
 ### W8.35 How to find the schedule id for atoms
@@ -387,7 +387,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 ### W8.38 Test mechanics for route tests
 
 - **Plan said:** 'HTTP mocking in tests: undici MockAgent'
-- **Assumed:** MockAgent for Orange plus mockAgent.enableNetConnect(host => host.startsWith('127.0.0.1')) so the app under test can be a real express server on a random port (W5's store tests never needed this because they made no local requests).
+- **Assumed:** MockAgent for Bob plus mockAgent.enableNetConnect(host => host.startsWith('127.0.0.1')) so the app under test can be a real express server on a random port (W5's store tests never needed this because they made no local requests).
 - **Reversibility:** trivial
 
 ### W8.39 Provenance of the new test bodies
@@ -482,7 +482,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 - **Assumed:** ADD `getMemoryById` and keep `getMemory` as a deprecated alias rather than rename. A rename would have forced edits to `api/src/routes/hypotheses.ts` (three call sites), which W15 does not own — that file's row is W8, W9, W22. I did switch store.ts's own internal call to the new name.
 - **Reversibility:** trivial
 
-### W15.6 What the `kind` argument of `getCurrentMemory(name, kind)` can possibly mean, given Orange's route has no kind filter.
+### W15.6 What the `kind` argument of `getCurrentMemory(name, kind)` can possibly mean, given Bob's route has no kind filter.
 
 - **Plan said:** `client.getCurrentMemory(name, kind)` returns full content
 - **Assumed:** A CLIENT-SIDE assertion, not a server filter: a mismatch is `not_found` with `details: {name, kind, found}`. See discoveredIssues — the route selects on `name` alone (go/httpapi/memories.go:391) and every Wolf memory kind shares `name=<hypothesis id>`. My own store reads deliberately do NOT use it; they use `listMemories` with a `kind=,name=` selector, which is also the only way to pass `include_retracted=1`.
@@ -497,7 +497,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 ### W15.8 Where the upstream 403 goes once the port-pool error is restated at 503.
 
 - **Plan said:** only that the 403 contradicts the taxonomy's `unavailable → 503`
-- **Assumed:** Preserve it as `details: { upstreamStatus: 403 }` rather than discard it; `message` and `upstreamBody` stay Orange's verbatim text.
+- **Assumed:** Preserve it as `details: { upstreamStatus: 403 }` rather than discard it; `message` and `upstreamBody` stay Bob's verbatim text.
 - **Reversibility:** trivial
 
 ### W15.9 Whether the fail-open provenance fix applies only to `mapMemorySearchRow` or to all three memory mappers.
@@ -590,7 +590,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 - **Assumed:** Two new StubConfig buckets (`templates`, `reports`) and dispatch on the selector's own `kind=` term rather than a `startsWith` prefix test — `kind=report` is a prefix of `kind=report-template`, and answering one query with the other's body is how a wrong selector passes unnoticed. W10 and W22 inherit this stub.
 - **Reversibility:** trivial
 
-### W15.24 Whether the new store/report test bodies had to be captured from a running Orange.
+### W15.24 Whether the new store/report test bodies had to be captured from a running Bob.
 
 - **Plan said:** W15 states no fixture-capture requirement (W5's ticket did, and W5's recorded bodies are committed under __fixtures__).
 - **Assumed:** Constructed in-test, in the SAME MemorySearchResult / memory-record shapes W5 recorded, and labelled in a comment as constructed rather than captured. No file is presented as a recording and nothing new was added under __fixtures__.

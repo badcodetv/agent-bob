@@ -3,7 +3,7 @@
 > **This is a companion to `design/2026-08-20-agent-wolf.md`, not a replacement.** The main plan
 > specifies the UI tickets (W11, W13, W14, W23, W24) in detail; it never *designed* the UI. This
 > document supplies what was missing — the information architecture, the screen flow, the visual
-> language for trust, and the Wolf-versus-Orange surface split — and § "Reconciliation" states
+> language for trust, and the Wolf-versus-Bob surface split — and § "Reconciliation" states
 > exactly which existing acceptance criteria it extends and which it **contradicts**.
 >
 > **It must be folded into the main plan before W13 is cut**, the way
@@ -24,10 +24,10 @@ is reversible; the reasoning is recorded so a reversal is an informed act.
 
 | # | Decision | Displaces |
 | --- | --- | --- |
-| **D1** | **Share Orange's UI code at tiers 1 and 2; keep the chat as an iframe.** Wolf installs `@agentkit/chat-ui` for types, pure logic and presentational components, rendered under **Wolf's own** `ThemeProvider`. Only `AgentChat` and the stateful pages stay behind the embed. | The main plan's § "Decisions taken during design" bullet **"Iframe-only UI reuse"**, which is now correct only for tier 3. |
+| **D1** | **Share Bob's UI code at tiers 1 and 2; keep the chat as an iframe.** Wolf installs `@agentkit/chat-ui` for types, pure logic and presentational components, rendered under **Wolf's own** `ThemeProvider`. Only `AgentChat` and the stateful pages stay behind the embed. | The main plan's § "Decisions taken during design" bullet **"Iframe-only UI reuse"**, which is now correct only for tier 3. |
 | **D2** | **The board is an attention queue**, ordered by what demands a human, not by time. | W13's implicit chronological board. |
 | **D3** | **Trust is rendered on two independent channels** — provenance (who wrote it, always on, never alarming) and severity (how much to trust it now, mostly absent, escalating). | Four tickets' independently-chosen treatments. |
-| **D4** | **The detail page is two columns**: Wolf's content scrolls on the left, the Orange conversation is a persistent full-height rail on the right. | W14's "compose above the condition table without restructuring it". |
+| **D4** | **The detail page is two columns**: Wolf's content scrolls on the left, the Bob conversation is a persistent full-height rail on the right. | W14's "compose above the condition table without restructuring it". |
 | **D5** | **One shared book.** `owner` is a byline, not a permission. Anyone allowlisted may act on anything. | Nothing — this ratifies what the code already does, and fixes the queue's wording. |
 
 ### Why D1 reverses the plan's standing decision
@@ -64,8 +64,8 @@ instrument:
 
  TIER 3 ── stateful pages + the chat ──────────────────────── IFRAME
    AgentChat · useAgentSession · EventsPage · ProjectSettingsPage
-   These carry Orange's API contract AND its fetch behaviour. This is
-   the only tier where an Orange change forces every client app to move,
+   These carry Bob's API contract AND its fetch behaviour. This is
+   the only tier where a Bob change forces every client app to move,
    and the only tier the iframe genuinely earns its cost on.
 ```
 
@@ -181,7 +181,7 @@ about a thesis you want to be true. Every rule below serves that.
    so a column of scores aligns and a changing digit never reflows its row.
 4. **Density over air.** Day 30 is twenty rows plus a rail. MUI's defaults are too generous — the
    board is a table, not a card gallery. Target a 40px board row.
-5. **Dark-first, following the OS.** This is a proven necessity, not a taste: the Orange rail reads
+5. **Dark-first, following the OS.** This is a proven necessity, not a taste: the Bob rail reads
    `prefers-color-scheme` and cannot be told otherwise (`examples/web/src/EmbedSession.tsx:77-80`).
    Wolf follows the same rule so the two agree by construction.
 
@@ -342,7 +342,7 @@ asserts exactly one fetch"* is **unaffected**; all of this is computed server-si
 │                                              │  ────────────────────│
 │  ◉ CHALLENGED — condition C2 tripped         │  ┌────────────────┐  │
 │    3 days ago · horizon 180d, 47 elapsed     │  │                │  │
-│    [ Confirm ]  [ Invalidate ]               │  │  Orange embed  │  │
+│    [ Confirm ]  [ Invalidate ]               │  │  Bob embed  │  │
 │    ── rationale required ──                  │  │  iframe        │  │
 │                                              │  │                │  │
 │  THE CASE                                    │  │  position:     │  │
@@ -386,7 +386,7 @@ asserts exactly one fetch"* is **unaffected**; all of this is computed server-si
 - **The rail is the `hyp-<id>` interview session and stays available after go-live.** The session
   persists; the daily researcher runs in its own fresh containers and writes notes, which appear in
   the timeline, not here.
-- 🔴 **Theme agreement is by construction, not by coincidence.** The embed page picks Orange's own
+- 🔴 **Theme agreement is by construction, not by coincidence.** The embed page picks Bob's own
   `darkTheme`/`lightTheme` from `prefers-color-scheme` (`examples/web/src/EmbedSession.tsx:77-80`),
   it cannot be told Wolf's theme, and cross-origin CSS cannot reach it. Wolf must therefore define
   its own light/dark pair and follow `prefers-color-scheme` **by the same rule**, so the rail and
@@ -450,9 +450,9 @@ what distinguishes "never written" from "the last tick failed". Say which is whi
 
 🟢 **`AgentMarkdown` is safe for untrusted prose.** It imports no `rehype-raw`, so react-markdown
 escapes raw HTML by default. Research notes are model-authored and this matters — **assert it by
-test in Wolf**, because it is a property of Orange's dependency list that Wolf is now relying on.
+test in Wolf**, because it is a property of Bob's dependency list that Wolf is now relying on.
 
-🔴 **Wolf's Orange client has no artifact support at all today** — no method, no route, no type.
+🔴 **Wolf's Bob client has no artifact support at all today** — no method, no route, no type.
 The artifact surface is genuinely unbuilt: it needs client methods, a Wolf route, and then the
 shared panel. That is a new ticket, not a wiring change.
 
@@ -596,7 +596,7 @@ GET /api/hypotheses/:id
 | `ConditionTable` renders all pinned fields | ✅ survives |
 | `indeterminate` visually distinct from `holding`; the word is never "unknown" | ✅ survives — now `Severity level="degraded"` |
 | `indeterminate` shows W4's `reason` verbatim, unknown reasons rendered not dropped | ✅ survives |
-| Status/staleness never from Orange's delivery status | ✅ survives |
+| Status/staleness never from Bob's delivery status | ✅ survives |
 | Expected `direction` beside `realised_change_pct` | ✅ survives |
 | `support_score` labelled a summary that decides nothing | ✅ survives |
 | `challenged`-only block: reason, tripped rows, three research notes | ✅ survives — notes now on the `model` ground via `AgentMarkdown` |
@@ -632,25 +632,25 @@ uses the same real frame component W24 already demands, for the same reason.
 
 | Id | Repo | Scope | Model | Depends on |
 | --- | --- | --- | --- | --- |
-| **O12** | agent-bob | Make `@agentkit/chat-ui` publishable, **to the shape the probe below proved**: drop `private`, `noEmit: false`, drop `allowImportingTsExtensions`, exclude tests and `test-setup` from the emit, move the five runtime deps (`@mui/icons-material`, `react-markdown`, `remark-gfm`, `prism-react-renderer`, `@untitledui/file-icons`) out of `devDependencies`, **add subpath exports (`.`, `./pure`, `./components`)**, version it, `prepack`, and a CI step that fails if `dist` stops emitting. Update `examples/web` to consume `dist` and shrink its dedupe list. **Does NOT change Orange's source imports** — proved unnecessary. | opus | — |
+| **O12** | agent-bob | Make `@agentkit/chat-ui` publishable, **to the shape the probe below proved**: drop `private`, `noEmit: false`, drop `allowImportingTsExtensions`, exclude tests and `test-setup` from the emit, move the five runtime deps (`@mui/icons-material`, `react-markdown`, `remark-gfm`, `prism-react-renderer`, `@untitledui/file-icons`) out of `devDependencies`, **add subpath exports (`.`, `./pure`, `./components`)**, version it, `prepack`, and a CI step that fails if `dist` stops emitting. Update `examples/web` to consume `dist` and shrink its dedupe list. **Does NOT change Bob's source imports** — proved unnecessary. | opus | — |
 | **W27** | agent-wolf | The attention model: `stale=<n>` on the evaluation summary line, `attention` surfaced by the parser, `attention_requests` on the board payload, tiers computed server-side. | opus | W22 |
 | **W28** | agent-wolf | The design system: `web/src/theme.ts` implementing § 2b (palette, glyphs, typography, density, `prefers-color-scheme`), plus `Provenance` and `Severity` in `web/src/components/trust/`. Criteria must include the two rules § 2b makes load-bearing — **provenance uses no semantic palette colour**, and **`error` red appears nowhere but severity `attacked`** — each asserted by test. 🔴 **And `web/vite.config.ts` MUST set `test.server.deps.inline: [/@mui/, /@agentkit/]`** — see the probe finding below; without it every test importing a shared component dies pointing at MUI. | sonnet | O12 |
-| **W29** | agent-wolf | Wolf's artifact surface: Orange client methods, `GET /api/hypotheses/:id/artifacts`, and the shared `ArtifactPanel` rendered under Wolf's theme. | sonnet | O12, W28 |
+| **W29** | agent-wolf | Wolf's artifact surface: Bob client methods, `GET /api/hypotheses/:id/artifacts`, and the shared `ArtifactPanel` rendered under Wolf's theme. | sonnet | O12, W28 |
 
 ### The O12 consumption probe — run 2026-08-24, before these tickets were written
 
 `web/` was built with the O12 config, packed (364KB), installed into a throwaway React 18.3.1 /
-MUI 6 / vitest app sharing no code with Orange, and exercised. **This is the R120 discipline: a
+MUI 6 / vitest app sharing no code with Bob, and exercised. **This is the R120 discipline: a
 package that typechecks and emits is not a package that works.** Results:
 
 | Claim | Result |
 | --- | --- |
 | `ArtifactPanel` renders from `dist` in a foreign app | ✅ |
 | One React copy — peer deps resolve under plain `npm install`, **no consumer dedupe list** | ✅ |
-| **The host's theme reaches the shared component's DOM** — a `live` status dot computed to `rgb(0, 229, 160)`, the *consumer's* `success.main`, not Orange's | ✅ **this is D1's proof, and the thing an iframe can never do** |
+| **The host's theme reaches the shared component's DOM** — a `live` status dot computed to `rgb(0, 229, 160)`, the *consumer's* `success.main`, not Bob's | ✅ **this is D1's proof, and the thing an iframe can never do** |
 | `AgentMarkdown` escapes raw HTML — `<img onerror>` and `<script>` both stripped, prose intact | ✅ |
 | Tier-1 pure logic imports and runs with no React | ✅ |
-| Orange's 11 `@mui/material/styles` imports need changing | ❌ **no** — isolated by rebuilding unpatched: still 4/4 green |
+| Bob's 11 `@mui/material/styles` imports need changing | ❌ **no** — isolated by rebuilding unpatched: still 4/4 green |
 
 🔴 **The blocker, and it is not ours.** Without `server: { deps: { inline: [/@mui/, /@agentkit/] } }`
 in the consumer's vitest config, every import fails with

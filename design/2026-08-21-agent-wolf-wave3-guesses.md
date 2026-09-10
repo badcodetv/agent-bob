@@ -207,7 +207,7 @@ plan's Discovered Issues Log as **R71–R83**.
 
 - **The plan is silent on:** Only that the variable exists and authenticates /mcp.
 - **The executor chose:** 32–128 characters of [A-Za-z0-9_-] (URL-safe base64), validated in config.ts with a `misconfigured` error that names the variable and never echoes the value; generation command documented as `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='`.
-- **Why it matters:** A short token defeats the constant-time compare, and a value containing a space, quote or `$` breaks silently somewhere along X1's shell export → Docker → Orange `${VAR}` interpolation chain — failing inside a container at first tool call. W12 and X1 must generate tokens that satisfy this pattern.
+- **Why it matters:** A short token defeats the constant-time compare, and a value containing a space, quote or `$` breaks silently somewhere along X1's shell export → Docker → Bob `${VAR}` interpolation chain — failing inside a container at first tool call. W12 and X1 must generate tokens that satisfy this pattern.
 
 ### Whether a missing WOLF_MCP_TOKEN is fatal at boot
 
@@ -279,7 +279,7 @@ plan's Discovered Issues Log as **R71–R83**.
 
 - **The plan is silent on:** Pins only "@modelcontextprotocol/sdk, HTTP transport".
 - **The executor chose:** Streamable HTTP, stateless (`sessionIdGenerator: undefined`) with `enableJsonResponse: true` and a fresh McpServer per request; GET/DELETE /mcp answer 405 with an Allow header.
-- **Why it matters:** Wolf's tools are pure request/response and Orange's client speaks Streamable HTTP; but wolf-web's nginx /mcp location carries SSE directives that will now never be exercised, and any client expecting a session id will not get one.
+- **Why it matters:** Wolf's tools are pure request/response and Bob's client speaks Streamable HTTP; but wolf-web's nginx /mcp location carries SSE directives that will now never be exercised, and any client expecting a session id will not get one.
 
 ### McpServer version string
 

@@ -17,7 +17,7 @@ The console already contains the answer to most of these questions, in one compo
 finished using.
 
 `web/src/spine.tsx` is the design's signature (§3.6) — *"one vertical hairline with ticks… Agent
-Orange is the tool where everything hangs off a rail, because everything is an append."* It ships
+Bob is the tool where everything hangs off a rail, because everything is an append."* It ships
 as `SpineRail`, `SpineRow`, `SpineGap` and a **closed set of five glyphs**. Two properties of that
 component decide this whole design:
 
