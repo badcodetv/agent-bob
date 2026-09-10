@@ -8,15 +8,15 @@ import (
 
 // DefaultSubfolder is the default root of the projection inside a project's
 // git clone (design doc §B "Layout"): everything this package writes lives
-// under `orange/` unless a project has configured a different subfolder.
-const DefaultSubfolder = "orange"
+// under `bob/` unless a project has configured a different subfolder.
+const DefaultSubfolder = "bob"
 
 // nameRe is the one shape a name segment is allowed to take. It is
 // deliberately restrictive — DNS-label shaped, like a Kubernetes name —
 // rather than "whatever characters happen to work": the only names that
 // reach this package are validated ones. See the package comment and §D of
 // the design doc for why that matters: an unvalidated name is how a worker
-// prompt or an inbound commit turns into a write outside `orange/`.
+// prompt or an inbound commit turns into a write outside `bob/`.
 var nameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 const maxNameLen = 63

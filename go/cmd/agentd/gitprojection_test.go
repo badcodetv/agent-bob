@@ -1093,7 +1093,7 @@ func TestGitProjectionPublishesFullDocumentsNotSnippets(t *testing.T) {
 	rig.proj.Hook()(context.Background(), ev)
 	rig.proj.RenderPending(context.Background())
 
-	published := readProjectionFile(t, rig, "wolf", "orange/memory/message-board.md")
+	published := readProjectionFile(t, rig, "wolf", "bob/memory/message-board.md")
 	if !strings.Contains(published, "AND THE LAST LINE MATTERS.") {
 		t.Fatalf("the published document is truncated — a snippet was rendered instead of the memory:\n%s", published)
 	}
@@ -1118,7 +1118,7 @@ func TestGitProjectionSkipsUnfilableDocuments(t *testing.T) {
 	if n := rig.commitCount("wolf"); n != 1 {
 		t.Fatalf("one badly-named document stopped the project rendering (%d commits)", n)
 	}
-	if got := readProjectionFile(t, rig, "wolf", "orange/memory/message-board.md"); !strings.Contains(got, "a fine file name") {
+	if got := readProjectionFile(t, rig, "wolf", "bob/memory/message-board.md"); !strings.Contains(got, "a fine file name") {
 		t.Fatalf("the renderable document did not publish: %q", got)
 	}
 
@@ -1216,10 +1216,10 @@ func (f *fakeProjectionState) lastErrorKind(project string) string {
 func TestGitProjectionRefusesToRenderOverAnUnimportedExport(t *testing.T) {
 	rig := newProjectionRig(t, "wolf")
 	export := map[string]string{
-		"orange/project.yaml":            "goal: sell the thing\n",
-		"orange/workers/copywriter.md":   "---\nname: copywriter\n---\nthe prompt a human wrote\n",
-		"orange/memory/message-board.md": "the board\n",
-		"README.md":                      "not the projection's file\n",
+		"bob/project.yaml":            "goal: sell the thing\n",
+		"bob/workers/copywriter.md":   "---\nname: copywriter\n---\nthe prompt a human wrote\n",
+		"bob/memory/message-board.md": "the board\n",
+		"README.md":                   "not the projection's file\n",
 	}
 	seedExport(t, rig, "wolf", export)
 	before := remoteHead(t, rig, "wolf")
@@ -1284,7 +1284,7 @@ func TestGitProjectionRendersIntoAnEmptyRemote(t *testing.T) {
 	}
 }
 
-// A repository that has history but no orange/ yet — a project's own repo
+// A repository that has history but no bob/ yet — a project's own repo
 // gaining a projection — is also the ordinary first run.
 func TestGitProjectionRendersWhenTheRemoteHasNoSubfolderYet(t *testing.T) {
 	rig := newProjectionRig(t, "wolf")
@@ -1297,7 +1297,7 @@ func TestGitProjectionRendersWhenTheRemoteHasNoSubfolderYet(t *testing.T) {
 	rig.proj.RenderPending(context.Background())
 
 	if kind := rig.state.lastErrorKind("wolf"); kind != agentdb.GitProjectionErrorNone {
-		t.Fatalf("the guard fired on a repository with no orange/ yet: kind %q, %q", kind, rig.state.lastError("wolf"))
+		t.Fatalf("the guard fired on a repository with no bob/ yet: kind %q, %q", kind, rig.state.lastError("wolf"))
 	}
 	if n := rig.commitCount("wolf"); n != 2 { // the seeded commit, plus ours
 		t.Fatalf("want the projection's commit on top of the existing history, got %d commits", n)
@@ -1314,7 +1314,7 @@ func TestGitProjectionRendersWhenTheRemoteHasNoSubfolderYet(t *testing.T) {
 func TestGitProjectionAdoptionGuardStopsAfterAnImport(t *testing.T) {
 	rig := newProjectionRig(t, "wolf")
 	seedExport(t, rig, "wolf", map[string]string{
-		"orange/project.yaml": "goal: sell the thing\n",
+		"bob/project.yaml": "goal: sell the thing\n",
 	})
 	// What a bootstrap or a webhook import leaves behind.
 	if err := rig.state.MarkImported(context.Background(), "wolf", remoteHead(t, rig, "wolf")); err != nil {
@@ -1341,8 +1341,8 @@ func TestGitProjectionAdoptionGuardDoesNotLatchAfterAFirstRender(t *testing.T) {
 	if err := rig.proj.PushProject(context.Background(), "wolf"); err != nil {
 		t.Fatalf("first push: %v", err)
 	}
-	// The remote's orange/ now has content — put there by us.
-	if _, ok := remoteFile(t, rig, "wolf", "orange/README.md"); !ok {
+	// The remote's bob/ now has content — put there by us.
+	if _, ok := remoteFile(t, rig, "wolf", "bob/README.md"); !ok {
 		t.Fatal("setup: the first render did not publish into the subfolder")
 	}
 

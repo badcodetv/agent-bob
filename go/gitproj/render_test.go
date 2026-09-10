@@ -15,7 +15,7 @@ func TestDumpTree(t *testing.T) {
 	if os.Getenv("DUMP") == "" {
 		t.Skip("set DUMP=1")
 	}
-	tree, err := RenderTree(goldenState(), "orange")
+	tree, err := RenderTree(goldenState(), "bob")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +188,10 @@ func sortedPaths(tree map[string][]byte) []string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeIsDeterministic(t *testing.T) {
-	first := mustRender(t, goldenState(), "orange")
+	first := mustRender(t, goldenState(), "bob")
 
 	for i := 0; i < 100; i++ {
-		got := mustRender(t, goldenState(), "orange")
+		got := mustRender(t, goldenState(), "bob")
 		if len(got) != len(first) {
 			t.Fatalf("iteration %d: rendered %d files, first render had %d", i, len(got), len(first))
 		}
@@ -218,8 +218,8 @@ func TestRenderTreeIgnoresInputOrder(t *testing.T) {
 	reverseImages(b.Images)
 	reverseDocs(b.Documents)
 
-	ta := mustRender(t, a, "orange")
-	tb := mustRender(t, b, "orange")
+	ta := mustRender(t, a, "bob")
+	tb := mustRender(t, b, "bob")
 
 	if strings.Join(sortedPaths(ta), ",") != strings.Join(sortedPaths(tb), ",") {
 		t.Fatalf("path sets differ:\n%v\n%v", sortedPaths(ta), sortedPaths(tb))
@@ -259,18 +259,18 @@ func reverseDocs(s []*agentdb.Memory) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeGoldenProject(t *testing.T) {
-	tree := mustRender(t, goldenState(), "orange")
+	tree := mustRender(t, goldenState(), "bob")
 
 	wantPaths := []string{
-		"orange/README.md",
-		"orange/images/wolf-base.md",
-		"orange/memory/message-board.md",
-		"orange/schedules/sched-1.md",
-		"orange/settings.md",
-		"orange/skills/csv-notes.md",
-		"orange/subscriptions/sub-1.md",
-		"orange/workers/architect.md",
-		"orange/workers/scorekeeper.md",
+		"bob/README.md",
+		"bob/images/wolf-base.md",
+		"bob/memory/message-board.md",
+		"bob/schedules/sched-1.md",
+		"bob/settings.md",
+		"bob/skills/csv-notes.md",
+		"bob/subscriptions/sub-1.md",
+		"bob/workers/architect.md",
+		"bob/workers/scorekeeper.md",
 	}
 	if got := sortedPaths(tree); strings.Join(got, "\n") != strings.Join(wantPaths, "\n") {
 		t.Fatalf("rendered path set:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantPaths, "\n"))
@@ -284,14 +284,14 @@ func TestRenderTreeGoldenProject(t *testing.T) {
 }
 
 var goldenFiles = map[string]string{
-	"orange/settings.md":             goldenSettings,
-	"orange/workers/architect.md":    goldenWorkerArchitect,
-	"orange/workers/scorekeeper.md":  goldenWorkerScorekeeper,
-	"orange/skills/csv-notes.md":     goldenSkill,
-	"orange/subscriptions/sub-1.md":  goldenSubscription,
-	"orange/schedules/sched-1.md":    goldenSchedule,
-	"orange/images/wolf-base.md":     goldenImage,
-	"orange/memory/message-board.md": goldenMemory,
+	"bob/settings.md":             goldenSettings,
+	"bob/workers/architect.md":    goldenWorkerArchitect,
+	"bob/workers/scorekeeper.md":  goldenWorkerScorekeeper,
+	"bob/skills/csv-notes.md":     goldenSkill,
+	"bob/subscriptions/sub-1.md":  goldenSubscription,
+	"bob/schedules/sched-1.md":    goldenSchedule,
+	"bob/images/wolf-base.md":     goldenImage,
+	"bob/memory/message-board.md": goldenMemory,
 }
 
 // The project prompt is the body; every renderable setting is frontmatter, in
@@ -312,7 +312,7 @@ daily_tokens_hard: 0
 daily_tokens_soft: 1000000
 git_branch: main
 git_remote: https://github.com/badcode/wolf-org
-git_subfolder: orange
+git_subfolder: bob
 git_token_env: WOLF_GITHUB_TOKEN
 git_webhook_secret_env: WOLF_WEBHOOK_SECRET
 max_concurrent_jobs: 4
@@ -446,7 +446,7 @@ func TestRenderTreeRefusesLiteralAttentionURL(t *testing.T) {
 	st := goldenState()
 	st.Settings.AttentionChannel = agentdb.JSONMap{"kind": "webhook", "url": secret}
 
-	tree, err := RenderTree(st, "orange")
+	tree, err := RenderTree(st, "bob")
 	if err == nil {
 		t.Fatalf("a literal Slack webhook URL rendered without complaint; that URL is a bearer token")
 	}
@@ -484,7 +484,7 @@ func TestRenderTreeRefusesLiteralMCPCredential(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			st := goldenState()
 			st.Settings.MCPConfig = cfg
-			tree, err := RenderTree(st, "orange")
+			tree, err := RenderTree(st, "bob")
 			if err == nil || tree != nil {
 				t.Fatalf("rendered %d files instead of refusing (err=%v)", len(tree), err)
 			}
@@ -500,7 +500,7 @@ func TestRenderTreeRefusesLiteralOnAWorkerToo(t *testing.T) {
 	st.Workers[1].MCPConfig = agentdb.JSONMap{
 		"x": map[string]any{"env": map[string]any{"K": "literal-secret"}},
 	}
-	tree, err := RenderTree(st, "orange")
+	tree, err := RenderTree(st, "bob")
 	if err == nil || tree != nil {
 		t.Fatalf("rendered %d files instead of refusing (err=%v)", len(tree), err)
 	}
@@ -525,15 +525,15 @@ func TestResolveSubfolder(t *testing.T) {
 		want                       string
 		wantErr                    string
 	}{
-		{name: "explicit wins", explicit: "conf", settings: "orange", defalt: "orange", want: "conf"},
-		{name: "settings when no explicit", settings: "conf", defalt: "orange", want: "conf"},
-		{name: "default when neither", defalt: "orange", want: "orange"},
+		{name: "explicit wins", explicit: "conf", settings: "bob", defalt: "bob", want: "conf"},
+		{name: "settings when no explicit", settings: "conf", defalt: "bob", want: "conf"},
+		{name: "default when neither", defalt: "bob", want: "bob"},
 		{name: "empty after defaulting is refused", wantErr: "empty after defaulting"},
-		{name: "whitespace is not a segment", explicit: " ", defalt: "orange", wantErr: "invalid git subfolder"},
-		{name: "traversal is refused", explicit: "../..", defalt: "orange", wantErr: "invalid git subfolder"},
-		{name: "nested path is refused", explicit: "a/b", defalt: "orange", wantErr: "invalid git subfolder"},
-		{name: "dotfile is refused", explicit: ".github", defalt: "orange", wantErr: "invalid git subfolder"},
-		{name: "uppercase is refused", explicit: "Orange", defalt: "orange", wantErr: "invalid git subfolder"},
+		{name: "whitespace is not a segment", explicit: " ", defalt: "bob", wantErr: "invalid git subfolder"},
+		{name: "traversal is refused", explicit: "../..", defalt: "bob", wantErr: "invalid git subfolder"},
+		{name: "nested path is refused", explicit: "a/b", defalt: "bob", wantErr: "invalid git subfolder"},
+		{name: "dotfile is refused", explicit: ".github", defalt: "bob", wantErr: "invalid git subfolder"},
+		{name: "uppercase is refused", explicit: "Bob", defalt: "bob", wantErr: "invalid git subfolder"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -578,7 +578,7 @@ func TestRenderTreeSubfolderDefaultsAndRefusals(t *testing.T) {
 	}
 
 	// A subfolder that is not a single safe segment is refused, with no tree.
-	for _, bad := range []string{"../../.github", "a/b", ".github", "Orange", " "} {
+	for _, bad := range []string{"../../.github", "a/b", ".github", "Bob", " "} {
 		tree3, err := RenderTree(goldenState(), bad)
 		if err == nil || tree3 != nil {
 			t.Errorf("subfolder %q rendered %d files instead of being refused", bad, len(tree3))
@@ -607,7 +607,7 @@ func TestRenderTreeAppliesGitBranchDefault(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeRoundTripsThroughParse(t *testing.T) {
-	tree := mustRender(t, goldenState(), "orange")
+	tree := mustRender(t, goldenState(), "bob")
 
 	for _, path := range sortedPaths(tree) {
 		content := tree[path]
@@ -618,13 +618,13 @@ func TestRenderTreeRoundTripsThroughParse(t *testing.T) {
 		// README explicitly rather than quarantining a whole push because of
 		// it. Reported; not fixable from this ticket's two files.
 		if strings.HasSuffix(path, "/README.md") {
-			if _, _, err := ParsePath("orange", path); err == nil {
+			if _, _, err := ParsePath("bob", path); err == nil {
 				t.Errorf("ParsePath now accepts %s — update this test and the importer note", path)
 			}
 			continue
 		}
 
-		ch, err := ParseAgainst("orange", path, content, content)
+		ch, err := ParseAgainst("bob", path, content, content)
 		if err != nil {
 			t.Fatalf("%s: rendered file does not parse: %v", path, err)
 		}
@@ -632,7 +632,7 @@ func TestRenderTreeRoundTripsThroughParse(t *testing.T) {
 			t.Errorf("%s: parsing a rendered file against itself reports a change (fields=%v bodyChanged=%v); the import→render loop would never terminate",
 				path, ch.Fields, ch.BodyChanged)
 		}
-		if len(ch.DroppedFields) > 0 && path != "orange/settings.md" {
+		if len(ch.DroppedFields) > 0 && path != "bob/settings.md" {
 			t.Errorf("%s: only settings.md may carry not-importable keys, got %v", path, ch.DroppedFields)
 		}
 	}
@@ -646,14 +646,14 @@ func TestRenderTreeRoundTripsThroughParse(t *testing.T) {
 // parser's key names and DI2's "only what changed" all have to agree, end to
 // end, or it fails.
 func TestRenderTreeAndParseAgreeOnOneChangedField(t *testing.T) {
-	before := mustRender(t, goldenState(), "orange")
+	before := mustRender(t, goldenState(), "bob")
 
 	changed := goldenState()
 	changed.Workers[0].Enabled = false
-	after := mustRender(t, changed, "orange")
+	after := mustRender(t, changed, "bob")
 
-	const path = "orange/workers/architect.md"
-	ch, err := ParseAgainst("orange", path, before[path], after[path])
+	const path = "bob/workers/architect.md"
+	ch, err := ParseAgainst("bob", path, before[path], after[path])
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -679,14 +679,14 @@ func TestRenderTreeAndParseAgreeOnOneChangedField(t *testing.T) {
 // prompt-only change must reach the importer as BodyOnly, which is what sends
 // it down the worker_prompt_write path rather than a whole-object write.
 func TestRenderTreeAndParseAgreeOnAPromptEdit(t *testing.T) {
-	before := mustRender(t, goldenState(), "orange")
+	before := mustRender(t, goldenState(), "bob")
 
 	changed := goldenState()
 	changed.Workers[0].SystemPrompt = "You are the architect. Be brief.\n"
-	after := mustRender(t, changed, "orange")
+	after := mustRender(t, changed, "bob")
 
-	const path = "orange/workers/architect.md"
-	ch, err := ParseAgainst("orange", path, before[path], after[path])
+	const path = "bob/workers/architect.md"
+	ch, err := ParseAgainst("bob", path, before[path], after[path])
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -701,8 +701,8 @@ func TestRenderTreeAndParseAgreeOnAPromptEdit(t *testing.T) {
 func TestRenderTreeRoundTripSurvivesReformatting(t *testing.T) {
 	// A human reformats a file — reorders keys, requotes a scalar, changes the
 	// indent — without changing anything. The importer must see no change.
-	tree := mustRender(t, goldenState(), "orange")
-	rendered := fileOf(t, tree, "orange/workers/scorekeeper.md")
+	tree := mustRender(t, goldenState(), "bob")
+	rendered := fileOf(t, tree, "bob/workers/scorekeeper.md")
 
 	reformatted := "---\n" +
 		"enabled: \"false\"\n" +
@@ -712,7 +712,7 @@ func TestRenderTreeRoundTripSurvivesReformatting(t *testing.T) {
 		"---\n\n" +
 		"Score the hypotheses.\n"
 
-	ch, err := ParseAgainst("orange", "orange/workers/scorekeeper.md", []byte(rendered), []byte(reformatted))
+	ch, err := ParseAgainst("bob", "bob/workers/scorekeeper.md", []byte(rendered), []byte(reformatted))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -724,8 +724,8 @@ func TestRenderTreeRoundTripSurvivesReformatting(t *testing.T) {
 func TestRenderTreeCreateParseSeesTheWholeFile(t *testing.T) {
 	// The bootstrap case (G15): no previous version, so every field the file
 	// carries is reported — and the not-importable git fields never are.
-	tree := mustRender(t, goldenState(), "orange")
-	ch, err := Parse("orange", "orange/settings.md", tree["orange/settings.md"])
+	tree := mustRender(t, goldenState(), "bob")
+	ch, err := Parse("bob", "bob/settings.md", tree["bob/settings.md"])
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -752,9 +752,9 @@ func TestRenderTreeCreateParseSeesTheWholeFile(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeBodyIsTheProse(t *testing.T) {
-	tree := mustRender(t, goldenState(), "orange")
+	tree := mustRender(t, goldenState(), "bob")
 
-	worker := fileOf(t, tree, "orange/workers/architect.md")
+	worker := fileOf(t, tree, "bob/workers/architect.md")
 	if strings.Contains(worker, "system_prompt:") {
 		t.Errorf("a worker's prompt must be the body, not a frontmatter key:\n%s", worker)
 	}
@@ -762,12 +762,12 @@ func TestRenderTreeBodyIsTheProse(t *testing.T) {
 		t.Errorf("worker body is not the system prompt:\n%s", worker)
 	}
 
-	settings := fileOf(t, tree, "orange/settings.md")
+	settings := fileOf(t, tree, "bob/settings.md")
 	if strings.Contains(settings, "system_prompt:") {
 		t.Errorf("the project prompt must be the body:\n%s", settings)
 	}
 
-	skill := fileOf(t, tree, "orange/skills/csv-notes.md")
+	skill := fileOf(t, tree, "bob/skills/csv-notes.md")
 	if strings.Contains(skill, "markdown:") {
 		t.Errorf("a skill's document must be the body:\n%s", skill)
 	}
@@ -775,7 +775,7 @@ func TestRenderTreeBodyIsTheProse(t *testing.T) {
 		t.Errorf("skill body is not its markdown:\n%s", skill)
 	}
 
-	memory := fileOf(t, tree, "orange/memory/message-board.md")
+	memory := fileOf(t, tree, "bob/memory/message-board.md")
 	if !strings.HasSuffix(memory, "The board says: hold.\n") {
 		t.Errorf("a memory document's body must be its content:\n%s", memory)
 	}
@@ -789,9 +789,9 @@ func TestRenderTreeBodyGetsExactlyOneTrailingNewline(t *testing.T) {
 		{Name: "a", SystemPrompt: "no newline", Enabled: true},
 		{Name: "b", SystemPrompt: "one newline\n", Enabled: true},
 	}}
-	tree := mustRender(t, st, "orange")
+	tree := mustRender(t, st, "bob")
 	for name, want := range map[string]string{"a": "no newline\n", "b": "one newline\n"} {
-		_, body, err := ParseFrontmatter([]byte(fileOf(t, tree, "orange/workers/"+name+".md")))
+		_, body, err := ParseFrontmatter([]byte(fileOf(t, tree, "bob/workers/"+name+".md")))
 		if err != nil {
 			t.Fatalf("worker %s: %v", name, err)
 		}
@@ -805,7 +805,7 @@ func TestRenderTreeOmitsUnsetKeysAndKeepsMeaningfulZeros(t *testing.T) {
 	st := ProjectState{Workers: []*agentdb.Worker{{
 		Project: "wolf", Name: "bare", Enabled: false, MaxInstances: 0,
 	}}}
-	got := fileOf(t, mustRender(t, st, "orange"), "orange/workers/bare.md")
+	got := fileOf(t, mustRender(t, st, "bob"), "bob/workers/bare.md")
 
 	for _, absent := range []string{"description:", "image:", "briefing:", "mcp_config:", "system_prompt:"} {
 		if strings.Contains(got, absent) {
@@ -822,7 +822,7 @@ func TestRenderTreeOmitsUnsetKeysAndKeepsMeaningfulZeros(t *testing.T) {
 }
 
 func TestRenderTreeNeverRendersNeverFields(t *testing.T) {
-	tree := mustRender(t, goldenState(), "orange")
+	tree := mustRender(t, goldenState(), "bob")
 	// Timestamps churn on every write and would put a diff in every commit;
 	// project/customer is identity; owner_email is personal data.
 	banned := []string{"updated_at", "created_at", "project:", "customer", "owner_email", "kai@example.com",
@@ -839,7 +839,7 @@ func TestRenderTreeNeverRendersNeverFields(t *testing.T) {
 }
 
 func TestRenderTreeReadme(t *testing.T) {
-	got := fileOf(t, mustRender(t, goldenState(), "orange"), "orange/README.md")
+	got := fileOf(t, mustRender(t, goldenState(), "bob"), "bob/README.md")
 	for _, want := range []string{"written by Agent Bob", "applied back into the system", "ignored on import"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("README does not say %q:\n%s", want, got)
@@ -857,17 +857,17 @@ func TestRenderTreeReadme(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeRendersNewestPerName(t *testing.T) {
-	tree := mustRender(t, goldenState(), "orange")
+	tree := mustRender(t, goldenState(), "bob")
 
-	skill := fileOf(t, tree, "orange/skills/csv-notes.md")
+	skill := fileOf(t, tree, "bob/skills/csv-notes.md")
 	if !strings.Contains(skill, "revision: 2") || strings.Contains(skill, "old revision") {
 		t.Errorf("the newest skill revision must win:\n%s", skill)
 	}
-	image := fileOf(t, tree, "orange/images/wolf-base.md")
+	image := fileOf(t, tree, "bob/images/wolf-base.md")
 	if !strings.Contains(image, "version: 7") {
 		t.Errorf("the newest image version must win:\n%s", image)
 	}
-	memory := fileOf(t, tree, "orange/memory/message-board.md")
+	memory := fileOf(t, tree, "bob/memory/message-board.md")
 	if strings.Contains(memory, "older board") {
 		t.Errorf("the newest named memory must win:\n%s", memory)
 	}
@@ -877,7 +877,7 @@ func TestRenderTreeRefusesMemoryWithoutNameLabel(t *testing.T) {
 	st := ProjectState{Documents: []*agentdb.Memory{
 		{ID: "mem-x", Content: "a lesson", Labels: agentdb.LabelSet{"kind": "lesson"}},
 	}}
-	tree, err := RenderTree(st, "orange")
+	tree, err := RenderTree(st, "bob")
 	if err == nil || tree != nil {
 		t.Fatalf("rendered %d files for a memory with no name= label (err=%v)", len(tree), err)
 	}
@@ -895,7 +895,7 @@ func TestRenderTreeRefusesUnsafeNames(t *testing.T) {
 	}
 	for name, st := range cases {
 		t.Run(name, func(t *testing.T) {
-			tree, err := RenderTree(st, "orange")
+			tree, err := RenderTree(st, "bob")
 			if err == nil || tree != nil {
 				t.Fatalf("rendered %d files for an unsafe %s name (err=%v)", len(tree), name, err)
 			}
@@ -908,27 +908,27 @@ func TestRenderTreeRefusesDuplicatePaths(t *testing.T) {
 		{Name: "twin", SystemPrompt: "one", Enabled: true},
 		{Name: "twin", SystemPrompt: "two", Enabled: true},
 	}}
-	tree, err := RenderTree(st, "orange")
+	tree, err := RenderTree(st, "bob")
 	if err == nil || tree != nil {
 		t.Fatalf("two workers with one name rendered %d files (err=%v)", len(tree), err)
 	}
-	if !strings.Contains(err.Error(), "orange/workers/twin.md") {
+	if !strings.Contains(err.Error(), "bob/workers/twin.md") {
 		t.Errorf("the error should name the contested path: %v", err)
 	}
 }
 
 func TestRenderTreeNilSettingsRendersNoSettingsFile(t *testing.T) {
-	tree := mustRender(t, ProjectState{Workers: []*agentdb.Worker{{Name: "a", Enabled: true}}}, "orange")
-	if _, ok := tree["orange/settings.md"]; ok {
+	tree := mustRender(t, ProjectState{Workers: []*agentdb.Worker{{Name: "a", Enabled: true}}}, "bob")
+	if _, ok := tree["bob/settings.md"]; ok {
 		t.Errorf("a project with no settings row must not render settings.md")
 	}
-	if _, ok := tree["orange/README.md"]; !ok {
+	if _, ok := tree["bob/README.md"]; !ok {
 		t.Errorf("the README always renders")
 	}
 }
 
 func TestRenderTreeRefusesNilRows(t *testing.T) {
-	if _, err := RenderTree(ProjectState{Workers: []*agentdb.Worker{nil}}, "orange"); err == nil {
+	if _, err := RenderTree(ProjectState{Workers: []*agentdb.Worker{nil}}, "bob"); err == nil {
 		t.Errorf("a nil worker must be an error, not a skipped row")
 	}
 }

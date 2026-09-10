@@ -231,7 +231,7 @@ func TestSkillsMCPCreate(t *testing.T) {
 	if res["revision"] != float64(1) {
 		t.Fatalf("revision = %v, want the store's allocation", res["revision"])
 	}
-	if res["session_url"] != "https://orange.example.com/p/acme/s/sess-1" {
+	if res["session_url"] != "https://bob.example.com/p/acme/s/sess-1" {
 		t.Fatalf("session_url = %v", res["session_url"])
 	}
 
@@ -315,7 +315,7 @@ func TestSkillsMCPListCarriesNoMarkdown(t *testing.T) {
 			t.Fatalf("skill_list must not carry %q — that is what skill_get is for (§14.2)", key)
 		}
 	}
-	if entry["session_url"] != "https://orange.example.com/p/acme/s/sess-7" {
+	if entry["session_url"] != "https://bob.example.com/p/acme/s/sess-7" {
 		t.Fatalf("session_url = %v", entry["session_url"])
 	}
 }

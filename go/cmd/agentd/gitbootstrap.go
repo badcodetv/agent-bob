@@ -118,7 +118,7 @@ type gitBootstrapInput struct {
 	Project string
 	// Repo is the clone to read. Bootstrap only ever reads from it.
 	Repo *gitproj.Repo
-	// Subfolder is the path prefix Orange owns. Empty means
+	// Subfolder is the path prefix Bob owns. Empty means
 	// gitproj.DefaultSubfolder, per DI3's read-time default rule: an empty
 	// subfolder reaching path construction would address the repository root.
 	Subfolder string

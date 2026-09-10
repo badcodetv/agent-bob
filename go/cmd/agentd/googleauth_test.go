@@ -546,7 +546,7 @@ func TestAuthPasswordHandler(t *testing.T) {
 		"kai@example.com":  {"apples-oranges"},
 		"test@example.com": {"pears-plums"},
 	}
-	h := authPasswordHandler("test@example.com", "orange-e2e", pm, issuer)
+	h := authPasswordHandler("test@example.com", "bob-e2e", pm, issuer)
 
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -555,7 +555,7 @@ func TestAuthPasswordHandler(t *testing.T) {
 	}
 
 	t.Run("valid credentials grant the union of all projects", func(t *testing.T) {
-		rec := post(`{"email":"Test@Example.com","password":"orange-e2e"}`)
+		rec := post(`{"email":"Test@Example.com","password":"bob-e2e"}`)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 		}
@@ -572,13 +572,13 @@ func TestAuthPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("wrong email is 401", func(t *testing.T) {
-		if rec := post(`{"email":"other@example.com","password":"orange-e2e"}`); rec.Code != http.StatusUnauthorized {
+		if rec := post(`{"email":"other@example.com","password":"bob-e2e"}`); rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status = %d", rec.Code)
 		}
 	})
 
 	t.Run("test login is wildcard and carries a login token", func(t *testing.T) {
-		rec := post(`{"email":"test@example.com","password":"orange-e2e"}`)
+		rec := post(`{"email":"test@example.com","password":"bob-e2e"}`)
 		var resp loginResponse
 		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 			t.Fatalf("decode: %v", err)

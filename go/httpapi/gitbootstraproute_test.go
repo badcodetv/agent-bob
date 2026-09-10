@@ -180,11 +180,11 @@ func TestGitBootstrapReturnsWhatWasIgnored(t *testing.T) {
 		Watermark: "abc123",
 		Files:     3,
 		Applied: []GitBootstrapWrite{
-			{Path: "orange/workers/architect.md", Kind: "worker", Name: "architect", Action: "create"},
+			{Path: "bob/workers/architect.md", Kind: "worker", Name: "architect", Action: "create"},
 		},
 		Ignored: []GitProjectionNote{
-			{Path: "orange/images/wolf-base.md", Reason: "images are not importable"},
-			{Path: "orange/settings.md", Reason: "git configuration is not importable; ignored: git_remote"},
+			{Path: "bob/images/wolf-base.md", Reason: "images are not importable"},
+			{Path: "bob/settings.md", Reason: "git configuration is not importable; ignored: git_remote"},
 		},
 	}}
 	h := newGitBootstrapHandlers(t, boot, identityFor("acme"))
@@ -201,7 +201,7 @@ func TestGitBootstrapReturnsWhatWasIgnored(t *testing.T) {
 		t.Fatalf("ignored = %v, want the two entries the run reported", body["ignored"])
 	}
 	first, _ := ignored[0].(map[string]any)
-	if first["path"] != "orange/images/wolf-base.md" || first["reason"] == "" {
+	if first["path"] != "bob/images/wolf-base.md" || first["reason"] == "" {
 		t.Fatalf("an ignored entry lost its path or reason: %v", first)
 	}
 	applied, _ := body["applied"].([]any)
@@ -219,7 +219,7 @@ func TestGitBootstrapQuarantineIs422WithTheReasons(t *testing.T) {
 		SHA:         "abc123",
 		Quarantined: true,
 		Failures: []GitProjectionNote{
-			{Path: "orange/workers/saboteur.md", Reason: "enabled: cannot unmarshal"},
+			{Path: "bob/workers/saboteur.md", Reason: "enabled: cannot unmarshal"},
 		},
 	}}
 	h := newGitBootstrapHandlers(t, boot, identityFor("acme"))
@@ -239,7 +239,7 @@ func TestGitBootstrapQuarantineIs422WithTheReasons(t *testing.T) {
 		t.Fatalf("failures = %v, want the one bad file", body["failures"])
 	}
 	f, _ := failures[0].(map[string]any)
-	if f["path"] != "orange/workers/saboteur.md" {
+	if f["path"] != "bob/workers/saboteur.md" {
 		t.Fatalf("the failure lost its path: %v", f)
 	}
 }

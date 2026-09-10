@@ -783,7 +783,7 @@ func TestListMemories_NarrowingParams(t *testing.T) {
 // The append route (O7) — POST /agent/memories.
 //
 // This is the ONE write on the memory surface, and the reason it exists is that
-// an application embedding Orange had no way to hold state at all: the only
+// an application embedding Bob had no way to hold state at all: the only
 // writer was memory_create on the core MCP server, authenticated by a session
 // token an embedder does not hold.
 //

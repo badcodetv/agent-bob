@@ -93,11 +93,11 @@ func TestGitProjectionStatusReportsQuarantine(t *testing.T) {
 			Project:         "wolf",
 			LastRenderedSHA: "aaa111",
 			LastPushedSHA:   "aaa111",
-			LastError:       "inbound commit quarantined: orange/workers/copywriter.md: cron is not valid",
+			LastError:       "inbound commit quarantined: bob/workers/copywriter.md: cron is not valid",
 			LastErrorKind:   agentdb.GitProjectionErrorQuarantined,
 		}},
 		quarantine: map[string][]agentdb.GitProjectionNote{"wolf": {
-			{Path: "orange/workers/copywriter.md", Reason: "cron is not valid", NotedAt: 1789000000},
+			{Path: "bob/workers/copywriter.md", Reason: "cron is not valid", NotedAt: 1789000000},
 		}},
 	})
 
@@ -109,7 +109,7 @@ func TestGitProjectionStatusReportsQuarantine(t *testing.T) {
 		t.Fatalf("want 1 quarantine entry in the response, got %v", body["quarantine"])
 	}
 	first, _ := list[0].(map[string]any)
-	if first["path"] != "orange/workers/copywriter.md" || first["reason"] != "cron is not valid" {
+	if first["path"] != "bob/workers/copywriter.md" || first["reason"] != "cron is not valid" {
 		t.Errorf("the entry must carry the file and the reason, got %v", first)
 	}
 	if first["at"] != float64(1789000000) {
@@ -125,7 +125,7 @@ func TestGitProjectionStatusReportsIgnored(t *testing.T) {
 			Project: "wolf", LastRenderedSHA: "aaa111", LastPushedSHA: "aaa111",
 		}},
 		ignored: map[string][]agentdb.GitProjectionNote{"wolf": {
-			{Path: "orange/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
+			{Path: "bob/skills/research.md", Reason: "skills are append-only; deleting the file removes nothing"},
 		}},
 	})
 
@@ -138,7 +138,7 @@ func TestGitProjectionStatusReportsIgnored(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("want 1 ignored entry, got %v", body["ignored"])
 	}
-	if first, _ := list[0].(map[string]any); first["path"] != "orange/skills/research.md" {
+	if first, _ := list[0].(map[string]any); first["path"] != "bob/skills/research.md" {
 		t.Errorf("the entry must name the file, got %v", first)
 	}
 }
@@ -293,7 +293,7 @@ func newGitNoteImportWiring(t *testing.T, g *gitImportRepo) (*gitWebhookWiring, 
 func TestGitImportRecordsQuarantineNotes(t *testing.T) {
 	g := newGitImportRepo(t)
 	g.human("add a worker with a field that cannot be read", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true\nmax_instances: as many as it takes", "Write things."),
+		"bob/workers/copywriter.md": file("enabled: true\nmax_instances: as many as it takes", "Write things."),
 	})
 	g.push()
 
@@ -326,7 +326,7 @@ func TestGitImportRecordsQuarantineNotes(t *testing.T) {
 func TestGitImportCleanRunClearsTheQuarantine(t *testing.T) {
 	g := newGitImportRepo(t)
 	g.human("add a worker with a field that cannot be read", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true\nmax_instances: as many as it takes", "Write things."),
+		"bob/workers/copywriter.md": file("enabled: true\nmax_instances: as many as it takes", "Write things."),
 	})
 	g.push()
 
@@ -340,7 +340,7 @@ func TestGitImportCleanRunClearsTheQuarantine(t *testing.T) {
 	}
 
 	g.human("fix the field", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true\nmax_instances: 3", "Write things."),
+		"bob/workers/copywriter.md": file("enabled: true\nmax_instances: 3", "Write things."),
 	})
 	g.push()
 	if err := w.importProject(ctx, gitImportProject); err != nil {
@@ -357,7 +357,7 @@ func TestGitImportCleanRunClearsTheQuarantine(t *testing.T) {
 func TestGitImportRecordsIgnoredNotes(t *testing.T) {
 	g := newGitImportRepo(t)
 	g.human("seed", map[string]*string{
-		"orange/settings.md": file("base_image: wolf-base", "The project."),
+		"bob/settings.md": file("base_image: wolf-base", "The project."),
 	})
 	g.push()
 
@@ -370,7 +370,7 @@ func TestGitImportRecordsIgnoredNotes(t *testing.T) {
 	// git_remote is a not-importable field (DI3): editing it in the repo is
 	// read, understood and deliberately not applied.
 	g.human("point the projection somewhere else", map[string]*string{
-		"orange/settings.md": file(strings.Join([]string{
+		"bob/settings.md": file(strings.Join([]string{
 			"base_image: wolf-base",
 			"git_remote: https://github.com/somebody/else.git",
 		}, "\n"), "The project."),

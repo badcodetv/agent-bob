@@ -1,7 +1,7 @@
 package main
 
 // The INBOUND door of the git projection (design/2026-09-09-git-projection.md
-// §C). A human edits `orange/workers/copywriter.md` in the mirror repository,
+// §C). A human edits `bob/workers/copywriter.md` in the mirror repository,
 // pushes, and that edit becomes config event N+1 — with the commit message as
 // its rationale and an empty actor, which is already the log's encoding for a
 // human/UI/API edit (agentdb.ConfigWrite).
@@ -127,7 +127,7 @@ type gitImportInput struct {
 	Project string
 	// Repo is the project's clone. The importer only reads from it.
 	Repo *gitproj.Repo
-	// Subfolder is the path prefix Orange owns. Empty means
+	// Subfolder is the path prefix Bob owns. Empty means
 	// gitproj.DefaultSubfolder, per DI3's read-time default rule: an empty
 	// subfolder reaching path construction would address the repository root.
 	Subfolder string
@@ -881,7 +881,7 @@ func (im *gitImporter) planSchedule(ctx context.Context, project string, ch gitp
 	}}, notices, nil
 }
 
-// planMemory implements §E: a human editing orange/memory/<name>.md produces a
+// planMemory implements §E: a human editing bob/memory/<name>.md produces a
 // NEW memory carrying the same name= label, exactly as an agent would. Nothing
 // is mutated, so every version keeps its stamp and history stays searchable.
 func (im *gitImporter) planMemory(ctx context.Context, project string, ch gitproj.Change, cw agentdb.ConfigWrite) ([]func(context.Context) error, []gitImportNotice, error) {

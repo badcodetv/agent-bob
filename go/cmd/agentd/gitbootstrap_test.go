@@ -783,7 +783,7 @@ func TestGitBootstrapAppliesInDependencyOrder(t *testing.T) {
 		}
 	}
 
-	// 🔴 DI9 item 2. RenderTree writes orange/README.md and gitproj.ParsePath
+	// 🔴 DI9 item 2. RenderTree writes bob/README.md and gitproj.ParsePath
 	// rejects it, correctly, because it is not an entity shape. Every folder a
 	// bootstrap is pointed at contains it, so failing to skip it would
 	// quarantine every bootstrap of an exported project. The round-trip test
@@ -812,9 +812,9 @@ func TestGitBootstrapIgnoresFilesOutsideTheSubfolder(t *testing.T) {
 	readme := "# The application this project belongs to\n"
 	workflow := "name: ci\non: push\n"
 	sha := gitBootstrapExport(t, g, stateA, map[string]*string{
-		"README.md":                   &readme,
-		".github/workflows/ci.yml":    &workflow,
-		"docs/orange/workers/fake.md": &readme,
+		"README.md":                &readme,
+		".github/workflows/ci.yml": &workflow,
+		"docs/bob/workers/fake.md": &readme,
 	})
 
 	storeB := newFakeGitImportStore()

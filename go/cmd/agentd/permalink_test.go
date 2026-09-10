@@ -10,10 +10,10 @@ func TestResolvePublicBaseURL(t *testing.T) {
 	}{
 		{"default", nil, "http://localhost:8080"},
 		{"empty value falls back to default", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": ""}, "http://localhost:8080"},
-		{"https origin", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://orange.example.com"}, "https://orange.example.com"},
-		{"trailing slash trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://orange.example.com/"}, "https://orange.example.com"},
-		{"many trailing slashes trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://orange.example.com///"}, "https://orange.example.com"},
-		{"surrounding space trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "  https://orange.example.com  "}, "https://orange.example.com"},
+		{"https origin", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://bob.example.com"}, "https://bob.example.com"},
+		{"trailing slash trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://bob.example.com/"}, "https://bob.example.com"},
+		{"many trailing slashes trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://bob.example.com///"}, "https://bob.example.com"},
+		{"surrounding space trimmed", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "  https://bob.example.com  "}, "https://bob.example.com"},
 		{"sub-path preserved", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "https://example.com/agents"}, "https://example.com/agents"},
 		{"port preserved", map[string]string{"AGENTKIT_PUBLIC_BASE_URL": "http://10.0.0.4:8080"}, "http://10.0.0.4:8080"},
 	}
@@ -35,12 +35,12 @@ func TestResolvePublicBaseURL_Invalid(t *testing.T) {
 		name  string
 		value string
 	}{
-		{"no scheme", "orange.example.com"},
+		{"no scheme", "bob.example.com"},
 		{"relative path", "/agents"},
-		{"non-http scheme", "ftp://orange.example.com"},
+		{"non-http scheme", "ftp://bob.example.com"},
 		{"scheme only", "https://"},
-		{"carries query", "https://orange.example.com?x=1"},
-		{"carries fragment", "https://orange.example.com#top"},
+		{"carries query", "https://bob.example.com?x=1"},
+		{"carries fragment", "https://bob.example.com#top"},
 		{"only slashes", "///"},
 		{"unparseable", "http://[::1"},
 	}
@@ -66,7 +66,7 @@ func TestPermalinkerSessionURL(t *testing.T) {
 		want    string
 	}{
 		{"default base", "", "acme", "sess-1", "http://localhost:8080/p/acme/s/sess-1"},
-		{"custom origin", "https://orange.example.com", "acme", "sess-1", "https://orange.example.com/p/acme/s/sess-1"},
+		{"custom origin", "https://bob.example.com", "acme", "sess-1", "https://bob.example.com/p/acme/s/sess-1"},
 		{"sub-path mount", "https://example.com/agents", "acme", "sess-1", "https://example.com/agents/p/acme/s/sess-1"},
 		{"uuid session", "https://o.example.com", "p1", "9f1c2d3e-0000-4a5b-8c7d-000000000001",
 			"https://o.example.com/p/p1/s/9f1c2d3e-0000-4a5b-8c7d-000000000001"},

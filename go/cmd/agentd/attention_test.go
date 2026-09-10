@@ -132,7 +132,7 @@ func (f *fakeAttentionStore) CreateProjectEvent(_ context.Context, ev *agentdb.P
 func newTestAttentionService(store attentionStore, env map[string]string) (*attentionService, *[]attentionPayload, *[]map[string]string) {
 	var posts []attentionPayload
 	var headers []map[string]string
-	svc := newAttentionService(store, permalinker{base: "https://orange.example.com"})
+	svc := newAttentionService(store, permalinker{base: "https://bob.example.com"})
 	svc.now = func() time.Time { return time.Unix(1_800_000_000, 0) }
 	svc.logf = func(string, ...any) {}
 	svc.env = func(k string) string { return env[k] }
@@ -167,7 +167,7 @@ func TestRequestHumanAttentionPostsToTheChannel(t *testing.T) {
 		t.Fatalf("request: %v", err)
 	}
 
-	if res.SessionURL != "https://orange.example.com/p/acme/s/s-1" {
+	if res.SessionURL != "https://bob.example.com/p/acme/s/s-1" {
 		t.Fatalf("permalink: got %q", res.SessionURL)
 	}
 	if !res.Delivered || res.Channel != attentionChannelWebhook || res.DeliveryError != "" {
@@ -392,7 +392,7 @@ func TestRequestHumanAttentionHTTP(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v (%s)", err, rec.Body)
 	}
-	if body["session_url"] != "https://orange.example.com/p/acme/s/s-1" {
+	if body["session_url"] != "https://bob.example.com/p/acme/s/s-1" {
 		t.Fatalf("the JSON key must be exactly session_url: %s", rec.Body)
 	}
 
@@ -432,7 +432,7 @@ func TestAttentionSweepEmitsTimeoutEvent(t *testing.T) {
 	sess := store.addSession("s-1", "acme", "tweet-author")
 	store.requests = append(store.requests, &agentdb.AttentionRequest{
 		ID: "att-1", Project: "acme", SessionID: "s-1", Worker: "tweet-author",
-		Message: "sign off on this draft", SessionURL: "https://orange.example.com/p/acme/s/s-1",
+		Message: "sign off on this draft", SessionURL: "https://bob.example.com/p/acme/s/s-1",
 		CreatedAt: 1000, ExpiresAt: 2000,
 	})
 	sess.AttentionRequested = true

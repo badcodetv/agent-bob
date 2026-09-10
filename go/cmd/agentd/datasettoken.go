@@ -1,6 +1,6 @@
 // Dataset download tokens: the short-lived, name-scoped credential handed to
 // an agent running inside a session container so its `curl` can pull a
-// dataset's bytes over Orange's HTTP API without carrying the project's own
+// dataset's bytes over Bob's HTTP API without carrying the project's own
 // API key into the container (design/2026-08-20-agent-wolf.md, O4).
 //
 // Modelled directly on embedtoken.go: same signing secret

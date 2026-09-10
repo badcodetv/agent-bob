@@ -141,7 +141,7 @@ func (f *backfillStore) project(name, remote string) *agentdb.ProjectSettings {
 	ps := agentdb.DefaultProjectSettings(name)
 	ps.GitRemote = remote
 	ps.GitBranch = "main"
-	ps.GitSubfolder = "orange"
+	ps.GitSubfolder = "bob"
 	f.settings[name] = ps
 	return ps
 }
@@ -437,7 +437,7 @@ func TestGitBackfillReplaysTheLogInSeqOrder(t *testing.T) {
 
 	ps := agentdb.DefaultProjectSettings("wolf")
 	ps.GitRemote = rig.store.settings["wolf"].GitRemote
-	ps.GitBranch, ps.GitSubfolder = "main", "orange"
+	ps.GitBranch, ps.GitSubfolder = "main", "bob"
 	ps.SystemPrompt = "we trade hypotheses"
 
 	want := []struct{ action, subject, actor string }{
@@ -491,12 +491,12 @@ func TestGitBackfillReplaysTheLogInSeqOrder(t *testing.T) {
 
 	// The end state is the configuration as it stands: the deleted worker's file
 	// is gone, the surviving one carries the newest prompt.
-	if _, ok := rig.fileAtHead("wolf", "orange/workers/reviewer.md"); ok {
+	if _, ok := rig.fileAtHead("wolf", "bob/workers/reviewer.md"); ok {
 		t.Error("the deleted worker's file survived the replay; a tombstone must remove the key")
 	}
-	body, ok := rig.fileAtHead("wolf", "orange/workers/copywriter.md")
+	body, ok := rig.fileAtHead("wolf", "bob/workers/copywriter.md")
 	if !ok {
-		t.Fatal("orange/workers/copywriter.md was not rendered")
+		t.Fatal("bob/workers/copywriter.md was not rendered")
 	}
 	if !strings.Contains(body, "v2 — lead with the offer") {
 		t.Errorf("the worker file does not hold the newest prompt:\n%s", body)
@@ -671,9 +671,9 @@ func TestGitBackfillFoldsTheProjectPromptOntoTheSettingsRow(t *testing.T) {
 	if err := rig.proj.BackfillProject(context.Background(), "wolf"); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
-	body, ok := rig.fileAtHead("wolf", "orange/settings.md")
+	body, ok := rig.fileAtHead("wolf", "bob/settings.md")
 	if !ok {
-		t.Fatal("orange/settings.md was not rendered")
+		t.Fatal("bob/settings.md was not rendered")
 	}
 	if !strings.Contains(body, "second prompt") {
 		t.Errorf("settings.md does not carry the newest project prompt:\n%s", body)
@@ -701,7 +701,7 @@ func TestGitBackfillRendersDocumentsAsTheyStandNow(t *testing.T) {
 	if err := rig.proj.BackfillProject(context.Background(), "wolf"); err != nil {
 		t.Fatalf("backfill: %v", err)
 	}
-	body, ok := rig.fileAtHead("wolf", "orange/memory/message-board.md")
+	body, ok := rig.fileAtHead("wolf", "bob/memory/message-board.md")
 	if !ok {
 		t.Fatal("the named document was not rendered; the backfilled tree must equal what the live renderer produces")
 	}
@@ -711,7 +711,7 @@ func TestGitBackfillRendersDocumentsAsTheyStandNow(t *testing.T) {
 	// It appears once, at the first backfilled commit, and never changes again:
 	// no fabricated history of a document is written.
 	out, _, err := runGit(context.Background(), rig.clone("wolf"),
-		"log", "--format=%H", "--", "orange/memory/message-board.md")
+		"log", "--format=%H", "--", "bob/memory/message-board.md")
 	if err != nil {
 		t.Fatalf("git log for the document: %v", err)
 	}

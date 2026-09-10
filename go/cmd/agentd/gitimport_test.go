@@ -393,10 +393,10 @@ func TestGitImportFieldMergeKeepsUnrenderedFields(t *testing.T) {
 
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("description: writes the words\nenabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("description: writes the words\nenabled: true", "You write copy."),
 	})
 	head := g.human("Pause the copywriter while we rewrite the brief", map[string]*string{
-		"orange/workers/copywriter.md": file("description: writes the words\nenabled: false", "You write copy."),
+		"bob/workers/copywriter.md": file("description: writes the words\nenabled: false", "You write copy."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -436,10 +436,10 @@ func TestGitImportRemovedKeyClearsField(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("description: writes the words\nenabled: true\nimage: wolf-base", "You write copy."),
+		"bob/workers/copywriter.md": file("description: writes the words\nenabled: true\nimage: wolf-base", "You write copy."),
 	})
 	head := g.human("Unpin the image", map[string]*string{
-		"orange/workers/copywriter.md": file("description: writes the words\nenabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("description: writes the words\nenabled: true", "You write copy."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -487,22 +487,22 @@ func TestGitImportQuarantineWritesNothing(t *testing.T) {
 			}
 			g := newGitImportRepo(t)
 			base := g.human("seed", map[string]*string{
-				"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
-				"orange/settings.md":           file("base_image: wolf-base", "The project."),
+				"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
+				"bob/settings.md":           file("base_image: wolf-base", "The project."),
 			})
 			head := g.human("A push with one bad file in it", map[string]*string{
 				// Two perfectly good edits...
-				"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
-				"orange/settings.md":           file("base_image: wolf-next", "The project."),
+				"bob/workers/copywriter.md": file("enabled: false", "You write copy."),
+				"bob/settings.md":           file("base_image: wolf-next", "The project."),
 				// ...and one that is not.
-				"orange/workers/broken.md": tc.bad,
+				"bob/workers/broken.md": tc.bad,
 			})
 
 			res := runImport(t, store, g, base, head)
 			if !res.Quarantined {
 				t.Fatalf("expected quarantine, got applied=%+v", res.Applied)
 			}
-			if len(res.Failures) != 1 || res.Failures[0].Path != "orange/workers/broken.md" {
+			if len(res.Failures) != 1 || res.Failures[0].Path != "bob/workers/broken.md" {
 				t.Fatalf("failures = %+v", res.Failures)
 			}
 			if !strings.Contains(res.Failures[0].Reason, tc.want) {
@@ -536,7 +536,7 @@ func TestGitImportTrailerForgeryIsStillImported(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 
 	// A human's commit whose message body ends with a line that LOOKS like our
@@ -545,7 +545,7 @@ func TestGitImportTrailerForgeryIsStillImported(t *testing.T) {
 	// the commit was ours, and throw this person's edit away.
 	forged := "Pause the copywriter\n\nI am quoting the log line that confused me:\nBob-Seq: 999999\n"
 	head := g.human(forged, map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -576,12 +576,12 @@ func TestGitImportSkipsOurOwnCommits(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.ours("worker_prompt_write: copywriter",
 		"The architect decided the copy was too long.\nBob-Seq: 999999", 1207,
 		map[string]*string{
-			"orange/workers/copywriter.md": file("enabled: true", "You write short copy."),
+			"bob/workers/copywriter.md": file("enabled: true", "You write short copy."),
 		})
 
 	res := runImport(t, store, g, base, head)
@@ -606,11 +606,11 @@ func TestGitImportHumanEditIsAnEmptyActorConfigWrite(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	msg := "Tighten the copywriter's brief\n\nMarketing asked for shorter sentences and no exclamation marks."
 	head := g.human(msg, map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write short copy. No exclamation marks."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write short copy. No exclamation marks."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -647,10 +647,10 @@ func TestGitImportBodyAndFieldsAreTwoWrites(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.human("Retune and pause", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: false", "You write short copy."),
+		"bob/workers/copywriter.md": file("enabled: false", "You write short copy."),
 	})
 
 	runImport(t, store, g, base, head)
@@ -675,21 +675,21 @@ func TestGitImportGitConfigFieldsAreIgnored(t *testing.T) {
 		SystemPrompt: "The project.",
 		GitRemote:    "https://github.com/badcode/wolf.git",
 		GitBranch:    "main",
-		GitSubfolder: "orange",
+		GitSubfolder: "bob",
 		GitTokenEnv:  "WOLF_GITHUB_TOKEN",
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/settings.md": file(strings.Join([]string{
+		"bob/settings.md": file(strings.Join([]string{
 			"base_image: wolf-base",
 			"git_branch: main",
 			"git_remote: https://github.com/badcode/wolf.git",
-			"git_subfolder: orange",
+			"git_subfolder: bob",
 			"git_token_env: WOLF_GITHUB_TOKEN",
 		}, "\n"), "The project."),
 	})
 	head := g.human("point the projection at my fork", map[string]*string{
-		"orange/settings.md": file(strings.Join([]string{
+		"bob/settings.md": file(strings.Join([]string{
 			"base_image: wolf-next",
 			"git_branch: attacker",
 			"git_remote: https://github.com/attacker/wolf.git",
@@ -709,7 +709,7 @@ func TestGitImportGitConfigFieldsAreIgnored(t *testing.T) {
 	// ...and none of the four did.
 	got := store.settings
 	if got.GitRemote != "https://github.com/badcode/wolf.git" || got.GitBranch != "main" ||
-		got.GitSubfolder != "orange" || got.GitTokenEnv != "WOLF_GITHUB_TOKEN" {
+		got.GitSubfolder != "bob" || got.GitTokenEnv != "WOLF_GITHUB_TOKEN" {
 		t.Fatalf("git configuration was redirected by a commit: %+v", got)
 	}
 	var told bool
@@ -737,11 +737,11 @@ func TestGitImportNoOpReformatWritesNothing(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("description: ''\nenabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("description: ''\nenabled: true", "You write copy."),
 	})
 	// Requoted, reordered, reindented — and meaning exactly the same thing.
 	head := g.human("tidy the file", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: \"true\"\ndescription: \"\"", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: \"true\"\ndescription: \"\"", "You write copy."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -767,10 +767,10 @@ func TestGitImportSameValueWritesNothing(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.human("match the database", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
 
 	runImport(t, store, g, base, head)
@@ -786,7 +786,7 @@ func TestGitImportCreatesWorkerAndDeletesIt(t *testing.T) {
 	g := newGitImportRepo(t)
 	empty := g.human("empty", map[string]*string{"README.md": ptr("hi\n")})
 	created := g.human("Hire a proofreader", map[string]*string{
-		"orange/workers/proofreader.md": file("description: checks the words\nenabled: true\nmax_instances: 2", "You proofread."),
+		"bob/workers/proofreader.md": file("description: checks the words\nenabled: true\nmax_instances: 2", "You proofread."),
 	})
 
 	res := runImport(t, store, g, empty, created)
@@ -802,7 +802,7 @@ func TestGitImportCreatesWorkerAndDeletesIt(t *testing.T) {
 	}
 
 	deleted := g.human("Retire the proofreader", map[string]*string{
-		"orange/workers/proofreader.md": nil,
+		"bob/workers/proofreader.md": nil,
 	})
 	res = runImport(t, store, g, created, deleted)
 	if res.Quarantined {
@@ -825,10 +825,10 @@ func TestGitImportSkillEditIsANewRevision(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/skills/ffmpeg.md": file("description: video\nlabels:\n  kind: tool", "old doc"),
+		"bob/skills/ffmpeg.md": file("description: video\nlabels:\n  kind: tool", "old doc"),
 	})
 	head := g.human("Explain the crop filter", map[string]*string{
-		"orange/skills/ffmpeg.md": file("description: video\nlabels:\n  kind: tool", "new doc, with crop"),
+		"bob/skills/ffmpeg.md": file("description: video\nlabels:\n  kind: tool", "new doc, with crop"),
 	})
 
 	runImport(t, store, g, base, head)
@@ -855,10 +855,10 @@ func TestGitImportMemoryDocumentAppendsANewMemory(t *testing.T) {
 	}}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/memory/message-board.md": file("labels:\n  kind: document\n  name: message-board", "old board"),
+		"bob/memory/message-board.md": file("labels:\n  kind: document\n  name: message-board", "old board"),
 	})
 	head := g.human("Add the Q3 target to the board", map[string]*string{
-		"orange/memory/message-board.md": file("labels:\n  kind: document\n  name: message-board", "old board\n\nQ3 target: 40 posts."),
+		"bob/memory/message-board.md": file("labels:\n  kind: document\n  name: message-board", "old board\n\nQ3 target: 40 posts."),
 	})
 
 	runImport(t, store, g, base, head)
@@ -888,11 +888,11 @@ func TestGitImportSubscriptionAndScheduleRoundTrip(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/subscriptions/11111111-2222-3333-4444-555555555555.md": file("enabled: true\nevent_type: architect.run\nworker: architect", ""),
+		"bob/subscriptions/11111111-2222-3333-4444-555555555555.md": file("enabled: true\nevent_type: architect.run\nworker: architect", ""),
 	})
 	head := g.human("Pause the architect subscription and add a nightly review", map[string]*string{
-		"orange/subscriptions/11111111-2222-3333-4444-555555555555.md": file("enabled: false\nevent_type: architect.run\nworker: architect", ""),
-		"orange/schedules/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.md":     file("cron: 0 3 * * *\nenabled: true\ninput: review the day\nworker: architect", ""),
+		"bob/subscriptions/11111111-2222-3333-4444-555555555555.md": file("enabled: false\nevent_type: architect.run\nworker: architect", ""),
+		"bob/schedules/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.md":     file("cron: 0 3 * * *\nenabled: true\ninput: review the day\nworker: architect", ""),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -917,9 +917,9 @@ func TestGitImportIgnoresImagesAndPathsOutsideTheSubfolder(t *testing.T) {
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{"README.md": ptr("hi\n")})
 	head := g.human("touch everything", map[string]*string{
-		"orange/images/wolf-base.md": file("version: 4", ""),
-		".github/workflows/ci.yml":   ptr("on: push\n"),
-		"docs/notes.md":              ptr("unrelated\n"),
+		"bob/images/wolf-base.md":  file("version: 4", ""),
+		".github/workflows/ci.yml": ptr("on: push\n"),
+		"docs/notes.md":            ptr("unrelated\n"),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -931,7 +931,7 @@ func TestGitImportIgnoresImagesAndPathsOutsideTheSubfolder(t *testing.T) {
 	}
 	var sawImage bool
 	for _, n := range res.Ignored {
-		if n.Path == "orange/images/wolf-base.md" {
+		if n.Path == "bob/images/wolf-base.md" {
 			sawImage = true
 		}
 		if strings.HasPrefix(n.Path, ".github/") {
@@ -943,15 +943,15 @@ func TestGitImportIgnoresImagesAndPathsOutsideTheSubfolder(t *testing.T) {
 	}
 }
 
-// 🔴 The renderer writes a generated orange/README.md and ParsePath refuses it
+// 🔴 The renderer writes a generated bob/README.md and ParsePath refuses it
 // (it is not an entity shape). If the importer did not skip it, that one file
 // would quarantine every push forever — the renderer rewrites it, so the bad
 // path never goes away and the watermark never advances. This test pins the
 // skip AND pins that the good edit in the same push still lands.
 func TestGitImportSkipsTheGeneratedReadme(t *testing.T) {
 	// The premise: gitproj really does refuse this path.
-	if _, _, err := gitproj.ParsePath("orange", "orange/README.md"); err == nil {
-		t.Fatalf("gitproj.ParsePath now accepts orange/README.md; this skip may no longer be needed")
+	if _, _, err := gitproj.ParsePath("bob", "bob/README.md"); err == nil {
+		t.Fatalf("gitproj.ParsePath now accepts bob/README.md; this skip may no longer be needed")
 	}
 
 	store := newFakeGitImportStore()
@@ -961,12 +961,12 @@ func TestGitImportSkipsTheGeneratedReadme(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob.\n"),
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob.\n"),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.human("Pause the copywriter", map[string]*string{
-		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob. Edit it and the change is applied.\n"),
-		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
+		"bob/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob. Edit it and the change is applied.\n"),
+		"bob/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
 
 	res := runImport(t, store, g, base, head)
@@ -993,14 +993,14 @@ func TestGitImportFromRemoteTip(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	g.push()
 
 	// A second clone stands in for a person working on their laptop.
 	other := filepath.Join(t.TempDir(), "laptop")
 	runGitImportGit(t, t.TempDir(), "clone", "-q", g.remote, other)
-	if err := os.WriteFile(filepath.Join(other, "orange/workers/copywriter.md"),
+	if err := os.WriteFile(filepath.Join(other, "bob/workers/copywriter.md"),
 		[]byte(*file("enabled: false", "You write copy.")), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -1040,10 +1040,10 @@ func TestGitImportStoreFailureLeavesWatermark(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.human("Pause it", map[string]*string{
-		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
+		"bob/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
 
 	res, err := newGitImporter(store).ImportRange(context.Background(), gitImportInput{
@@ -1103,16 +1103,16 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 		store.workers["scribe"] = agentdb.Worker{Project: gitImportProject, Name: "scribe", Enabled: true, MaxInstances: 1, SystemPrompt: "You take notes. Timestamp every one."}
 		g := newGitImportRepo(t)
 		base := g.ours("seed", "", 2, map[string]*string{
-			"orange/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
-			"orange/workers/scribe.md": file("enabled: true", rendered("You take notes.")),
+			"bob/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
+			"bob/workers/scribe.md": file("enabled: true", rendered("You take notes.")),
 		})
 		// Our own render of scribe's newer prompt, inside the import's range
 		// because the push loop had not recorded it yet.
 		g.ours("worker_update: scribe", "", 6, map[string]*string{
-			"orange/workers/scribe.md": file("enabled: true", rendered("You take notes. Timestamp every one.")),
+			"bob/workers/scribe.md": file("enabled: true", rendered("You take notes. Timestamp every one.")),
 		})
 		head := g.human("Tighten the editor prompt\n\nThe old one said nothing about adjectives.", map[string]*string{
-			"orange/workers/editor.md": file("enabled: true", rendered("You edit copy. Cut every second adjective.")),
+			"bob/workers/editor.md": file("enabled: true", rendered("You edit copy. Cut every second adjective.")),
 		})
 
 		runImport(t, store, g, base, head)
@@ -1143,7 +1143,7 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 			seed: func(s *fakeGitImportStore) {
 				s.settings = agentdb.ProjectSettings{Project: gitImportProject, BaseImage: "wolf-base", SystemPrompt: "The project."}
 			},
-			path: "orange/settings.md", front: "base_image: wolf-base",
+			path: "bob/settings.md", front: "base_image: wolf-base",
 			old: "An older project prompt.", now: "The project.",
 		},
 		{
@@ -1154,7 +1154,7 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 					Markdown: "new doc", InstallSh: "apt-get install ffmpeg", Labels: agentdb.LabelSet{"kind": "tool"},
 				}
 			},
-			path: "orange/skills/ffmpeg.md", front: "description: video\nlabels:\n  kind: tool",
+			path: "bob/skills/ffmpeg.md", front: "description: video\nlabels:\n  kind: tool",
 			old: "old doc", now: "new doc",
 		},
 		{
@@ -1165,7 +1165,7 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 					Labels: agentdb.LabelSet{"name": "message-board", "kind": "document"},
 				}}
 			},
-			path: "orange/memory/message-board.md", front: "labels:\n  kind: document\n  name: message-board",
+			path: "bob/memory/message-board.md", front: "labels:\n  kind: document\n  name: message-board",
 			old: "old board", now: "new board",
 		},
 	} {
@@ -1175,8 +1175,8 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 			tc.seed(store)
 			g := newGitImportRepo(t)
 			base := g.ours("seed", "", 1, map[string]*string{
-				tc.path:                    file(tc.front, rendered(tc.old)),
-				"orange/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
+				tc.path:                 file(tc.front, rendered(tc.old)),
+				"bob/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
 			})
 			// Our re-render of this door's file, inside the range...
 			g.ours("re-render", "", 2, map[string]*string{tc.path: file(tc.front, rendered(tc.now))})
@@ -1184,7 +1184,7 @@ func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
 			// nothing at all, so without this the case passes with the fix
 			// reverted — it did, which is how this line came to exist.
 			head := g.human("an unrelated human edit", map[string]*string{
-				"orange/workers/editor.md": file("enabled: true", rendered("You edit copy. Briefly.")),
+				"bob/workers/editor.md": file("enabled: true", rendered("You edit copy. Briefly.")),
 			})
 			runImport(t, store, g, base, head)
 			got := store.writes()
