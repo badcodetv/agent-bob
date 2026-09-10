@@ -248,6 +248,13 @@ because both are append-only. A skill's `revision` restarts at 1, which is corre
   wholesale currently sees that it was, but not which file.
 - **Editing an image file, or deleting a skill or memory file, does nothing.** The importer reports
   it as ignored rather than failing, so check that list before concluding the system is broken.
+- **Trailing newlines are not part of a stored body.** The renderer ends every body with exactly one;
+  on import they are stripped, and two bodies that differ only by trailing newlines are the same body.
+  Before this was enforced, our own rendered files looked like human edits whenever they fell inside an
+  import's range under load, and the changelog attributed rewrites to people who had not made them
+  (design DI23).
+- **Editors that save CRLF line endings are not handled.** Every line of the body would differ, and
+  the edit would be imported as a rewrite of the whole body. Save files with LF endings.
 - **A jsonb null or a non-integer number inside `mcp_config` makes a project unrenderable** — refused
   with a named error rather than silently rounded or dropped.
 - **One writer.** The deployment runs a single `agentd` (`replicas: 1`); a per-project lease enforces

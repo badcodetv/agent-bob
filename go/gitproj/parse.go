@@ -381,3 +381,23 @@ func asSlice(v interface{}) ([]interface{}, bool) {
 		return nil, false
 	}
 }
+
+// StorageBody is a markdown body as it should be STORED: without the trailing
+// newlines a file carries. The renderer gives every non-empty body exactly one
+// (normalizeBody), and editors add or drop them freely, so a trailing newline
+// is never part of a prompt, a skill or a memory's content.
+func StorageBody(body string) string { return strings.TrimRight(body, "\n") }
+
+// BodyEqual reports whether a body read from a FILE and a body read from the
+// DATABASE say the same thing. It is the only correct comparison across the two
+// doors, and every importer same-value check must use it.
+//
+// A raw != is always true for a rendered file whose stored value has no
+// trailing newline — which is every value the console and API write. So each of
+// our own rendered files looked like a human edit whenever it fell inside an
+// import's diff range, which happens when the push loop lags under load. That
+// defeated the same-value suppression built for exactly that case, and stamped
+// the rewrite with a stranger's commit message: the changelog recorded a person
+// rewriting a worker they never touched (git-projection DI23). Parse compares
+// file against file and stays raw; this is for file against store.
+func BodyEqual(a, b string) bool { return StorageBody(a) == StorageBody(b) }

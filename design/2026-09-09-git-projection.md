@@ -1029,6 +1029,8 @@ a check that earns its place without earning a test.
 `requires_build` render but are not applied on import (**ticket G21**), and an
 imported body keeps the renderer's trailing newline, so a prompt round-trips
 modulo `\n` — idempotent under re-render, so loop termination still holds.
+**[corrected by DI23]** Not harmless. The same mismatch defeated the importer's same-value
+suppression and produced falsely attributed writes under load. Fixed; see DI23.
 
 ---
 
@@ -1366,6 +1368,52 @@ rather than a silence: a log-once ledger prints a repeated failure only when the
 sentence *changes* and forgets it on success; and `ensureRepo` now drops a cached
 `Repo` whose clone directory has vanished (a stat, not a fork) and re-inits,
 re-wires origin and re-installs the credential.
+
+---
+
+### DI23 (consolidation) — a human edited ONE worker; the changelog says they edited TWO
+
+**Found only when both epics' browser suites ran together, under load.** A single human push
+that edited `workers/editor.md` produced **two** `worker_prompt_write` config events, 13 ms apart,
+both carrying the human's commit message as rationale. The second rewrote **`scribe`** — a worker
+the human never touched. The changelog now recorded a person doing something they did not do.
+
+**Mechanism.** The renderer gives every non-empty body exactly one trailing newline
+(`normalizeBody`). Values written by the console or the API have none. The importer compared a
+file body against the stored value **raw**, so our own rendered files were *always* unequal to the
+store. Whenever one of our commits fell inside an import's diff range — which happens when the push
+loop lags, i.e. under load — each of our rendered files looked like a human edit. DI10's same-value
+suppression, built for exactly that case, could never fire. It also silently added a trailing
+newline to every stored value a human did edit.
+
+**It hit four doors, not one:** worker prompt, project prompt, **skill** (a spurious write is a new
+*revision* — skills are append-only) and **named memory** (a spurious write is a new *memory*).
+
+**Why nothing caught it.**
+- A **solo rerun of the browser spec passed, 7 of 7.** Only the loaded batch failed. Rerun-and-move-on
+  would have shipped it; the database rows were the proof.
+- **Every importer unit test built bodies with `file()`, which adds no trailing newline** — so no test
+  body looked like a real rendered file, and the suite was green while the bug lived.
+- **DI12 noticed the quirk and called it harmless**, and two bootstrap tests *trim newlines before
+  comparing* — the symptom was seen and routed around rather than fixed.
+
+**Fix.** Two helpers in `gitproj` — `StorageBody` (strip trailing newlines) and `BodyEqual` (compare
+after stripping) — used at all four doors, at the exact point where a **file** body meets a **stored**
+one. `Parse` still returns the body as the file holds it; its contract is honest about the file.
+
+**Proof.** `TestGitImportRenderedBodiesAreNotHumanEdits`: the exact batch failure plus one case per
+door, with bodies shaped exactly as the renderer writes them. **Falsified: with the fix reverted all
+four go red**, the first with the production message verbatim ("one human edit to ONE worker
+produced 2 writes").
+
+**And the test had a flaw of its own, caught by falsifying it.** The first version's three per-door
+cases **passed with the fix reverted**: their ranges held only our own commits, and the importer
+skips an all-ours range entirely, so the buggy comparison never ran. Each now includes an unrelated
+human edit to force a real import. The comment in the test records why. A test that passes with the
+fix removed is decoration — the only way to know is to remove the fix.
+
+**Not addressed, noted for later:** a human editor that writes CRLF line endings would make every
+line of a body differ. Out of scope here; `StorageBody` trims only `\n`.
 
 ---
 

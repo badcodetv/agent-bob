@@ -1076,3 +1076,121 @@ func TestGitImportWorkerNotFoundSentinel(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// TestGitImportRenderedBodiesAreNotHumanEdits is the regression test for DI23,
+// found only when both epics' browser suites ran together. One human push that
+// edited ONE worker produced TWO worker_prompt_write events, and the second
+// rewrote a worker the human never touched — with the human's commit message as
+// its rationale. The changelog recorded a person doing something they did not do.
+//
+// The mechanism: the renderer gives every body exactly one trailing newline, and
+// values written by the console or the API have none. A raw compare between a
+// rendered file and its stored value is therefore ALWAYS unequal, so whenever
+// one of our own commits fell inside an import's diff range — which happens
+// when the push loop lags under load — the same-value suppression built for
+// exactly that case could not fire. A solo rerun of the browser spec passed; the
+// loaded batch did not.
+//
+// Every other test in this file builds bodies with file(), which adds no
+// trailing newline, so none of them looked like a real rendered file — which is
+// why the suite was green while the bug lived. These bodies are rendered().
+func TestGitImportRenderedBodiesAreNotHumanEdits(t *testing.T) {
+	rendered := func(body string) string { return body + "\n" } // exactly as RenderTree writes a body
+
+	t.Run("a human edit to one worker writes that worker, and only with its own rationale", func(t *testing.T) {
+		store := newFakeGitImportStore()
+		store.workers["editor"] = agentdb.Worker{Project: gitImportProject, Name: "editor", Enabled: true, MaxInstances: 1, SystemPrompt: "You edit copy."}
+		store.workers["scribe"] = agentdb.Worker{Project: gitImportProject, Name: "scribe", Enabled: true, MaxInstances: 1, SystemPrompt: "You take notes. Timestamp every one."}
+		g := newGitImportRepo(t)
+		base := g.ours("seed", "", 2, map[string]*string{
+			"orange/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
+			"orange/workers/scribe.md": file("enabled: true", rendered("You take notes.")),
+		})
+		// Our own render of scribe's newer prompt, inside the import's range
+		// because the push loop had not recorded it yet.
+		g.ours("worker_update: scribe", "", 6, map[string]*string{
+			"orange/workers/scribe.md": file("enabled: true", rendered("You take notes. Timestamp every one.")),
+		})
+		head := g.human("Tighten the editor prompt\n\nThe old one said nothing about adjectives.", map[string]*string{
+			"orange/workers/editor.md": file("enabled: true", rendered("You edit copy. Cut every second adjective.")),
+		})
+
+		runImport(t, store, g, base, head)
+		got := store.writes()
+		if len(got) != 1 {
+			t.Fatalf("one human edit to ONE worker produced %d writes, want exactly 1: %+v", len(got), got)
+		}
+		if got[0].Name != "editor" {
+			t.Fatalf("the only write went to %q, a worker the human never touched", got[0].Name)
+		}
+		if !strings.Contains(got[0].CW.Rationale, "Tighten the editor prompt") {
+			t.Fatalf("rationale = %q, want the human's commit message", got[0].CW.Rationale)
+		}
+	})
+
+	// One case per door the fix touched: our own rendered file in range, the
+	// store already holding that value without the newline, nothing written.
+	for _, tc := range []struct {
+		name  string
+		seed  func(*fakeGitImportStore)
+		path  string
+		front string
+		old   string
+		now   string
+	}{
+		{
+			name: "project prompt",
+			seed: func(s *fakeGitImportStore) {
+				s.settings = agentdb.ProjectSettings{Project: gitImportProject, BaseImage: "wolf-base", SystemPrompt: "The project."}
+			},
+			path: "orange/settings.md", front: "base_image: wolf-base",
+			old: "An older project prompt.", now: "The project.",
+		},
+		{
+			name: "skill (a spurious write would be a new revision)",
+			seed: func(s *fakeGitImportStore) {
+				s.skills["ffmpeg"] = agentdb.Skill{
+					Customer: gitImportProject, Name: "ffmpeg", Revision: 3, Description: "video",
+					Markdown: "new doc", InstallSh: "apt-get install ffmpeg", Labels: agentdb.LabelSet{"kind": "tool"},
+				}
+			},
+			path: "orange/skills/ffmpeg.md", front: "description: video\nlabels:\n  kind: tool",
+			old: "old doc", now: "new doc",
+		},
+		{
+			name: "named memory (a spurious write would be a new memory)",
+			seed: func(s *fakeGitImportStore) {
+				s.memories = []agentdb.Memory{{
+					ID: "mem-0", Project: gitImportProject, Content: "new board",
+					Labels: agentdb.LabelSet{"name": "message-board", "kind": "document"},
+				}}
+			},
+			path: "orange/memory/message-board.md", front: "labels:\n  kind: document\n  name: message-board",
+			old: "old board", now: "new board",
+		},
+	} {
+		t.Run("our own render of a "+tc.name+" in range is not re-imported", func(t *testing.T) {
+			store := newFakeGitImportStore()
+			store.workers["editor"] = agentdb.Worker{Project: gitImportProject, Name: "editor", Enabled: true, MaxInstances: 1, SystemPrompt: "You edit copy."}
+			tc.seed(store)
+			g := newGitImportRepo(t)
+			base := g.ours("seed", "", 1, map[string]*string{
+				tc.path:                    file(tc.front, rendered(tc.old)),
+				"orange/workers/editor.md": file("enabled: true", rendered("You edit copy.")),
+			})
+			// Our re-render of this door's file, inside the range...
+			g.ours("re-render", "", 2, map[string]*string{tc.path: file(tc.front, rendered(tc.now))})
+			// ...AND a human edit to something else. An all-ours range imports
+			// nothing at all, so without this the case passes with the fix
+			// reverted — it did, which is how this line came to exist.
+			head := g.human("an unrelated human edit", map[string]*string{
+				"orange/workers/editor.md": file("enabled: true", rendered("You edit copy. Briefly.")),
+			})
+			runImport(t, store, g, base, head)
+			got := store.writes()
+			if len(got) != 1 || got[0].Name != "editor" {
+				t.Fatalf("want exactly one write, to editor; got %d: %+v — our own rendered %s, differing from the store only by a trailing newline, was re-imported", len(got), got, tc.name)
+			}
+		})
+	}
+}

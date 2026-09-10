@@ -461,8 +461,8 @@ func (im *gitImporter) planWorker(ctx context.Context, project string, ch gitpro
 		return nil, nil, err
 	}
 
-	body := ch.Body
-	promptChanged := ch.BodyChanged && strings.TrimSpace(body) != "" && (current == nil || body != current.SystemPrompt)
+	body := gitproj.StorageBody(ch.Body)
+	promptChanged := ch.BodyChanged && strings.TrimSpace(body) != "" && (current == nil || !gitproj.BodyEqual(body, current.SystemPrompt))
 	if ch.BodyChanged && strings.TrimSpace(body) == "" {
 		// SetWorkerPrompt refuses a blank prompt (§9), and emptying a file is
 		// far more likely to be an accident than an instruction to un-brief a
@@ -601,11 +601,11 @@ func (im *gitImporter) planSettings(ctx context.Context, project string, ch gitp
 			return err
 		})
 	}
-	if ch.BodyChanged && ch.Body != current.SystemPrompt {
+	if ch.BodyChanged && !gitproj.BodyEqual(ch.Body, current.SystemPrompt) {
 		if strings.TrimSpace(ch.Body) == "" {
 			return steps, []gitImportNotice{{Path: ch.Path, Reason: "empty project prompt ignored: the prompt may not be blank"}}, nil
 		}
-		prompt := ch.Body
+		prompt := gitproj.StorageBody(ch.Body)
 		steps = append(steps, func(ctx context.Context) error {
 			_, _, err := im.store.SetProjectPrompt(ctx, project, prompt, cw)
 			return err
@@ -721,13 +721,13 @@ func (im *gitImporter) planSkill(ctx context.Context, project string, ch gitproj
 		}
 	}
 	if ch.BodyChanged {
-		next.Markdown = ch.Body
+		next.Markdown = gitproj.StorageBody(ch.Body)
 	}
 	if strings.TrimSpace(next.Markdown) == "" {
 		return nil, nil, fmt.Errorf("skill %q: the markdown body is required", ch.Name)
 	}
 	if current != nil && next.Description == current.Description && next.InstallSh == current.InstallSh &&
-		next.Markdown == current.Markdown && next.Visibility == current.Visibility &&
+		gitproj.BodyEqual(next.Markdown, current.Markdown) && next.Visibility == current.Visibility &&
 		next.RequiresBuild == current.RequiresBuild &&
 		reflect.DeepEqual(map[string]string(next.Labels), map[string]string(current.Labels)) {
 		return nil, nil, nil
@@ -920,14 +920,14 @@ func (im *gitImporter) planMemory(ctx context.Context, project string, ch gitpro
 	// the path, which ParsePath validated, never from frontmatter.
 	labels["name"] = ch.Name
 
-	content := ch.Body
+	content := gitproj.StorageBody(ch.Body)
 	if !ch.BodyChanged && current != nil {
 		content = current.Content
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, nil, fmt.Errorf("memory %q: the markdown body is required", ch.Name)
 	}
-	if current != nil && content == current.Content && reflect.DeepEqual(map[string]string(labels), map[string]string(current.Labels)) {
+	if current != nil && gitproj.BodyEqual(content, current.Content) && reflect.DeepEqual(map[string]string(labels), map[string]string(current.Labels)) {
 		return nil, nil, nil
 	}
 
