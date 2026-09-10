@@ -19,9 +19,9 @@ function status(patch: Partial<GitProjectionStatus> = {}): GitProjectionStatus {
     enabled: true,
     remote: 'https://github.com/badcode/acme.git',
     branch: 'main',
-    subfolder: 'orange',
+    subfolder: 'bob',
     token_env: 'ACME_GITHUB_TOKEN',
-    browse_url: 'https://github.com/badcode/acme/tree/main/orange',
+    browse_url: 'https://github.com/badcode/acme/tree/main/bob',
     state_available: true,
     last_rendered_seq: 42,
     last_rendered_sha: 'abc1234567890',
@@ -54,7 +54,7 @@ describe('GitProjectionPanel', () => {
     expect(health()).toHaveAttribute('data-health', 'ok')
 
     const link = screen.getByRole('link', { name: 'https://github.com/badcode/acme.git' })
-    expect(link).toHaveAttribute('href', 'https://github.com/badcode/acme/tree/main/orange')
+    expect(link).toHaveAttribute('href', 'https://github.com/badcode/acme/tree/main/bob')
 
     const marks = screen.getByTestId('git-projection-watermarks')
     // The config-log seq, not a git date: seq is the projection's only
@@ -63,7 +63,7 @@ describe('GitProjectionPanel', () => {
     expect(marks).toHaveTextContent('abc1234')
     expect(marks).toHaveTextContent('def9876')
     expect(screen.getByText('branch main')).toBeInTheDocument()
-    expect(screen.getByText('orange/')).toBeInTheDocument()
+    expect(screen.getByText('bob/')).toBeInTheDocument()
   })
 
   it('healthy: shows the NAME of the push credential variable, never a token', () => {
@@ -150,13 +150,13 @@ describe('GitProjectionPanel', () => {
         status={status({
           health: 'quarantined',
           quarantine: [
-            { path: 'orange/workers/scout.md', reason: 'frontmatter is not a mapping', at: 1 },
+            { path: 'bob/workers/scout.md', reason: 'frontmatter is not a mapping', at: 1 },
           ],
         })}
       />,
     )
     const list = screen.getByTestId('git-projection-quarantine')
-    expect(list).toHaveTextContent('orange/workers/scout.md')
+    expect(list).toHaveTextContent('bob/workers/scout.md')
     expect(list).toHaveTextContent('frontmatter is not a mapping')
     expect(screen.getByText(/NOTHING in it was applied/)).toBeInTheDocument()
   })
@@ -168,15 +168,15 @@ describe('GitProjectionPanel', () => {
       <GitProjectionPanel
         status={status({
           ignored: [
-            { path: 'orange/skills/research.md', reason: 'skills are append-only; deleting the file removes nothing', at: 1 },
-            { path: 'orange/images/base.md', reason: 'images are not importable', at: 1 },
+            { path: 'bob/skills/research.md', reason: 'skills are append-only; deleting the file removes nothing', at: 1 },
+            { path: 'bob/images/base.md', reason: 'images are not importable', at: 1 },
           ],
         })}
       />,
     )
     const list = screen.getByTestId('git-projection-ignored')
-    expect(list).toHaveTextContent('orange/skills/research.md')
-    expect(list).toHaveTextContent('orange/images/base.md')
+    expect(list).toHaveTextContent('bob/skills/research.md')
+    expect(list).toHaveTextContent('bob/images/base.md')
     expect(list).toHaveTextContent(/append-only/)
     expect(list).toHaveTextContent(/the change you made is not in the project/i)
   })

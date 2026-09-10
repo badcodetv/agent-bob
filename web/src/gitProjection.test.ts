@@ -17,9 +17,9 @@ function status(patch: Partial<GitProjectionStatus> = {}): GitProjectionStatus {
     enabled: true,
     remote: 'https://github.com/badcode/acme.git',
     branch: 'main',
-    subfolder: 'orange',
+    subfolder: 'bob',
     token_env: 'ACME_GITHUB_TOKEN',
-    browse_url: 'https://github.com/badcode/acme/tree/main/orange',
+    browse_url: 'https://github.com/badcode/acme/tree/main/bob',
     state_available: true,
     last_rendered_seq: 42,
     last_rendered_sha: 'abc1234567890',
@@ -71,11 +71,11 @@ describe('coerceGitProjectionStatus', () => {
 
   it('coerces the note lists and drops non-objects inside them', () => {
     const s = coerceGitProjectionStatus({
-      quarantine: [{ path: 'orange/workers/scout.md', reason: 'bad frontmatter', at: 5 }, null],
+      quarantine: [{ path: 'bob/workers/scout.md', reason: 'bad frontmatter', at: 5 }, null],
       ignored: 'not an array',
     })
     expect(s.quarantine).toEqual([
-      { path: 'orange/workers/scout.md', reason: 'bad frontmatter', at: 5 },
+      { path: 'bob/workers/scout.md', reason: 'bad frontmatter', at: 5 },
       { path: '', reason: '', at: 0 },
     ])
     expect(s.ignored).toEqual([])
@@ -204,7 +204,7 @@ describe('describeGitProjection', () => {
     const s = describeGitProjection(
       status({
         health: 'quarantined',
-        quarantine: [{ path: 'orange/workers/scout.md', reason: 'frontmatter is not a mapping', at: 0 }],
+        quarantine: [{ path: 'bob/workers/scout.md', reason: 'frontmatter is not a mapping', at: 0 }],
       }),
     )
     expect(s.severity).toBe('error')

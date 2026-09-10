@@ -225,7 +225,12 @@ export function parseBenchReport(input: unknown): BenchReport {
   if (!isObj(raw)) throw new Error('That file is not a comparison report.')
 
   const schema = str(raw.schema)
-  if (!schema.startsWith('agent-bob/experiments/compare-report')) {
+  // Accept both the current "agent-bob/" schema-id prefix and the old
+  // "agent-orange/" prefix, so reports generated before the rename still load.
+  if (
+    !schema.startsWith('agent-bob/experiments/compare-report') &&
+    !schema.startsWith('agent-orange/experiments/compare-report')
+  ) {
     throw new Error(
       `That file is not a comparison report — expected schema "agent-bob/experiments/compare-report@1", found ${
         schema === '' ? 'none' : `"${schema}"`

@@ -77,7 +77,7 @@ export default function GitProjectionPanel({
         Published to git
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Orange renders this project&rsquo;s configuration into a repository as markdown, and imports
+        Bob renders this project&rsquo;s configuration into a repository as markdown, and imports
         what a human pushes back. Git is the <strong>published record</strong>, never the write
         path: the database stays authoritative, so nothing here can be lost to a merge.
       </Typography>
@@ -164,7 +164,7 @@ function Body({
   )
 }
 
-/** Where it publishes: the repo link, the branch, and the folder Orange owns. */
+/** Where it publishes: the repo link, the branch, and the folder Bob owns. */
 function Where({ status }: { status: GitProjectionStatus }) {
   return (
     <Box data-testid="git-projection-where">

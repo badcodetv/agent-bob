@@ -19,7 +19,7 @@
 #       which is exactly what a mis-filed peer dependency produces
 #   (c) a `live` status dot computes to the CONSUMER's success.main
 #
-# (c) is the whole reason the package exists. Orange's components are themed by
+# (c) is the whole reason the package exists. Bob's components are themed by
 # the HOST's ThemeProvider, which is the one thing an iframe can never do
 # (design/2026-08-24-agent-wolf-ui.md § 1). It is also the assertion a refactor
 # will silently break: swap `success.main` for a literal hex and every other
@@ -37,8 +37,8 @@ set -euo pipefail
 WEB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$WEB_DIR"
 
-# The consumer's success.main. Deliberately NOT any colour in Orange's own
-# palette, so a dot that resolves to Orange's default green fails loudly.
+# The consumer's success.main. Deliberately NOT any colour in Bob's own
+# palette, so a dot that resolves to Bob's default green fails loudly.
 CONSUMER_SUCCESS_HEX="#00E5A0"
 CONSUMER_SUCCESS_RGB="rgb(0, 229, 160)"
 
@@ -129,7 +129,7 @@ import { createTheme, ThemeProvider } from '@mui/material/styles'
 import { ArtifactPanel } from '@agentkit/chat-ui/components'
 import { buildArtifactTree, type ArtifactInfo } from '@agentkit/chat-ui/pure'
 
-// The consumer's own theme. Its success.main is a colour Orange does not use.
+// The consumer's own theme. Its success.main is a colour Bob does not use.
 const theme = createTheme({ palette: { success: { main: '$CONSUMER_SUCCESS_HEX' } } })
 
 const artifacts: ArtifactInfo[] = [

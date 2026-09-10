@@ -28,8 +28,8 @@ describe('buildSessionPath', () => {
 describe('buildSessionPermalink', () => {
   const cases: Array<{ name: string; base: string; want: string }> = [
     { name: 'empty base → relative', base: '', want: '/p/acme/s/s1' },
-    { name: 'origin', base: 'https://orange.example.com', want: 'https://orange.example.com/p/acme/s/s1' },
-    { name: 'trailing slash trimmed', base: 'https://orange.example.com/', want: 'https://orange.example.com/p/acme/s/s1' },
+    { name: 'origin', base: 'https://bob.example.com', want: 'https://bob.example.com/p/acme/s/s1' },
+    { name: 'trailing slash trimmed', base: 'https://bob.example.com/', want: 'https://bob.example.com/p/acme/s/s1' },
     { name: 'many trailing slashes trimmed', base: 'https://o.example.com///', want: 'https://o.example.com/p/acme/s/s1' },
     { name: 'sub-path base preserved', base: 'https://o.example.com/agents', want: 'https://o.example.com/agents/p/acme/s/s1' },
     { name: 'localhost with port', base: 'http://localhost:8080', want: 'http://localhost:8080/p/acme/s/s1' },

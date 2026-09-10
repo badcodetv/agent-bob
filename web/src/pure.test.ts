@@ -105,7 +105,7 @@ describe('@agentkit/chat-ui/components — tier 2', () => {
   const entry = resolve(SRC, 'components/index.ts')
   const source = readFileSync(entry, 'utf8')
 
-  // The eight components that touch context or fetch(). They carry Orange's API
+  // The eight components that touch context or fetch(). They carry Bob's API
   // contract as well as its look, so they stay behind the embed page.
   const TIER_3 = [
     'AgentChat',

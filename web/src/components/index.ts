@@ -5,14 +5,14 @@
 // an iframe can never be themed by its embedder
 // (design/2026-08-24-agent-wolf-ui.md § 1).
 //
-// WHAT IS DELIBERATELY NOT HERE. The eight components that carry Orange's API
+// WHAT IS DELIBERATELY NOT HERE. The eight components that carry Bob's API
 // contract and its fetch behaviour stay tier 3, reachable only from the root
 // entry point and normally consumed through the embed page instead:
 //
 //   AgentChat · AgentSessionList · ArtifactViewer · ArtifactPreviewDialog
 //   InlineArtifactPreview · WorkersPage · WorkerChatPanel · ProjectSettingsPage
 //
-// They are the only tier where an Orange change forces every client app to
+// They are the only tier where a Bob change forces every client app to
 // move. Adding one of them to this file collapses the tier line, so don't.
 //
 // Everything here is ALSO exported from the root entry point.
