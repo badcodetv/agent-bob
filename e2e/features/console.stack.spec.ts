@@ -122,11 +122,31 @@ test.describe('operator console', () => {
     const api = await projectClient(request, project)
 
     await expect(page.getByTestId('nav-chart')).toHaveCount(0)
+    await expect(page.getByTestId('nav-activity')).toHaveCount(0)
 
-    // One worker is not a shape — there is nothing to wire it to.
+    // ── the first worker reveals ACTIVITY, and this is not what it looks like
+    //
+    // Activity is revealed by the project's first EVENT, and hiring a worker
+    // produces one: every configuration mutation emits `config.changed` as a
+    // project event (§15.8), so the first `PUT /agent/workers/{name}` is also
+    // the first thing that ever happened in this project. Verified against the
+    // running stack: a fresh project goes from 0 events to 1 on that call.
+    //
+    // This assertion used to sit at the END of the test, after an explicitly
+    // posted event, and could never have held there — Activity was already
+    // sticky two reloads earlier, so `appeared` was empty and the notice was
+    // never drawn. The file's own header says it was UNRUN at authoring time;
+    // this is what that cost.
     await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
     await page.reload()
     await expect(page.getByTestId('nav-workers')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('nav-activity')).toBeVisible({ timeout: 30_000 })
+    // Announced in words rather than by a badge (design 28 §3.2).
+    await expect(page.getByTestId('nav-reveal-notice')).toContainText(
+      'lists everything this project does',
+    )
+
+    // One worker is not a SHAPE, though — there is nothing to wire it to.
     await expect(page.getByTestId('nav-chart')).toHaveCount(0)
 
     // Two workers is the first moment there is a PAIR to connect, which is the
@@ -135,15 +155,16 @@ test.describe('operator console', () => {
     await api.putWorker(THIRD, { system_prompt: 'You announce finished work.', description: 'announces' })
     await page.reload()
     await expect(page.getByTestId('nav-chart')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('nav-reveal-notice')).toContainText(
+      'draws which worker wakes which',
+    )
 
-    // An event reveals Activity, and the reveal is announced in words rather
-    // than by a badge (design 28 §3.2).
+    // And an ordinary posted event reveals nothing new — Activity is sticky,
+    // so there is no second announcement for it.
     await api.postEvent({ type: `${WRITER}.task`, text: 'Write a blurb about the new apples.' })
     await page.reload()
     await expect(page.getByTestId('nav-activity')).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByTestId('nav-reveal-notice')).toContainText(
-      'lists everything this project does',
-    )
+    await expect(page.getByTestId('nav-reveal-notice')).toHaveCount(0)
   })
 
   // ── Activity: one rail carrying more than one kind of record ──────────────
@@ -191,14 +212,38 @@ test.describe('operator console', () => {
     await page.getByTestId('edit-triggers').click()
     await page.getByTestId('new-schedule').click()
 
+    // The editor's own labels (ScheduleEditor.tsx): "Cron", "Instruction",
+    // "Rationale". This block previously asked for /what should .* do|input/i
+    // and /^Why\??$/, and neither has ever matched anything on that form —
+    // "Instruction" does not contain "input", and the reason field is called
+    // Rationale. Another consequence of the UNRUN note at the top of this
+    // file; see the plan's DI8.
+    // FIXED (plan DI9). This line used to type the worker's name in by hand,
+    // with a note explaining why it had to: the editor did not prefill the
+    // worker even when opened from that worker's own Triggers tab.
+    // `WorkerTriggers` passed `schedule={null}` while holding `workerName` and
+    // never handed it over, and `validateSchedule` keeps the save button
+    // disabled without one — so the form asked which worker it was for while
+    // displaying the answer two inches away. Both editors now take a
+    // `defaultWorker`, and the hand-fill has become the assertion that they do.
+    await expect(page.getByLabel(/^Worker$/).first()).toHaveValue(WRITER)
     await page.getByLabel(/cron/i).first().fill('0 9 * * 1-5')
-    await page.getByLabel(/what should .* do|input/i).first().fill('Write the morning blurb.')
-    await page.getByLabel(/^Why\??$/).fill('the catalogue goes out at nine')
-    await page.getByRole('button', { name: /save/i }).first().click()
+    await page.getByLabel(/^Instruction$/).first().fill('Write the morning blurb.')
+    await page.getByLabel(/^Rationale$/).first().fill('the catalogue goes out at nine')
+    // "Create schedule" for a new one, "Save schedule" for an existing one —
+    // /save/i matched neither on this form. The third assertion in this file
+    // that could never have passed (DI8).
+    await page.getByRole('button', { name: /create schedule|save schedule/i }).first().click()
 
-    // The engine, not the screen, is the proof.
-    const schedules = await api.listSchedules()
-    expect(schedules.some((s) => s.worker === WRITER)).toBe(true)
+    // The engine, not the screen, is the proof — but the save is a round trip,
+    // so poll rather than reading once. The previous version asked the API in
+    // the same tick as the click and could only ever have passed by luck.
+    await expect
+      .poll(
+        async () => (await api.listSchedules()).some((sc) => sc.worker === WRITER),
+        { timeout: 30_000, message: 'the schedule never reached the engine' },
+      )
+      .toBe(true)
   })
 
   // ── (b) + (c) the topology flow, the chart it draws, and traffic on a wire ──
@@ -374,6 +419,16 @@ test.describe('operator console', () => {
     const api = await projectClient(request, project)
 
     await api.putWorker(CRITIC, { system_prompt: 'You score answers.', description: 'the judge' })
+    // TWO workers, and the second one is load-bearing rather than scenery.
+    // Chart is revealed by `subscriptions > 0 || workers >= 2` — one worker
+    // with nothing wired to it has no shape worth drawing — so this test with
+    // a single worker was waiting for a tab that could not appear, and burned
+    // its full 300s doing it. It had never actually run to find out: it sits
+    // after the topology test in a serial describe, and that one failed first
+    // for a different reason (DI12), so this was reported "did not run" on
+    // every previous attempt. The same UNRUN note at the top of this file
+    // (DI8) covers it.
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'the scribe' })
 
     await gotoView(page, 'chart')
     await openNodeMenu(page, CRITIC)

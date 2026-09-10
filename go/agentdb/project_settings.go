@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,30 @@ const (
 // ErrInvalidProjectSettings marks a caller mistake (empty project, negative
 // budget) as opposed to a store failure, so HTTP handlers can answer 400.
 var ErrInvalidProjectSettings = errors.New("invalid project settings")
+
+// gitTokenEnvPattern mirrors the shell's own rule for a plausible environment
+// variable name — the same regexp as cmd/agentd's envVarName (googleauth.go),
+// which validates api_key_env/github_token_env in the project map. agentdb
+// cannot import cmd/agentd (the dependency runs the other way), so this is a
+// deliberate duplicate of that one-line rule rather than a new invention;
+// keep the two in sync if either changes.
+var gitTokenEnvPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// gitSubfolderPattern is the path-safety rule from
+// design/2026-09-09-git-projection.md §D: every rendered/imported path
+// segment is validated against this pattern, with a fixed prefix and fixed
+// depth. GitSubfolder is exactly one such segment — no slashes, no `..`, no
+// leading dot — because a name that escapes it could write into
+// `.github/workflows/*.yml` in the project's own repo, where it would run
+// with that repo's secrets on the next push.
+var gitSubfolderPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// DefaultGitBranch and DefaultGitSubfolder are the values GitBranch and
+// GitSubfolder take when left empty (design/2026-09-09-git-projection.md).
+const (
+	DefaultGitBranch    = "main"
+	DefaultGitSubfolder = "orange"
+)
 
 // ProjectSettings is the per-project configuration row (§5): one row per
 // project (the customer string), created lazily on first write. Projects
@@ -47,7 +72,56 @@ type ProjectSettings struct {
 	DailyTokensHard   int64   `json:"daily_tokens_hard"` // 0 = off
 	BriefingMaxBytes  int     `json:"briefing_max_bytes"`
 	SnapshotTTLDays   int     `json:"snapshot_ttl_days"` // 0 = never reap
-	UpdatedAt         int64   `json:"updated_at" gorm:"autoUpdateTime"`
+	// Briefing is the project-wide briefing selector list (design B1,
+	// 2026-09-08-memory-coordinated-organisation.md): unioned into every
+	// worker's own `Briefing` inside BuildBriefingSections, after the
+	// built-in default selector and before the worker's own entries, so a
+	// worker with none of its own still receives it. Same NULL-preserving
+	// SelectorList as Worker.Briefing, and the same "entry must parse as a
+	// label selector" rule normalize() applies to it.
+	Briefing SelectorList `json:"briefing,omitempty" gorm:"type:jsonb"`
+
+	// The five fields below are git projection config
+	// (design/2026-09-09-git-projection.md, G7 and G20): which repo a project's
+	// configuration renders to, and which environment variables name the push
+	// token and the inbound webhook secret. NONE OF THEM ARE IMPORTABLE (§D): the git importer this design
+	// also builds must never write these columns. If it could, anyone with
+	// commit access to the rendered repo could redirect a project's
+	// projection at a repository — and a credential — they control. They
+	// change only through PutProjectSettings, i.e. the console/API, never
+	// through anything reading the repo back.
+
+	// GitRemote is the GitHub repo URL this project renders its configuration
+	// to. Empty means projection is off for this project. NOT IMPORTABLE —
+	// see the block comment above.
+	GitRemote string `json:"git_remote" gorm:"type:text"`
+	// GitBranch is the branch to render to. Empty means DefaultGitBranch
+	// ("main") at render time — this column is not defaulted on write, the
+	// same way BaseImage and SystemPrompt aren't. NOT IMPORTABLE.
+	GitBranch string `json:"git_branch" gorm:"type:text"`
+	// GitSubfolder is the single path segment Orange owns inside the repo.
+	// Empty means DefaultGitSubfolder ("orange") at render time. Must be one
+	// valid path segment — no slashes, no `..`, no leading dot — see
+	// gitSubfolderPattern. NOT IMPORTABLE.
+	GitSubfolder string `json:"git_subfolder" gorm:"type:text"`
+	// GitTokenEnv names the environment variable holding the push token for
+	// GitRemote. The token value itself is never stored here, only the
+	// variable's name (same pattern as api_key_env in the project map,
+	// cmd/agentd/googleauth.go) — see the overlap note on
+	// github_token_env there. NOT IMPORTABLE.
+	GitTokenEnv string `json:"git_token_env" gorm:"type:text"`
+	// GitWebhookSecretEnv names the environment variable holding the shared
+	// secret GitHub signs this project's webhook deliveries with
+	// (X-Hub-Signature-256, HMAC-SHA256 over the raw body). As with
+	// GitTokenEnv it is a variable NAME, never the secret itself.
+	//
+	// NOT IMPORTABLE, and this one most sharply of the five: if a commit could
+	// rewrite it, then commit access to the mirror would be the power to point
+	// verification at a secret the committer chose — i.e. to make forged
+	// deliveries verify. Set through the console/API only.
+	GitWebhookSecretEnv string `json:"git_webhook_secret_env" gorm:"type:text"`
+
+	UpdatedAt int64 `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 func (ProjectSettings) TableName() string { return "project_settings" }
@@ -90,6 +164,34 @@ func (ps *ProjectSettings) normalize() error {
 		if f.v < 0 {
 			return fmt.Errorf("%w: %s must not be negative (got %d)", ErrInvalidProjectSettings, f.name, f.v)
 		}
+	}
+	for i, sel := range ps.Briefing {
+		trimmed := strings.TrimSpace(sel)
+		if trimmed == "" {
+			return fmt.Errorf("%w: briefing selector %d is empty", ErrInvalidProjectSettings, i)
+		}
+		if _, err := ParseLabelSelector(trimmed); err != nil {
+			return fmt.Errorf("%w: briefing selector %d (%q) does not parse: %v", ErrInvalidProjectSettings, i, sel, err)
+		}
+	}
+	if ps.GitTokenEnv != "" && !gitTokenEnvPattern.MatchString(ps.GitTokenEnv) {
+		return fmt.Errorf("%w: git_token_env %q is not a valid environment variable name", ErrInvalidProjectSettings, ps.GitTokenEnv)
+	}
+	if ps.GitWebhookSecretEnv != "" && !gitTokenEnvPattern.MatchString(ps.GitWebhookSecretEnv) {
+		// The same rule as git_token_env, for the same reason: this field
+		// holds the NAME of an environment variable. It catches the shapes a
+		// pasted secret usually has — punctuation, spaces, a leading digit —
+		// before the secret ends up in a row the console displays and the
+		// renderer publishes. It cannot catch a secret that happens to look
+		// like an identifier, and does not pretend to.
+		return fmt.Errorf("%w: git_webhook_secret_env %q is not a valid environment variable name", ErrInvalidProjectSettings, ps.GitWebhookSecretEnv)
+	}
+	if ps.GitSubfolder != "" && !gitSubfolderPattern.MatchString(ps.GitSubfolder) {
+		// gitSubfolderPattern already rules out slashes, "..", and a leading
+		// dot (it only accepts lowercase letters, digits and internal
+		// hyphens) — the message spells those out because they're the
+		// concrete ways a subfolder could escape.
+		return fmt.Errorf("%w: git_subfolder %q must be a single path segment (lowercase letters, digits, hyphens; no slashes, no \"..\", no leading dot)", ErrInvalidProjectSettings, ps.GitSubfolder)
 	}
 	if ps.MaxConcurrentJobs == 0 {
 		ps.MaxConcurrentJobs = DefaultMaxConcurrentJobs
@@ -156,6 +258,12 @@ func (s *Store) PutProjectSettings(ctx context.Context, ps *ProjectSettings, cw 
 		existing.DailyTokensHard = next.DailyTokensHard
 		existing.BriefingMaxBytes = next.BriefingMaxBytes
 		existing.SnapshotTTLDays = next.SnapshotTTLDays
+		existing.Briefing = next.Briefing
+		existing.GitRemote = next.GitRemote
+		existing.GitBranch = next.GitBranch
+		existing.GitSubfolder = next.GitSubfolder
+		existing.GitTokenEnv = next.GitTokenEnv
+		existing.GitWebhookSecretEnv = next.GitWebhookSecretEnv
 		if _, err := s.WithConfigEvent(ctx, ConfigChange{
 			Project: existing.Project,
 			Action:  ActionProjectSettingsPut,

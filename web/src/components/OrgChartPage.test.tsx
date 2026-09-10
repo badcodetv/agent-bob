@@ -552,6 +552,12 @@ describe('the node toggles (OC4)', () => {
       mcp_config: {},
       image: '',
       max_instances: 2,
+      // null, because this worker never had a briefing and this freeze is not
+      // touching it. Since T27 that is exactly what null says on the wire —
+      // "leave the stored briefing alone". Sending [] instead would mean
+      // "clear it", the row would count as changed, and the config log would
+      // record `worker_update` rather than `worker_freeze`, because it picks
+      // the narrow action only when every other field is byte-identical.
       briefing: null,
       enabled: true,
       frozen: true,
@@ -559,7 +565,7 @@ describe('the node toggles (OC4)', () => {
     })
   })
 
-  it('disables without thawing a frozen worker — PUT is create-or-replace', async () => {
+  it('disables without thawing a frozen worker', async () => {
     const user = userEvent.setup()
     renderChart()
     await waitFor(() => expect(screen.getByTestId('node-fee-scorer')).toBeTruthy())

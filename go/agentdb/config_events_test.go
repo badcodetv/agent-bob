@@ -647,7 +647,15 @@ func TestMutationsAreLogged(t *testing.T) {
 		// again — an observation, not a decision. The decision it leads to (the
 		// disable) still goes through DisableSchedule and IS logged, so §8.6's
 		// "disabled and logged" is unweakened.
+		// Grown six more on 2026-09-09 by G22, the git projection's durable
+		// state: a lease, three watermarks and a failure reason, all written by
+		// background loops on every render, push and poll. §15.3 rule 3 again —
+		// and note the changes an IMPORT applies are each logged by the store
+		// methods that apply them, because git writes nothing the store did not
+		// serialise. Only "how far the loop has read" is exempt.
 		want := []string{
+			"AcquireGitProjectionLease",
+			"ClearGitProjectionQuarantine",
 			"ClearScheduleProvisionFailures",
 			"ClearWorkerBinding",
 			"CreateProjectEvent",
@@ -656,19 +664,30 @@ func TestMutationsAreLogged(t *testing.T) {
 			"MarkConfigEventEmitted",
 			"MarkCustomImageReaped",
 			"MarkCustomImageResumed",
+			"MarkGitProjectionImported",
+			"MarkGitProjectionPushed",
+			"MarkGitProjectionRendered",
 			"MarkProjectEventDelivered",
 			// Grown once more on 2026-08-06 by RD11's watermark (migration 041):
 			// `last_evaluated` is the scheduler's progress marker, written every
 			// minute per schedule so that "nothing was due" and "nobody was
 			// running" stop looking identical. Runtime state, exactly like the
 			// router's `delivered` watermark two entries up.
+			"NoteGitProjectionFailure",
 			"NoteScheduleEvaluated",
 			"NoteScheduleProvisionFailure",
 			// Grown once more on 2026-08-06 by RD13's append-only trigger
 			// (migration 039): PurgeConfigEvents is the one sanctioned way to
 			// remove config-log rows, and a config event recording a purge
 			// would be a row in the table being purged.
+			// Grown once more on 2026-09-09 by G23: the projection's per-file
+			// notes (git_projection_notes). Runtime state of the same class as
+			// the six above — an observation of the last import run, replaced
+			// wholesale on the next one, never a decision. What the import
+			// APPLIED is still logged, by the store methods that applied it.
 			"PurgeConfigEvents",
+			"PutGitProjectionNotes",
+			"ReleaseGitProjectionLease",
 			"SetConfigEventHook",
 			"SetSkillVisibility",
 			"SetWorkerBinding",

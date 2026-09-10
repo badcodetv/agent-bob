@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { z } from 'zod'
 import { inferArtifactType } from './write_file.js'
-import { askUserTool } from './ask_user.js'
+import { askUserTool, buildAskUserPayload } from './ask_user.js'
 import { viewImageTool } from './view_image.js'
 
 // --- inferArtifactType (write_file) ---
@@ -90,6 +91,131 @@ describe('askUserTool marker', () => {
     expect(parsed.__ask_user).toBe(true)
     expect(parsed.question).toBe('Choose one')
     expect(parsed.options).toHaveLength(2)
+  })
+})
+
+// --- askUserTool: the open question, and the dead card that cannot happen ---
+//
+// `options` used to be `.min(2)`, so a question whose answer is a number, a
+// date or a ticker could not be asked as a card at all and the model fell
+// back to prose — which is the exact thing the card exists to replace.
+// These pin the relaxation and the rule that came with it.
+
+describe('buildAskUserPayload', () => {
+  it('an open question keeps options as an ARRAY and turns the text box ON', () => {
+    const payload = buildAskUserPayload({ question: 'What level would prove you wrong?' })
+    expect(payload.options).toEqual([])
+    expect(payload.allow_freetext).toBe(true)
+  })
+
+  it('a NON-array options (a model sending a string) still yields an array', () => {
+    // AskUserCard maps over this with no guard; anything but an array blanks
+    // the chat panel rather than dropping one card.
+    const payload = buildAskUserPayload({ question: 'Pick', options: 'red, blue' })
+    expect(Array.isArray(payload.options)).toBe(true)
+    expect(payload.options).toEqual([])
+  })
+
+  it('FORCES the text box on when there are no options, even if told not to', () => {
+    // No buttons and no text box is a card the user can neither click nor
+    // type into. The rule is only worth anything if it cannot be overridden.
+    const payload = buildAskUserPayload({ question: 'How many days?', allow_freetext: false })
+    expect(payload.allow_freetext).toBe(true)
+  })
+
+  it('LIMIT: with options present, an unspecified allow_freetext stays FALSE', () => {
+    // The pre-existing default for every caller that already passes options.
+    // If this flips, every existing product's cards silently grow a text box.
+    const payload = buildAskUserPayload({
+      question: 'Pick a colour',
+      options: [{ label: 'Red', value: 'red' }, { label: 'Blue', value: 'blue' }],
+    })
+    expect(payload.allow_freetext).toBe(false)
+  })
+
+  it('with options present, an explicit allow_freetext: true is honoured', () => {
+    const payload = buildAskUserPayload({
+      question: 'Pick a colour',
+      options: [{ label: 'Red', value: 'red' }, { label: 'Blue', value: 'blue' }],
+      allow_freetext: true,
+    })
+    expect(payload.allow_freetext).toBe(true)
+  })
+
+  it('is idempotent — re-resolving an already-built payload changes nothing', () => {
+    // toEvent and toModelText both run it over a payload the handler already
+    // produced. A non-idempotent rule would flip allow_freetext on the way
+    // to the UI while the model saw the other value.
+    const once = buildAskUserPayload({
+      question: 'Pick a colour',
+      options: [{ label: 'Red', value: 'red' }, { label: 'Blue', value: 'blue' }],
+    })
+    expect(buildAskUserPayload(once)).toEqual(once)
+  })
+
+  it('defaults context to a string, never undefined', () => {
+    expect(buildAskUserPayload({ question: 'Why?' }).context).toBe('')
+  })
+})
+
+describe('askUserTool schema accepts an open question', () => {
+  // The relaxation itself: `options` used to be `.min(2)`, so these two
+  // calls were rejected by the SDK before the handler ever ran. Driving the
+  // real zod shape (and the real handler through it) is the only way to see
+  // that — buildAskUserPayload alone never meets the schema.
+  const shape = (askUserTool.sdkTool as unknown as { inputSchema: z.ZodRawShape }).inputSchema
+  const schema = z.object(shape)
+  const handler = (askUserTool.sdkTool as unknown as {
+    handler: (args: unknown, extra: unknown) => Promise<{ content: Array<{ text: string }> }>
+  }).handler
+
+  it('accepts a question with NO options at all', () => {
+    const parsed = schema.safeParse({ question: 'What level would prove you wrong?' })
+    expect(parsed.success).toBe(true)
+  })
+
+  it('accepts an explicitly empty options array', () => {
+    expect(schema.safeParse({ question: 'How many days?', options: [] }).success).toBe(true)
+  })
+
+  it('still rejects more than 10 options', () => {
+    const options = Array.from({ length: 11 }, (_, i) => ({ label: `L${i}`, value: `v${i}` }))
+    expect(schema.safeParse({ question: 'Pick', options }).success).toBe(false)
+  })
+
+  it('still rejects an empty question', () => {
+    expect(schema.safeParse({ question: '' }).success).toBe(false)
+  })
+
+  it('the real handler answers an open question with a renderable marker', async () => {
+    const args = schema.parse({ question: 'What level would prove you wrong?' })
+    const result = await handler(args, {})
+    const marker = JSON.parse(result.content[0].text)
+    expect(marker.__ask_user).toBe(true)
+    expect(marker.options).toEqual([])
+    expect(marker.allow_freetext).toBe(true)
+    expect(marker.context).toBe('')
+  })
+})
+
+describe('askUserTool marker over an open question', () => {
+  const marker = askUserTool.marker!
+
+  it('toEvent yields an empty options array and allowFreetext true', () => {
+    const event = marker.toEvent({ __ask_user: true, question: 'How many days?' })
+    expect(event).toEqual({
+      question: 'How many days?',
+      options: [],
+      allowFreetext: true,
+      context: '',
+    })
+  })
+
+  it('toModelText round-trips an open question', () => {
+    const parsed = JSON.parse(marker.toModelText({ __ask_user: true, question: 'How many days?' }))
+    expect(parsed.__ask_user).toBe(true)
+    expect(parsed.options).toEqual([])
+    expect(parsed.allow_freetext).toBe(true)
   })
 })
 

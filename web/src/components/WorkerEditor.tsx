@@ -342,10 +342,15 @@ export default function WorkerEditor({
                     aria-label={`Remove briefing selector ${i + 1}`}
                     onClick={() => {
                       const next = selectors.filter((_, j) => j !== i)
-                      // Collapse the empty list back to null: "no extra
-                      // selectors" and "an explicitly empty list" compose
-                      // identically, and null is the state the engine defaults to.
-                      update({ briefing: next.length === 0 ? null : next })
+                      // Emptying the list leaves [], NOT null. The two compose
+                      // identically — a briefing of none and a briefing of []
+                      // produce the same job — but since T27 they no longer
+                      // TRAVEL identically: null on the wire means "leave the
+                      // stored briefing alone" and [] means "clear it". So the
+                      // draft has to keep the distinction the human just made.
+                      // Collapsing to null here would turn "remove every
+                      // selector, save" into a silent no-op.
+                      update({ briefing: next })
                     }}
                   >
                     <DeleteIcon fontSize="small" />

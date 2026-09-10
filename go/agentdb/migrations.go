@@ -1087,6 +1087,113 @@ var agentMigrations = []migration{
 			CREATE INDEX IF NOT EXISTS datasets_labels ON datasets USING GIN (labels);
 		`,
 	},
+	{
+		// The project-wide briefing (design/2026-09-08-memory-coordinated-
+		// organisation.md, decision B1): a selector list unioned into every
+		// worker's own briefing at composition time, so "the whole project
+		// should always see X" is one field, not a copy-paste into every
+		// worker row. Same NULL-preserving JSONB shape as workers.briefing
+		// (migration 021) and the same nil-vs-empty-list distinction.
+		Name: "046_project_briefing",
+		SQL:  `ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS briefing JSONB DEFAULT NULL;`,
+	},
+	{
+		// Git projection config (design/2026-09-09-git-projection.md, G7): which
+		// repo a project renders to, and which environment variable names the
+		// push token. Four columns, all optional — an empty git_remote means
+		// projection is off for this project.
+		//
+		// NOT IMPORTABLE (§D of the design doc): git_remote, git_branch,
+		// git_subfolder and git_token_env say *which repo* and *which
+		// credential* a project's configuration renders to and is read back
+		// from. If the importer were allowed to write them, anyone with commit
+		// access to the rendered repo could redirect a project's projection at
+		// a repository — and a token — they control. They render as
+		// informational only and change exclusively through the console/API
+		// (PutProjectSettings), never through the git importer. See the field
+		// comments below and the importer's own docs when it is built.
+		Name: "047_project_git_projection",
+		SQL: `
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_remote TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_branch TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_subfolder TEXT NOT NULL DEFAULT '';
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_token_env TEXT NOT NULL DEFAULT '';
+		`,
+	},
+	{
+		// G20 + G22 of design/2026-09-09-git-projection.md, in one migration
+		// because both halves of the inbound door landed together.
+		//
+		// 1. git_webhook_secret_env — the fifth git-projection settings column.
+		// GitHub signs every webhook delivery with HMAC-SHA256 keyed by a
+		// per-repository secret; nothing in the system held one (DI11), so the
+		// route could not verify anything. Like git_token_env and the project
+		// map's github_token_env it names an ENVIRONMENT VARIABLE, never a
+		// value — the secret stays in agentd's environment. NOT IMPORTABLE for
+		// the same reason as its four neighbours, and more sharply: if a commit
+		// could rewrite it, commit access to the mirror would become the power
+		// to make FORGED webhooks verify.
+		//
+		// 2. git_projection_state — the projection's durable watermark, lease
+		// and last failure (§F). It previously appeared by `AutoMigrate` at
+		// boot inside cmd/agentd; nothing else in this product creates schema
+		// that way, so it is spelled here where a schema change can be read and
+		// reviewed. `IF NOT EXISTS` means an upgraded database that already has
+		// the AutoMigrated table keeps it, and the column names below are the
+		// ones gorm derives from agentdb.GitProjectionState — pinned by
+		// TestGitProjectionStateSchemaMatchesTheMigration, because a fresh
+		// database and an upgraded one must end up with the same schema.
+		//
+		// Runtime state, not configuration: these rows write no config event
+		// (§15.3 rule 3), the same class as the session lease.
+		Name: "048_git_projection_state",
+		SQL: `
+			ALTER TABLE project_settings ADD COLUMN IF NOT EXISTS git_webhook_secret_env TEXT NOT NULL DEFAULT '';
+
+			CREATE TABLE IF NOT EXISTS git_projection_state (
+				project           VARCHAR(255) PRIMARY KEY,
+				last_rendered_seq BIGINT NOT NULL DEFAULT 0,
+				last_rendered_sha TEXT NOT NULL DEFAULT '',
+				last_pushed_sha   TEXT NOT NULL DEFAULT '',
+				last_imported_sha TEXT NOT NULL DEFAULT '',
+				last_error        TEXT NOT NULL DEFAULT '',
+				last_error_at     BIGINT NOT NULL DEFAULT 0,
+				lease_owner       TEXT NOT NULL DEFAULT '',
+				lease_expires_at  BIGINT NOT NULL DEFAULT 0,
+				updated_at        BIGINT NOT NULL DEFAULT 0
+			);
+		`,
+	},
+	{
+		// G23. Two gaps in what the projection can tell an operator.
+		//
+		// `last_error_kind` is WHICH KIND of failure the row records, written at
+		// the point the error was raised and its Go type was still in hand. Its
+		// absence forced the console's status route to re-derive the kind by
+		// string-matching gitproj's own error text — so rewording a sentence
+		// silently reclassified a production failure.
+		//
+		// `git_projection_notes` is the per-file half: the quarantine reasons
+		// and the ignored edits from the most recent import, which until now
+		// lived in memory for one run and were dropped. Bounded, newest kept —
+		// an operator's view, not an audit log; the audit record is the config
+		// log, which already carries every write an import performed.
+		Name: "049_git_projection_notes",
+		SQL: `
+			ALTER TABLE git_projection_state ADD COLUMN IF NOT EXISTS last_error_kind VARCHAR(32) NOT NULL DEFAULT '';
+
+			CREATE TABLE IF NOT EXISTS git_projection_notes (
+				id       BIGSERIAL PRIMARY KEY,
+				project  VARCHAR(255) NOT NULL,
+				kind     VARCHAR(32) NOT NULL,
+				path     TEXT NOT NULL,
+				reason   TEXT NOT NULL,
+				noted_at BIGINT NOT NULL DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_git_projection_notes_lookup
+				ON git_projection_notes (project, kind, noted_at DESC);
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

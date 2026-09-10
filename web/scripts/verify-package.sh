@@ -95,12 +95,7 @@ cat > "$APP/package.json" <<JSON
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
-  "devDependencies": {
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "jsdom": "^29.1.1",
-    "vitest": "^4.0.18"
-  }
+  "comment": "The test harness is NOT listed here. See the two-step install below."
 }
 JSON
 
@@ -184,15 +179,67 @@ describe('@agentkit/chat-ui installed from a tarball', () => {
 })
 TSX
 
+# TWO STEPS, and the split is load-bearing.
+#
+# Step one installs ONLY the subject and its runtime company — the tarball,
+# react, react-dom, MUI, emotion — with npm's peer resolution fully strict.
+# That is the install whose result this script asserts on: a runtime import
+# mis-filed under devDependencies, or react moved from peerDependencies to
+# dependencies, shows up here as a second nested copy and nowhere else.
+#
+# Step two adds the test harness (vitest, jsdom, testing-library) with
+# --legacy-peer-deps, because npm 10.9.2's arborist CRASHES resolving vitest 4's
+# own optional-peer graph:
+#
+#   TypeError: Cannot read properties of null (reading 'edgesOut')
+#     at #loadPeerSet (@npmcli/arborist/lib/arborist/build-ideal-tree.js:1289)
+#
+# That is an upstream npm bug, not a fact about this package: a package.json
+# containing nothing but `"vitest": "4.1.8"`, in an empty directory, reproduces
+# it (verified 2026-09-09). web/ itself is immune only because `npm ci` installs
+# from a lockfile and never builds the peer set. Confining the flag to step two
+# keeps the strictness where the assertion lives; the shape check in 3b then
+# runs against the FINAL tree, so if step two disturbed the subject's
+# resolution, that check still catches it.
+#
+# Revisit when npm ships the arborist fix: drop step two's flag and re-run.
+say "3a/5  the subject, with peer resolution strict"
 ( cd "$APP" && npm install --no-audit --no-fund >/dev/null 2>&1 ) \
   || { echo "npm install failed in the throwaway app"; ( cd "$APP" && npm install --no-audit --no-fund ); exit 1; }
 
+say "3b/5  the test harness (see the arborist note above)"
+( cd "$APP" && npm install --no-audit --no-fund --legacy-peer-deps --save-dev \
+    "@testing-library/jest-dom@^6.9.1" "@testing-library/react@^16.3.2" \
+    "jsdom@^29.1.1" "vitest@^4.0.18" \
+    "@testing-library/dom@^10.4.1" "@types/react@^18.3.12" >/dev/null 2>&1 ) \
+  || { echo "installing the test harness failed"; \
+       ( cd "$APP" && npm install --no-audit --no-fund --legacy-peer-deps --save-dev \
+           "@testing-library/jest-dom@^6.9.1" "@testing-library/react@^16.3.2" \
+           "jsdom@^29.1.1" "vitest@^4.0.18" \
+           "@testing-library/dom@^10.4.1" "@types/react@^18.3.12" ); exit 1; }
+# @testing-library/dom and @types/react are the harness's OWN peers, named here
+# because --legacy-peer-deps does not auto-install peers. Left out, they show up
+# as "missing" and the tree is genuinely incomplete rather than merely loose.
+
 # One React, one react-dom, one @mui/material, one emotion cache in the whole
 # consumer tree. `npm ls` exits non-zero on an unmet peer dependency, which is
-# the other half of the same question.
-say "3b/5  dependency shape in the consumer"
+# the other half of the same question — so its exit code is checked, not
+# discarded.
+#
+# It is asked about the SUBJECT and its runtime company by name rather than
+# about the whole tree (`npm ls --all`), because the loosely-installed harness
+# leaves resolvable-but-untidy edges that say nothing about this package: vite
+# wants yaml@2 while emotion's build-time babel plugin pulls yaml@1 to the top,
+# and npm reports that as ELSPROBLEMS for the entire tree. Naming the packages
+# keeps the question pointed at the thing under test.
+say "3c/5  dependency shape in the consumer"
+( cd "$APP" && npm ls @agentkit/chat-ui react react-dom @mui/material @emotion/react >/dev/null 2>&1 ) \
+  || { echo "npm ls reports an unmet or invalid dependency for the subject:"; \
+       ( cd "$APP" && npm ls @agentkit/chat-ui react react-dom @mui/material @emotion/react ); exit 1; }
+
 ( cd "$APP" && npm ls --all --parseable 2>/dev/null | grep -E 'node_modules/(react|react-dom|@mui/material|@emotion/react)$' | sort -u ) \
-  | tee "$APP/.resolved.txt"
+  > "$APP/.resolved.txt" || true
+cat "$APP/.resolved.txt"
 for pkg in react react-dom @mui/material @emotion/react; do
   n=$(grep -c "node_modules/${pkg}\$" "$APP/.resolved.txt" || true)
   [ "$n" = "1" ] || { echo "expected exactly one copy of $pkg in the consumer, found $n"; exit 1; }

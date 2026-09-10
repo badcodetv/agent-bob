@@ -19,3 +19,6 @@ e2e/.stack-e2e-mode
 
 # ./stack: which image mode the running stack was started in
 .stack-image-mode
+
+# ./stack wolf: local dev secrets for the Agent Wolf workflow (never commit)
+.stack-wolf-secrets.env

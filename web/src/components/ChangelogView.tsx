@@ -24,21 +24,36 @@ import { useState } from 'react'
 import {
   Alert,
   Box,
+  Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Link,
   MenuItem,
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   type Theme,
 } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import useConfigLog, { type UseConfigLogOptions } from '../useConfigLog.js'
+import { useConfigApi } from '../configApi.js'
 import { SpineRail, SpineRow, consoleTokenColor } from '../spine.js'
 import { usePrefersReducedMotion } from '../useReducedMotion.js'
-import { formatConfigTimestamp, type ChangelogEntry, type DiffLine } from '../configLog.js'
+import {
+  configRevertPath,
+  formatConfigTimestamp,
+  revertBlocks,
+  type ChangelogEntry,
+  type DiffLine,
+  type RevertBlock,
+} from '../configLog.js'
 
 export interface ChangelogViewProps extends Omit<UseConfigLogOptions, 'query'> {
   /** Heading. Pass '' for none. */
@@ -47,6 +62,14 @@ export interface ChangelogViewProps extends Omit<UseConfigLogOptions, 'query'> {
   onOpenSession?: (sessionId: string) => void
   /** Hide the action/actor filter row (a host with its own filters). */
   hideFilters?: boolean
+  /**
+   * Offer "Revert to this version" on each entry. Default true.
+   *
+   * A host that mounts this view read-only — an audit screen, an embed — turns
+   * it off. The route is guarded server-side regardless; this only decides
+   * whether the button is drawn.
+   */
+  allowRevert?: boolean
 }
 
 /** Filter presets: the whole vocabulary, plus the prefix groups §15.9 allows. */
@@ -66,11 +89,20 @@ export default function ChangelogView({
   title = 'Changelog',
   onOpenSession,
   hideFilters = false,
+  allowRevert = true,
   ...options
 }: ChangelogViewProps) {
   const [action, setAction] = useState('')
   const [actorWorker, setActorWorker] = useState('')
   const log = useConfigLog({ ...options, query: { action, actorWorker } })
+  // Which entries cannot be put back, and why — computed once for the page
+  // rather than per card, because the answer for one entry depends on the
+  // others (only the newest change to a thing can be reverted).
+  const blocks = revertBlocks(log.entries)
+  // The "it worked" notice lives HERE, not on the card that was clicked. A
+  // successful revert reloads the list, which remounts every card — so a
+  // notice held inside one would vanish at exactly the moment it was earned.
+  const [justReverted, setJustReverted] = useState(false)
 
   return (
     <Box sx={{ p: 3, maxWidth: 960 }}>
@@ -83,6 +115,13 @@ export default function ChangelogView({
         Every management mutation, newest first. Rationales are the commit messages; prompt
         rewrites are diffed against the previous version of the same prompt.
       </Typography>
+
+      {justReverted && (
+        <Alert severity="success" sx={{ mb: 2 }} data-testid="revert-done" onClose={() => setJustReverted(false)}>
+          Reverted. The change that put it back is the newest entry below — the entry you reverted
+          stays exactly where it is, because nothing here is ever erased.
+        </Alert>
+      )}
 
       {!log.available && (
         <Alert severity="info" sx={{ mb: 2 }}>
@@ -145,6 +184,18 @@ export default function ChangelogView({
               key={entry.id}
               entry={entry}
               onOpenSession={onOpenSession}
+              revert={
+                allowRevert
+                  ? {
+                      block: blocks.get(entry.id) ?? null,
+                      onReverted: () => {
+                        setJustReverted(true)
+                        void log.reload()
+                      },
+                    }
+                  : null
+              }
+              apiOptions={options}
             />
           ))}
         </SpineRail>
@@ -156,9 +207,14 @@ export default function ChangelogView({
 function ChangelogEntryCard({
   entry,
   onOpenSession,
+  revert,
+  apiOptions,
 }: {
   entry: ChangelogEntry
   onOpenSession?: (sessionId: string) => void
+  /** Null when the host mounted the view read-only. */
+  revert: { block: RevertBlock | null; onReverted: () => void } | null
+  apiOptions: Record<string, unknown>
 }) {
   const [showPayload, setShowPayload] = useState(false)
   // Authorship is the glyph, exactly as on the Desk: the config log already
@@ -229,6 +285,10 @@ function ChangelogEntryCard({
         </Box>
       )}
 
+      {revert !== null && (
+        <RevertControl entry={entry} block={revert.block} onReverted={revert.onReverted} {...apiOptions} />
+      )}
+
       <Box sx={{ mt: 1.5 }}>
         <Link
           component="button"
@@ -257,6 +317,159 @@ function ChangelogEntryCard({
       </Box>
     </Paper>
     </SpineRow>
+  )
+}
+
+/**
+ * "Revert to this version" — the whole of the human's control over a
+ * self-revising organisation (design §C6: there is no mechanical brake on the
+ * architect; revert IS the control).
+ *
+ * Three things about it are deliberate.
+ *
+ * NEVER THE WORD "UNDO". Nothing here is undone: reverting writes a NEW change
+ * that puts the old state back, and both changes stay in this log forever. A
+ * button labelled "undo" would promise the history could be edited, which is
+ * the one thing this log exists to make impossible.
+ *
+ * THE CONFIRMATION SAYS WHAT WILL CHANGE, by name — not "are you sure?". The
+ * reader has been scrolling a list of similar-looking entries, and the cost of
+ * clicking the wrong one is a live worker's prompt.
+ *
+ * THE REASON IS REQUIRED, like every other write in this console (K2). A
+ * changelog whose entries say "(no reason given)" is a changelog nobody reads.
+ */
+function RevertControl({
+  entry,
+  block,
+  onReverted,
+  ...apiOptions
+}: {
+  entry: ChangelogEntry
+  block: RevertBlock | null
+  onReverted: () => void
+} & Record<string, unknown>) {
+  const { request } = useConfigApi(apiOptions)
+  const [open, setOpen] = useState(false)
+  const [rationale, setRationale] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const what = entry.entity.name === '' ? entry.entity.kind : entry.entity.name
+
+  const submit = async () => {
+    if (rationale.trim() === '') return
+    setBusy(true)
+    setError(null)
+    try {
+      await request<unknown>(configRevertPath(entry.id), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rationale: rationale.trim() }),
+      })
+      setOpen(false)
+      onReverted()
+    } catch (err) {
+      // The server's own sentence. Its refusal names the entries standing in
+      // the way, and a paraphrase would drop exactly the part that tells the
+      // human what to do next.
+      setError(err instanceof Error ? err.message : 'the revert failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const button = (
+    <span>
+      <Button
+        size="small"
+        variant="outlined"
+        disabled={block !== null}
+        data-testid={`revert-${entry.id}`}
+        onClick={() => {
+          setError(null)
+          setRationale('')
+          setOpen(true)
+        }}
+      >
+        Revert to this version
+      </Button>
+    </span>
+  )
+
+  return (
+    <Box sx={{ mt: 1.5 }}>
+      {block === null ? (
+        button
+      ) : (
+        // The reason rides on the disabled control rather than replacing it:
+        // "why can I not do this" is the question a greyed-out button asks,
+        // and it should be answerable without guessing.
+        <Tooltip title={block.reason}>
+          <Box component="span" data-testid={`revert-blocked-${entry.id}`}>
+            {button}
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {block.reason}
+            </Typography>
+          </Box>
+        </Tooltip>
+      )}
+
+      {error !== null && (
+        <Alert severity="error" sx={{ mt: 1 }} data-testid="revert-error">
+          {error}
+        </Alert>
+      )}
+
+      <Dialog open={open} onClose={() => (busy ? undefined : setOpen(false))} fullWidth maxWidth="sm">
+        <DialogTitle>Revert to this version?</DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            <p>
+              This puts <strong>{what}</strong> back to the state it was in{' '}
+              <strong>after {entry.title.toLowerCase()}</strong>, made{' '}
+              {formatConfigTimestamp(entry.createdAt)}
+              {entry.actorWorker !== '' ? ` by ${entry.actorWorker}` : ' by a human'}.
+            </p>
+            <p>
+              Nothing is erased. Reverting writes a <strong>new change</strong> that puts the old
+              state back, and both stay in this log — so you can revert the revert.
+            </p>
+          </DialogContentText>
+          <TextField
+            fullWidth
+            size="small"
+            required
+            autoFocus
+            sx={{ mt: 1 }}
+            label="Why?"
+            placeholder="the rewrite made the replies worse"
+            value={rationale}
+            onChange={(e) => setRationale(e.target.value)}
+            inputProps={{ 'aria-label': 'Why?' }}
+            helperText="Required. Stored with the change, and shown in this list next to who made it."
+          />
+          {error !== null && (
+            <Alert severity="error" sx={{ mt: 1 }}>
+              {error}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => void submit()}
+            disabled={busy || rationale.trim() === ''}
+            data-testid="revert-confirm"
+          >
+            {busy ? 'Reverting…' : 'Revert it'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   )
 }
 

@@ -171,6 +171,24 @@ type Config struct {
 	// host that can list datasets but not serve their bytes should say so on
 	// the one route that cannot be honoured.
 	DatasetBlobs DatasetBlobReader
+
+	// GitProjection backs GET /agent/git-projection (gitprojectionstatus.go).
+	// Same defaulting rule as Workers: auto-filled from AgentDB in New().
+	//
+	// Nil is a supported deployment and, unlike the others, does NOT 501: the
+	// route still reports whether projection is configured and where it
+	// publishes, with state_available=false. A missing state store is a reason
+	// to say "I cannot see whether this is working", never a reason to hide the
+	// repository link. See the file header in gitprojectionstatus.go.
+	GitProjection GitProjectionStore
+
+	// GitBootstrap backs POST /agent/git-bootstrap (gitbootstraproute.go,
+	// ticket G26): create a project's whole configuration from a folder in its
+	// repository. It is deliberately NOT auto-filled from AgentDB — a
+	// bootstrap needs a clone, a lease and a projector, none of which agentdb
+	// has — so the host wires it in cmd/agentd. Nil is a supported deployment
+	// and the route answers 501, the same way every other unwired seam does.
+	GitBootstrap GitBootstrapper
 }
 
 // Tenancy contract
@@ -251,6 +269,9 @@ func New(cfg Config) (*Handlers, error) {
 	// its field comment.
 	if cfg.Datasets == nil && cfg.AgentDB != nil {
 		cfg.Datasets = cfg.AgentDB
+	}
+	if cfg.GitProjection == nil && cfg.AgentDB != nil {
+		cfg.GitProjection = cfg.AgentDB
 	}
 	if cfg.Topologies == nil && cfg.AgentDB != nil {
 		cfg.Topologies = cfg.AgentDB
@@ -358,6 +379,13 @@ type Endpoints struct {
 	Schedule  string // "/agent/schedules/{id}" (GET, PUT, DELETE)
 	// The config log (§15.10) — read-only; the project comes from the JWT.
 	ConfigEvents string // "GET /agent/config-events"
+	// One record by id — what makes a changelog entry addressable, and what
+	// the revert action names.
+	ConfigEvent string // "GET /agent/config-events/{id}"
+	// The one write on this surface: a FORWARD compensating change (design
+	// §D). No MCP twin (D4) — an architect that could revert would be able to
+	// undo the human who had just corrected it.
+	RevertConfigEvent string // "POST /agent/config-events/{id}/revert"
 	// Attention requests (design B1) — read-only; the project comes from the JWT.
 	AttentionRequests string // "GET /agent/attention-requests"
 	// Memory (§7.6) — the project comes from the JWT, never from the request.
@@ -394,15 +422,48 @@ type Endpoints struct {
 	ListTopologies  string // "GET /agent/topologies"
 	PreviewTopology string // "POST /agent/topologies/preview"
 	ApplyTopology   string // "POST /agent/topologies/apply"
+	// The onboarding charter (T11 of the memory-coordinated-organisation
+	// design). CurrentCharter reads what the interview deposited and says
+	// whether it is fit to apply; ApplyCharter is the ONE approval, and reads
+	// the charter from the store rather than from its body — the interviewer
+	// runs in a container, and a container is the untrusted party.
+	CurrentCharter string // "GET /agent/charter/current"
+	ApplyCharter   string // "POST /agent/charter/apply"
 	// The image/skill catalogues (B4) — read-only; the project comes from the
 	// JWT. There is no write counterpart: both catalogues are append-only and
 	// are written only from inside a session (§13.4, §14.2).
-	ListImages   string // "GET /agent/images"
-	ListSkills   string // "GET /agent/skills"
+	ListImages string // "GET /agent/images"
+	ListSkills string // "GET /agent/skills"
+	// GitProjectionStatus is the console's read of the git projection's health
+	// (design/2026-09-09-git-projection.md, ticket G16). Read-only, and the
+	// project comes from the JWT: there is no write counterpart because the
+	// projection's configuration is four fields on project settings and its
+	// state is written only by the projector itself.
+	GitProjectionStatus string // "GET /agent/git-projection"
+	// GitBootstrap creates a project's configuration FROM its repository
+	// folder (ticket G26). Like the status read, the project comes from the
+	// JWT and never from a parameter; unlike it, this one writes — and refuses
+	// with 409 when the project already has configuration, because bootstrap
+	// creates a project from a folder and never merges a folder into a live
+	// one. See gitbootstraproute.go.
+	GitBootstrap string // "POST /agent/git-bootstrap"
+
 	ListWorkers  string // "GET /agent/workers"
 	GetWorker    string // "GET /agent/workers/{name}"
 	PutWorker    string // "PUT /agent/workers/{name}"
 	DeleteWorker string // "DELETE /agent/workers/{name}"
+
+	// GitWebhook is git projection's inbound door
+	// (design/2026-09-09-git-projection.md §C, ticket G12, gitwebhook.go).
+	// It authenticates itself — GitHub cannot hold a console JWT — by
+	// verifying an HMAC-SHA256 signature, so it MUST be mounted OUTSIDE
+	// apiAuthMiddleware, directly on the host's root mux, the same way
+	// cmd/agentd/main.go mounts the core MCP server
+	// (root.Handle(coreMCPPath, mcpSrv), never through h.Mux()). The pattern
+	// is named here only so every route this package defines is recorded in
+	// one place; Mux() does NOT register it — NewGitWebhookHandler
+	// (gitwebhook.go) builds the http.Handler the host mounts by hand.
+	GitWebhook string // "POST /agent/git/webhook"
 }
 
 // DefaultEndpoints is the canonical route layout.
@@ -447,6 +508,8 @@ var DefaultEndpoints = Endpoints{
 	Schedules:          "/agent/schedules",
 	Schedule:           "/agent/schedules/{id}",
 	ConfigEvents:       "GET /agent/config-events",
+	ConfigEvent:        "GET /agent/config-events/{id}",
+	RevertConfigEvent:  "POST /agent/config-events/{id}/revert",
 	AttentionRequests:  "GET /agent/attention-requests",
 	ListMemories:       "GET /agent/memories",
 	CreateMemory:       "POST /agent/memories",
@@ -463,8 +526,15 @@ var DefaultEndpoints = Endpoints{
 	ListTopologies:  "GET /agent/topologies",
 	PreviewTopology: "POST /agent/topologies/preview",
 	ApplyTopology:   "POST /agent/topologies/apply",
+	CurrentCharter:  "GET /agent/charter/current",
+	ApplyCharter:    "POST /agent/charter/apply",
 	ListImages:      "GET /agent/images",
 	ListSkills:      "GET /agent/skills",
+
+	GitProjectionStatus: GitProjectionEndpoint,
+	GitBootstrap:        GitBootstrapEndpoint,
+	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
+	GitWebhook: "POST /agent/git/webhook",
 }
 
 // Mux registers every handler on a fresh *http.ServeMux. Mount it under your
@@ -532,6 +602,8 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.Schedules:         h.Schedules,
 		e.Schedule:          h.Schedule,
 		e.ConfigEvents:      h.ListConfigEvents,
+		e.ConfigEvent:       h.GetConfigEvent,
+		e.RevertConfigEvent: h.RevertConfigEvent,
 		e.AttentionRequests: h.ListAttentionRequests,
 		e.ListMemories:      h.ListMemories,
 		e.ListDatasets:      h.ListDatasets,
@@ -544,9 +616,14 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.ListTopologies:    h.ListTopologies,
 		e.PreviewTopology:   h.PreviewTopology,
 		e.ApplyTopology:     h.ApplyTopologyHandler,
+		e.CurrentCharter:    h.GetCurrentCharter,
+		e.ApplyCharter:      h.ApplyCharter,
 		e.ListImages:        h.ListImages,
 		e.ListSkills:        h.ListSkills,
-		e.GetSessionByName:  h.GetSessionByName,
+
+		e.GitProjectionStatus: h.GetGitProjectionStatus,
+		e.GitBootstrap:        h.GitBootstrap,
+		e.GetSessionByName:    h.GetSessionByName,
 
 		e.DownloadArtifact:          h.DownloadArtifact,
 		e.SessionArtifactsByName:    h.SessionArtifactsByName,

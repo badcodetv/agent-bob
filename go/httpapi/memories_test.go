@@ -328,6 +328,9 @@ func TestListMemories_LivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = store.Close() })
 	mine, theirs := "memread-mine", "memread-theirs"
 	t.Cleanup(func() {
 		for _, p := range []string{mine, theirs} {
@@ -628,6 +631,9 @@ func TestMemoryReadRoutes_LivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = store.Close() })
 	mine, theirs := "memfull-mine", "memfull-theirs"
 	t.Cleanup(func() {
 		for _, p := range []string{mine, theirs} {
@@ -1182,6 +1188,9 @@ func TestMemoryAppendRoute_LivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = store.Close() })
 	mine, theirs := "memappend-mine", "memappend-theirs"
 	t.Cleanup(func() {
 		for _, p := range []string{mine, theirs} {
@@ -1418,6 +1427,9 @@ func TestListMemories_IncludeRetractedLivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = store.Close() })
 	// A project name nothing else can collide with: a fixed one leaves rows
 	// behind when a run is killed mid-test, and the latest_per assertions below
 	// would then fail for a reason that has nothing to do with the code.

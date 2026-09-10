@@ -153,6 +153,47 @@ export type {
 export { default as useTopologies } from './useTopologies.js'
 export type { UseTopologiesOptions, TopologiesApi } from './useTopologies.js'
 
+// The onboarding charter — the /agent/charter surface: what an interview
+// deposits, whether it is fit to approve, and the one approval that applies
+// it. NOT a roster: approving creates the architect, and the architect
+// designs the team.
+export {
+  CHARTER_ENDPOINTS,
+  DEFAULT_ARCHITECT_NAME,
+  DEFAULT_ARCHITECT_CRON,
+  coerceCharter,
+  coerceCharterIssue,
+  coerceCharterIssues,
+  coerceCharterEffects,
+  coerceCharterCurrent,
+  describeCharterCadence,
+  buildOnboardingSeed,
+} from './charter.js'
+export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './charter.js'
+export { default as useCharter } from './useCharter.js'
+export type { UseCharterOptions, CharterApi } from './useCharter.js'
+
+// The git projection (G16) — the pure client for GET /agent/git-projection,
+// and the prose that turns one health word into a sentence an operator can act
+// on. Every failure mode this describes is one nobody would otherwise notice.
+export {
+  GIT_PROJECTION_ENDPOINT,
+  GIT_PROJECTION_HEALTHS,
+  GIT_PROJECTION_IGNORED_EXPLANATION,
+  coerceGitProjectionStatus,
+  coerceGitProjectionNote,
+  describeGitProjection,
+  isGitProjectionHealth,
+  shortSha,
+} from './gitProjection.js'
+export type {
+  GitProjectionHealth,
+  GitProjectionNote,
+  GitProjectionSeverity,
+  GitProjectionStatus,
+  GitProjectionSummary,
+} from './gitProjection.js'
+
 // Events & observability (F1) — the `/agent/events` + `/agent/deliveries` read
 // surface: pure helpers, the overview hook, and the dry-run subscription
 // matcher. Read-only; F2 owns the subscription/schedule editors.
@@ -523,14 +564,17 @@ export type { WorkerTriggersProps } from './components/WorkerTriggers.js'
 // sentence that announces a new one (design 28 §3, decision K9).
 export {
   NAV_ALWAYS,
+  NAV_CONDITIONAL,
   NAV_ENTRIES,
   NAV_LABELS,
+  everythingRevealed,
   navRevealSentence,
   revealedNav,
 } from './navReveal.js'
 export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'
 export {
   default as useNavReveal,
+  NAV_REVEAL_POLL_MS,
   navRevealKey,
   readRevealed,
   writeRevealed,
@@ -846,6 +890,20 @@ export { default as SubscriptionEditor } from './components/SubscriptionEditor.j
 export type { SubscriptionEditorProps } from './components/SubscriptionEditor.js'
 export { default as ScheduleEditor } from './components/ScheduleEditor.js'
 export type { ScheduleEditorProps } from './components/ScheduleEditor.js'
+
+// The onboarding charter panel — the one human gate between an interview and
+// an architect.
+export { default as CharterPanel } from './components/CharterPanel.js'
+export type { CharterPanelProps } from './components/CharterPanel.js'
+export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './components/RunArchitectControl.js'
+export type { RunArchitectControlProps } from './components/RunArchitectControl.js'
+export { default as OnboardingPage } from './components/OnboardingPage.js'
+export type { OnboardingPageProps } from './components/OnboardingPage.js'
+
+// The git projection panel — presentational, so it lives in the components
+// tier: it takes a status and renders it, and ProjectSettingsPage owns the read.
+export { default as GitProjectionPanel } from './components/GitProjectionPanel.js'
+export type { GitProjectionPanelProps } from './components/GitProjectionPanel.js'
 export { default as NlAssistField } from './components/NlAssistField.js'
 export type { NlAssistFieldProps } from './components/NlAssistField.js'
 

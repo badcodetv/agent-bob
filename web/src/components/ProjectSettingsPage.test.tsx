@@ -189,6 +189,90 @@ describe('budget/cap fields', () => {
   })
 })
 
+describe('git projection fields (G24)', () => {
+  it('presents an empty repository as projection being off', async () => {
+    render(<ProjectSettingsPage />)
+    const remote = await screen.findByLabelText(/repository/i)
+    expect(remote).toHaveValue('')
+    expect(screen.getByText(/git projection is off/i)).toBeInTheDocument()
+  })
+
+  it('says projection is on once a repository is typed', async () => {
+    render(<ProjectSettingsPage />)
+    const remote = await screen.findByLabelText(/repository/i)
+    await userEvent.type(remote, 'https://github.com/acme/orange')
+    expect(await screen.findByText(/renders to this repository/i)).toBeInTheDocument()
+  })
+
+  it('flags an invalid git_token_env inline, without needing a save attempt', async () => {
+    render(<ProjectSettingsPage />)
+    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
+    fireEvent.change(tokenEnv, { target: { value: '1-not-valid' } })
+    expect(await screen.findByText(/not a valid environment variable name/i)).toBeInTheDocument()
+  })
+
+  it('accepts a valid git_token_env with no error', async () => {
+    render(<ProjectSettingsPage />)
+    const tokenEnv = await screen.findByLabelText(/push token.*environment variable name/i)
+    fireEvent.change(tokenEnv, { target: { value: 'GIT_PUSH_TOKEN' } })
+    expect(screen.queryByText(/not a valid environment variable name/i)).not.toBeInTheDocument()
+  })
+
+  it('flags a git_subfolder that is not a single path segment', async () => {
+    render(<ProjectSettingsPage />)
+    const subfolder = await screen.findByLabelText(/subfolder/i)
+    fireEvent.change(subfolder, { target: { value: '../escape' } })
+    expect(await screen.findByText(/single path segment/i)).toBeInTheDocument()
+  })
+
+  it('flags an invalid git_webhook_secret_env inline, without needing a save attempt', async () => {
+    render(<ProjectSettingsPage />)
+    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
+    fireEvent.change(webhookSecretEnv, { target: { value: '1-not-valid' } })
+    expect(await screen.findByText(/not a valid environment variable name/i)).toBeInTheDocument()
+  })
+
+  it('accepts a valid git_webhook_secret_env with no error', async () => {
+    render(<ProjectSettingsPage />)
+    const webhookSecretEnv = await screen.findByLabelText(/webhook secret.*environment variable name/i)
+    fireEvent.change(webhookSecretEnv, { target: { value: 'GIT_WEBHOOK_SECRET' } })
+    expect(screen.queryByText(/not a valid environment variable name/i)).not.toBeInTheDocument()
+  })
+
+  it('presents an empty git_webhook_secret_env as inbound webhooks not being configured', async () => {
+    render(<ProjectSettingsPage />)
+    expect(await screen.findByText(/inbound webhooks are not configured/i)).toBeInTheDocument()
+  })
+
+  it('sends the git fields on save, whole-object', async () => {
+    render(<ProjectSettingsPage />)
+    // fireEvent.change rather than userEvent.type, as in the tests above: this is
+    // about what the save SENDS, not about typing. Typed a keystroke at a time,
+    // these three values were 62 re-renders of an eleven-field form that
+    // validates live; it took ~2s here and timed out at 5s on CI's slower
+    // runners. The typing behaviour itself is covered by "says projection is on
+    // once a repository is typed", above.
+    fireEvent.change(await screen.findByLabelText(/repository/i), {
+      target: { value: 'https://github.com/acme/orange' },
+    })
+    fireEvent.change(await screen.findByLabelText(/push token.*environment variable name/i), {
+      target: { value: 'GIT_PUSH_TOKEN' },
+    })
+    fireEvent.change(await screen.findByLabelText(/webhook secret.*environment variable name/i), {
+      target: { value: 'GIT_WEBHOOK_SECRET' },
+    })
+    await explain()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect(puts()[0]!.body).toMatchObject({
+      git_remote: 'https://github.com/acme/orange',
+      git_token_env: 'GIT_PUSH_TOKEN',
+      git_webhook_secret_env: 'GIT_WEBHOOK_SECRET',
+    })
+  })
+})
+
 describe('dirty tracking', () => {
   it('disables save until something changes, and again after saving', async () => {
     render(<ProjectSettingsPage />)
@@ -204,5 +288,83 @@ describe('dirty tracking', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /save settings/i })).toBeDisabled(),
     )
+  })
+})
+
+describe('the project-wide briefing (B1)', () => {
+  const explainIt = async () => {
+    await userEvent.type(screen.getByLabelText(/why\?/i), 'adding the rulebook')
+  }
+
+  it('shows what the project already has', async () => {
+    stored = { ...stored, briefing: ['name=label-registry'] }
+    render(<ProjectSettingsPage />)
+    expect(await screen.findByDisplayValue('name=label-registry')).toBeInTheDocument()
+  })
+
+  // Two blast-radius sentences, and both matter: one field here edits every
+  // worker's prompt at once, and a chat receives none of it — which nothing
+  // else in the console says, and which is invisible when it bites.
+  it('says who gets these, and who does not', async () => {
+    render(<ProjectSettingsPage />)
+    const panel = await screen.findByTestId('project-briefing')
+    expect(panel.textContent).toMatch(/every job in this project/i)
+    expect(panel.textContent).toMatch(/chat sessions do not receive these/i)
+  })
+
+  it('adds and removes entries, and sends them', async () => {
+    render(<ProjectSettingsPage />)
+    await screen.findByTestId('project-briefing')
+
+    await userEvent.click(screen.getByRole('button', { name: /add a selector/i }))
+    await userEvent.type(screen.getByLabelText(/^briefing selector 1$/i), 'name=label-registry')
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
+  })
+
+  it('removes a row', async () => {
+    stored = { ...stored, briefing: ['name=label-registry', 'kind=lesson'] }
+    render(<ProjectSettingsPage />)
+    await screen.findByDisplayValue('kind=lesson')
+
+    await userEvent.click(screen.getByRole('button', { name: /^remove briefing selector 2$/i }))
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
+  })
+
+  it('refuses an unparseable selector with the engine own words, and blocks the save', async () => {
+    render(<ProjectSettingsPage />)
+    await screen.findByTestId('project-briefing')
+
+    await userEvent.click(screen.getByRole('button', { name: /add a selector/i }))
+    fireEvent.change(screen.getByLabelText(/^briefing selector 1$/i), {
+      target: { value: 'kind in (a' },
+    })
+    await explainIt()
+
+    expect(await screen.findByText(/unbalanced/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /save settings/i })).toBeDisabled()
+    expect(puts()).toHaveLength(0)
+  })
+
+  // PUT is whole-object: before this field existed, every unrelated settings
+  // save wrote briefing: null and wiped it.
+  it('sends the briefing on a save that had nothing to do with it', async () => {
+    stored = { ...stored, briefing: ['name=label-registry'] }
+    render(<ProjectSettingsPage />)
+    await screen.findByLabelText(/base image/i)
+
+    await userEvent.type(screen.getByLabelText(/base image/i), '2')
+    await explainIt()
+    await userEvent.click(screen.getByRole('button', { name: /save settings/i }))
+
+    await waitFor(() => expect(puts()).toHaveLength(1))
+    expect((puts()[0].body as { briefing: string[] }).briefing).toEqual(['name=label-registry'])
   })
 })

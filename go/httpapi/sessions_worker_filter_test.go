@@ -13,7 +13,7 @@ import (
 // database rather than in the browser (design 15 §B5): the worker page used to
 // pull a page of sessions and filter it client-side, so a busy project hid the
 // older jobs of a quiet worker. The filter is ANDed with the project scope, and
-// an absent/empty parameter must remain "no filter" rather than worker = ''.
+// an absent/empty parameter must remain "no filter" rather than worker = ”.
 func TestListSessions_WorkerFilter_LivePG(t *testing.T) {
 	url := os.Getenv("AGENTKIT_TEST_POSTGRES_URL")
 	if url == "" {
@@ -23,6 +23,9 @@ func TestListSessions_WorkerFilter_LivePG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open live postgres: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = store.Close() })
 	ctx := context.Background()
 	mine, theirs := "wf-mine-"+t.Name(), "wf-theirs-"+t.Name()
 	t.Cleanup(func() {

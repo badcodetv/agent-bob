@@ -63,7 +63,14 @@ func newConfigLogTools(store configHistoryStore, permalinks permalinker) *config
 // vocabulary ("ask again with entity: worker:x") and the only cheap way for a
 // reader to tell two workers' rewrites apart in one mixed page.
 type configHistoryRecord struct {
-	ID           string          `json:"id"`
+	ID string `json:"id"`
+	// Seq is the per-project sequence number, and it is the ORDER: created_at
+	// is a millisecond wall clock and two writes can share one, so a reader
+	// that sorted or reasoned by timestamp would put two same-millisecond
+	// changes in an arbitrary order. It is also what "the newest change to this
+	// entity" means when the architect checks whether its own last change is
+	// still the latest.
+	Seq          int64           `json:"seq"`
 	Action       string          `json:"action"`
 	Entity       string          `json:"entity"`
 	ActorWorker  string          `json:"actor_worker"`
@@ -81,6 +88,7 @@ func (c *configLogTools) record(project string, ev *agentdb.ConfigEvent) configH
 	}
 	return configHistoryRecord{
 		ID:           ev.ID,
+		Seq:          ev.Seq,
 		Action:       ev.Action,
 		Entity:       entity,
 		ActorWorker:  ev.ActorWorker,

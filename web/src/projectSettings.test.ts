@@ -12,6 +12,7 @@ import {
   projectSettingsBody,
   PROJECT_SETTING_NUMERICS,
   validateProjectSettings,
+  validateProjectBriefing,
   DEFAULT_BRIEFING_MAX_BYTES,
   DEFAULT_MAX_CONCURRENT_JOBS,
   DEFAULT_SNAPSHOT_TTL_DAYS,
@@ -145,6 +146,16 @@ describe('coerceProjectSettings', () => {
     expect(coerceProjectSettings({ mcp_config: [1, 2] }).mcp_config).toEqual({})
   })
 
+  it('defaults briefing to an empty list and filters out non-string entries', () => {
+    expect(coerceProjectSettings({ base_image: 'core:1' }, 'acme').briefing).toEqual([])
+    const s = coerceProjectSettings({ briefing: ['name=label-registry', 3, null] }, 'acme')
+    expect(s.briefing).toEqual(['name=label-registry'])
+  })
+
+  it('drops a briefing that is not an array', () => {
+    expect(coerceProjectSettings({ briefing: 'name=x' }, 'acme').briefing).toEqual([])
+  })
+
   it('survives a null/garbage response', () => {
     expect(coerceProjectSettings(null, 'acme').project).toBe('acme')
     expect(coerceProjectSettings('nope', 'acme').project).toBe('acme')
@@ -166,5 +177,63 @@ describe('projectSettingsBody', () => {
     })
     expect(projectSettingsBody(settings)).not.toHaveProperty('rationale')
     expect(projectSettingsBody(settings, '   ')).not.toHaveProperty('rationale')
+  })
+
+  it('carries briefing through to the PUT body', () => {
+    const settings = { ...defaultProjectSettings('acme'), briefing: ['name=label-registry'] }
+    expect(projectSettingsBody(settings).briefing).toEqual(['name=label-registry'])
+  })
+})
+
+describe('validateProjectBriefing', () => {
+  it('accepts the selectors the engine accepts', () => {
+    expect(
+      validateProjectBriefing([
+        'name=label-registry',
+        'kind in (summary,lesson)',
+        'kind!=draft',
+        'urgent',
+        '!archived',
+      ]),
+    ).toEqual({})
+  })
+
+  // Borrowed from the engine's own grammar, not restated: a stricter rule
+  // here would refuse selectors the server accepts, and the human would have
+  // no way to find out they were wrong.
+  it('refuses what the engine refuses, keyed by row', () => {
+    const errors = validateProjectBriefing(['name=ok', 'kind in (a', 'no spaces here'])
+    expect(errors[0]).toBeUndefined()
+    expect(errors[1]).toMatch(/unbalanced/)
+    expect(errors[2]).toMatch(/not a valid requirement/)
+  })
+
+  // A row that vanishes when you save it reads as a bug.
+  it('calls a blank row an error rather than silently dropping it', () => {
+    expect(validateProjectBriefing(['   '])[0]).toMatch(/empty/)
+  })
+})
+
+describe('validateProjectSettings with a briefing', () => {
+  it('blocks the save when any selector is unparseable', () => {
+    const s = { ...defaultProjectSettings('acme'), briefing: ['kind in (a'] }
+    expect(validateProjectSettings(s).briefing).toMatch(/unbalanced/)
+  })
+
+  it('is silent when every selector parses', () => {
+    const s = { ...defaultProjectSettings('acme'), briefing: ['name=label-registry'] }
+    expect(validateProjectSettings(s).briefing).toBeUndefined()
+  })
+})
+
+describe('projectSettingsBody carries the briefing', () => {
+  // PUT is whole-object, so a body that omitted this would wipe the project
+  // briefing on every unrelated settings save.
+  it('sends briefing so an unrelated save cannot erase it', () => {
+    const body = projectSettingsBody(
+      { ...defaultProjectSettings('acme'), briefing: ['name=label-registry'] },
+      'why',
+    )
+    expect(body.briefing).toEqual(['name=label-registry'])
   })
 })

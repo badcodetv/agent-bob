@@ -222,6 +222,11 @@ export function validateWorker(w: WorkerDraft): WorkerFieldErrors {
  * suggest the body could change them (it cannot). The image is trimmed —
  * trailing whitespace in an image pointer is a silent resolution failure.
  *
+ * Every field is sent explicitly. Since DI11 the route keeps anything a body
+ * omits, so this is no longer load-bearing against a wipe — but the editor
+ * holds the whole row anyway, and a body that says exactly what the human saw
+ * is the easiest one to reason about in the config log.
+ *
  * `rationale` is the operator's one-line reason, threaded into the config event
  * (design B3 / K2). Omitted when empty rather than sent blank, so an absent
  * reason reads as absent — the same contract `scheduleBody` has.
@@ -243,10 +248,20 @@ export function workerBody(w: WorkerDraft, rationale = ''): {
     mcp_config: w.mcp_config ?? {},
     image: w.image.trim(),
     max_instances: w.max_instances,
+    // Sent verbatim, and the null/[] distinction is load-bearing since T27.
+    //
+    // null means "leave the stored briefing alone" and [] means "clear it", so
+    // this cannot coerce either way. Coercing null → [] makes an ordinary
+    // freeze look like a briefing change, and the config log then records
+    // `worker_update` instead of `worker_freeze` — it picks the narrow action
+    // only when every other field is byte-identical. Coercing [] → null makes
+    // "remove every selector, save" a silent no-op. The draft is what keeps
+    // them apart: null is a row that never had one, [] is a human emptying it.
     briefing: w.briefing,
     enabled: w.enabled,
-    // Always sent explicitly: PUT is create-or-replace, and an omitted frozen
-    // reads as false server-side — an accidental unfreeze, silently.
+    // Always sent explicitly. Until DI11 an omitted frozen read as false
+    // server-side — a silent unfreeze — so this line was a guard. The route now
+    // keeps an omitted frozen; sending it is simply saying what the human saw.
     frozen: w.frozen,
   }
   return rationale.trim() === '' ? body : { ...body, rationale: rationale.trim() }

@@ -290,6 +290,158 @@ func TestBriefingSectionsDedupesTheDefaultSelector(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// B1 — the project-wide briefing (design/2026-09-08-memory-coordinated-
+// organisation.md), unioned in after the default selector and before the
+// worker's own entries.
+// ---------------------------------------------------------------------------
+
+// TestBriefingSectionsProjectWideBriefingReachesAWorkerWithNoneOfItsOwn: a
+// worker that configures no briefing selectors at all still gets the
+// project's — B1's whole point.
+func TestBriefingSectionsProjectWideBriefingReachesAWorkerWithNoneOfItsOwn(t *testing.T) {
+	src := briefingSource(map[string]string{
+		"kind=rolling-summary,worker=w": "40 emails answered.",
+		"name=label-registry":           "kind: summary | lesson | house-style",
+	})
+	worker := briefingWorker("w") // no briefing of its own
+	settings := &agentdb.ProjectSettings{Project: "acme", Briefing: agentdb.SelectorList{"name=label-registry"}}
+
+	got := BuildBriefingSections(context.Background(), src, "acme", worker, settings)
+
+	want := []BriefingSection{
+		{Heading: DefaultBriefingHeading, Content: "40 emails answered."},
+		{Heading: DefaultBriefingHeading + ": name=label-registry", Content: "kind: summary | lesson | house-style"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sections, want %d: %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("section %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestBriefingSectionsProjectAndWorkerDedupeAcrossWhitespace: the project list
+// and the worker's own list can name the same selector, one padded with
+// whitespace, and it must still collapse to one section — `add` compares raw
+// strings, so both sides must be trimmed identically before it sees them.
+func TestBriefingSectionsProjectAndWorkerDedupeAcrossWhitespace(t *testing.T) {
+	src := briefingSource(map[string]string{
+		"kind=rolling-summary,worker=w": "summary",
+		"name=house-style":              "British English.",
+	})
+	worker := briefingWorker("w", "  name=house-style  ") // padded
+	settings := &agentdb.ProjectSettings{Project: "acme", Briefing: agentdb.SelectorList{"name=house-style"}}
+
+	got := BuildBriefingSections(context.Background(), src, "acme", worker, settings)
+
+	want := []BriefingSection{
+		{Heading: DefaultBriefingHeading, Content: "summary"},
+		{Heading: DefaultBriefingHeading + ": name=house-style", Content: "British English."},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d sections, want %d (exactly one house-style section): %#v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("section %d = %#v, want %#v", i, got[i], want[i])
+		}
+	}
+	// One read of house-style, not two.
+	n := 0
+	for _, c := range src.calls {
+		if c == "name=house-style" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("house-style read %d times, want 1: %v", n, src.calls)
+	}
+}
+
+// TestBriefingSectionsProjectSelectorOrderedBetweenDefaultAndWorker pins B1's
+// stated order: built-in default, then the project's own entries, then the
+// worker's — so an operator reading a composed prompt sees the universal
+// rules before the worker-specific ones.
+func TestBriefingSectionsProjectSelectorOrderedBetweenDefaultAndWorker(t *testing.T) {
+	src := briefingSource(map[string]string{
+		"kind=rolling-summary,worker=w": "summary",
+		"name=label-registry":           "the registry",
+		"kind=lesson":                   "a lesson",
+	})
+	worker := briefingWorker("w", "kind=lesson")
+	settings := &agentdb.ProjectSettings{Project: "acme", Briefing: agentdb.SelectorList{"name=label-registry"}}
+
+	got := BuildBriefingSections(context.Background(), src, "acme", worker, settings)
+	if len(got) != 3 {
+		t.Fatalf("got %d sections, want 3: %#v", len(got), got)
+	}
+	if got[0].Heading != DefaultBriefingHeading {
+		t.Fatalf("section 0 = %#v, want the built-in default first", got[0])
+	}
+	if got[1].Heading != DefaultBriefingHeading+": name=label-registry" {
+		t.Fatalf("section 1 = %#v, want the project briefing second", got[1])
+	}
+	if got[2].Heading != DefaultBriefingHeading+": kind=lesson" {
+		t.Fatalf("section 2 = %#v, want the worker's own briefing last", got[2])
+	}
+}
+
+// TestBriefingSectionsUnparseableProjectEntryIsSkippedNotFatal: an unparseable
+// project-briefing selector degrades exactly like an unparseable worker
+// selector already does (compose.go:259-279) — logged, its section omitted,
+// the rest of the job's briefing and the job itself unaffected.
+func TestBriefingSectionsUnparseableProjectEntryIsSkippedNotFatal(t *testing.T) {
+	src := briefingSource(map[string]string{"kind=rolling-summary,worker=w": "summary"})
+	src.errs["kind in (unterminated"] = errors.New("selector: unbalanced '('")
+	worker := briefingWorker("w")
+	settings := &agentdb.ProjectSettings{Project: "acme", Briefing: agentdb.SelectorList{"kind in (unterminated"}}
+
+	got := BuildBriefingSections(context.Background(), src, "acme", worker, settings)
+	if len(got) != 1 || got[0].Heading != DefaultBriefingHeading {
+		t.Fatalf("sections = %#v, want just the default (the bad project selector must not fail the job)", got)
+	}
+
+	in := baseInput()
+	in.Worker = worker
+	in.Briefing = got
+	if _, err := ComposeJob(context.Background(), in); err != nil {
+		t.Fatalf("ComposeJob must survive an unparseable project briefing entry: %v", err)
+	}
+}
+
+// TestBriefingSectionsNoProjectBriefingBehavesAsBefore: an existing project
+// with no `settings.Briefing` set (nil, the default for every project written
+// before B1 shipped) composes byte-identically to the pre-B1 behaviour.
+func TestBriefingSectionsNoProjectBriefingBehavesAsBefore(t *testing.T) {
+	src := briefingSource(map[string]string{
+		"kind=rolling-summary,worker=w": "summary",
+		"kind=lesson":                   "a lesson",
+	})
+	worker := briefingWorker("w", "kind=lesson")
+
+	withNilSettings := BuildBriefingSections(context.Background(), src, "acme", worker, nil)
+	withEmptySettings := BuildBriefingSections(context.Background(), src, "acme", worker,
+		&agentdb.ProjectSettings{Project: "acme"})
+
+	want := []BriefingSection{
+		{Heading: DefaultBriefingHeading, Content: "summary"},
+		{Heading: DefaultBriefingHeading + ": kind=lesson", Content: "a lesson"},
+	}
+	for _, got := range [][]BriefingSection{withNilSettings, withEmptySettings} {
+		if len(got) != len(want) {
+			t.Fatalf("got %d sections, want %d: %#v", len(got), len(want), got)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("section %d = %#v, want %#v", i, got[i], want[i])
+			}
+		}
+	}
+}
+
 // TestBriefingSectionsSelectorFormat pins the built-in selector text itself:
 // it is the §7.4 contract between core and every archivist prompt in every
 // project, so changing it silently orphans every rolling summary ever written.

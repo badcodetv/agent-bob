@@ -46,14 +46,14 @@ func TestMsTimeArgParseStringForms(t *testing.T) {
 // and every rejection names the accepted forms.
 func TestMsTimeArgRejectsAmbiguousForms(t *testing.T) {
 	for _, in := range []string{
-		"7 days",  // spaces
-		"7 d",     // space before unit
-		"-7d",     // sign
-		"0d",      // zero is not a window
-		"d",       // no count
-		"7",       // unitless — would be an absurd millisecond value
-		"7w",      // unsupported unit
-		"7D",      // wrong case
+		"7 days", // spaces
+		"7 d",    // space before unit
+		"-7d",    // sign
+		"0d",     // zero is not a window
+		"d",      // no count
+		"7",      // unitless — would be an absurd millisecond value
+		"7w",     // unsupported unit
+		"7D",     // wrong case
 		"last week",
 		"",
 	} {

@@ -50,6 +50,10 @@ func openLivePGNoVectorColumn(t *testing.T) *Store {
 	if err := admin.DB().Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create schema %s: %v", schema, err)
 	}
+	// Drop the schema first, then release BOTH pools — this helper opens two
+	// (admin + the schema-scoped one), and t.Cleanup runs last-registered
+	// first, so the drop registered here still happens before either close.
+	t.Cleanup(func() { _ = admin.Close() })
 	t.Cleanup(func() { _ = admin.DB().Exec("DROP SCHEMA " + schema + " CASCADE").Error })
 
 	sep := "?"
@@ -60,6 +64,7 @@ func openLivePGNoVectorColumn(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open live postgres in schema %s: %v", schema, err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 
 	// Did migration 022's own exception path fire? Recorded, not asserted: the
 	// mechanism is what this setup reproduces, but the STATE is what the tests

@@ -1,0 +1,48 @@
+{
+  "rules": [
+    {
+      "match": "You are interviewing the person who has just created this project",
+      "turns": [
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "I have enough to write the charter. Checking it before I deposit it."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__charter_validate",
+              "input": {
+                "charter": "Charter v1: a weekly bookshop newsletter, judged on it going out and the list growing.\n{\n  \"goal\": \"Send one email newsletter every week to the shop's mailing list, so people who came in once come back.\",\n  \"measure\": \"In a month: four newsletters have gone out, one per week, and the subscriber count is higher than the 430 it is today.\",\n  \"label_rules\": \"kind=decision - a choice that was made and why. kind=summary - what happened in one piece of work; name=<slug>. kind=lesson - something that should change how we do this next time. kind=fact - a durable fact; name=<what-it-is>; subscriber-count lives here. kind=draft - a newsletter written but not sent; name=<issue-slug>.\",\n  \"rationale\": \"The shop's problem is repeat visits, not new customers. The measure is 'it went out' rather than sales because nothing here can attribute a sale to an email.\",\n  \"project_background\": \"An independent bookshop with one shopfront and about 430 people on its mailing list.\"\n}"
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Valid. Depositing it under this interview's session id."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__memory_create",
+              "input": {
+                "content": "Charter v1: a weekly bookshop newsletter, judged on it going out and the list growing.\n{\n  \"goal\": \"Send one email newsletter every week to the shop's mailing list, so people who came in once come back.\",\n  \"measure\": \"In a month: four newsletters have gone out, one per week, and the subscriber count is higher than the 430 it is today.\",\n  \"label_rules\": \"kind=decision - a choice that was made and why. kind=summary - what happened in one piece of work; name=<slug>. kind=lesson - something that should change how we do this next time. kind=fact - a durable fact; name=<what-it-is>; subscriber-count lives here. kind=draft - a newsletter written but not sent; name=<issue-slug>.\",\n  \"rationale\": \"The shop's problem is repeat visits, not new customers. The measure is 'it went out' rather than sales because nothing here can attribute a sale to an email.\",\n  \"project_background\": \"An independent bookshop with one shopfront and about 430 people on its mailing list.\"\n}",
+                "labels": { "kind": "org-charter", "name": "e2e-onboard" }
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The charter is on screen. Nothing exists yet — read it, and approve it when it looks right."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

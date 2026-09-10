@@ -7,12 +7,13 @@
 # `docker compose logs -f` across five services is unreadable in one pane.
 #
 #   ./stack build          build the images
-#   ./stack start          REAL model + tmux panes, sessions PULL their base
-#                          image from Artifact Registry  (BILLABLE; production's
-#                          path). Needs ./stack publish-base first.
+#   ./stack start          REAL model + the tmux log wall, sessions PULL their
+#                          base image from Artifact Registry  (BILLABLE;
+#                          production's path). Needs ./stack publish-base first.
 #   ./stack start mock     the same, with the deterministic mock model (free)
 #   ./stack start local    build the harness into DinD instead of pulling —
 #                          the offline escape hatch, no GCP credentials needed
+#     [--no-tmux]            ... and don't open the log wall (also: NO_TMUX=1)
 #   ./stack publish-base [tag]    build + push session-base/session-core to
 #                          Artifact Registry (default tag: dev; never moves :latest)
 #   ./stack stop           tear it down and kill the tmux session
@@ -25,6 +26,35 @@
 #   ./stack clean          delete every session (frees containers + host ports)
 #   ./stack testdb [up|down]  throwaway Postgres for the live-PG Go suite
 #   ./stack test-go [args]    go test with live Postgres wired up correctly
+#
+# Both `start` and `wolf up` finish by opening a tmux session (default name
+# "agent-orange", override with TMUX_SESSION) holding one `docker compose logs
+# -f` pane per group of services plus two empty panes to type in. Detaching
+# (C-b d) leaves the stack running; `stop` / `wolf down` kill the session too.
+# Re-running either command while the session exists just re-attaches to it.
+#
+# ── Agent Wolf: the joint development workflow ───────────────────────────────
+# Stands up BOTH stacks against the REAL providers (real model, real Artifact
+# Registry, real Google sign-in), because that is the only way local resembles
+# deployed. BILLABLE. Needs a sibling ../agent-wolf checkout (or WOLF_REPO).
+#
+#   ./stack wolf up        publish the wolf session image, start Orange with the
+#                          wolf project in its map, start Wolf, bootstrap it
+#     [mock]                 ... with the free mock model instead
+#     [--cron EXPR]          researcher cron (default: Wolf's daily 06:00 UTC)
+#     [--gcs]                snapshots to real GCS under your own prefix
+#     [--test-login]         mount POST /api/auth/dev-login for the Playwright rig.
+#                            NO login form is shown — the sign-in page is Google-only
+#                            since 2026-09-08; this is the API route alone.
+#     [--skip-image]         reuse the published session image as-is
+#     [--no-tmux]            don't open the log wall at the end (also: NO_TMUX=1)
+#   ./stack wolf down      stop both stacks
+#   ./stack wolf status    both stacks, the model, the image, session count
+#   ./stack wolf logs      follow Wolf's logs
+#   ./stack wolf env       the resolved config of both, secrets redacted
+#   ./stack wolf image     build + push session-wolf only
+#   ./stack wolf bootstrap re-seed the wolf project (idempotent)
+#   ./stack wolf rotate    replace the local dev secrets
 #
 set -euo pipefail
 
@@ -155,6 +185,96 @@ have_key() {
   [[ -n "$k$t" ]]
 }
 
+# ── The tmux log wall ────────────────────────────────────────────────────────
+# `docker compose logs -f` across five (or seven) services in one pane is
+# unreadable, so both `start` and `wolf up` end by opening a tmux session with
+# one pane per group of services and a couple of empty panes at the bottom to
+# type in. Same idea as Platinum's `./stack start`.
+#
+# Takes one argument per pane, top to bottom. Each is either:
+#   'cmd'          a command to run in that pane
+#   'ROWS|cmd'     the same, but force the pane to ROWS lines high
+#   ''             leave the pane empty (a shell prompt, cwd = the repo)
+#
+# Panes are addressed by tmux PANE ID (%3), never by index: `send-keys -t 0`
+# resolves the index against tmux's *current* session, which is not necessarily
+# ours when we create the session detached — and a user with pane-base-index 1
+# would have every command land one pane off.
+tmux_wall() {
+  local specs=("$@") n=$# i
+
+  if [[ -n "${NO_TMUX:-}" ]]; then
+    echo "NO_TMUX is set — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    echo "tmux is not installed — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+  if ! [[ -t 0 && -t 1 ]]; then
+    echo "Not a terminal — not opening the log wall.  Logs: ./stack logs [svc…]"
+    return 0
+  fi
+
+  # Running from INSIDE tmux is the normal case here, not an error — but
+  # `attach` would then nest a session inside itself, which tmux refuses and
+  # which leaves the terminal looking hung. Switch the existing client instead.
+  local enter=(-2 attach-session -t "$TMUX_SESSION")
+  [[ -n "${TMUX:-}" ]] && enter=(switch-client -t "$TMUX_SESSION")
+
+  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    echo "tmux session $TMUX_SESSION already exists. Attaching…"
+    sleep 1
+    exec tmux "${enter[@]}"
+  fi
+
+  echo "Creating tmux session $TMUX_SESSION with $n panes…"
+  local size w h
+  # Inside tmux, `stty size` reports the PANE, not the whole terminal, and the
+  # wall would be built for a window half the height it is about to occupy.
+  if [[ -n "${TMUX:-}" ]]; then
+    size="$(tmux display-message -p '#{client_height} #{client_width}' 2>/dev/null || true)"
+  fi
+  [[ -n "${size:-}" ]] || size=$(stty size 2>/dev/null || echo "50 200")
+  h=$(echo -n "$size" | awk '{print $1}'); w=$(echo -n "$size" | awk '{print $2}')
+  tmux -2 new-session -d -s "$TMUX_SESSION" -c "$DIR" -x "${w:-200}" -y "$(( ${h:-50} - 1 ))"
+
+  # Create every pane FIRST, then fill them. A split that fails for want of rows
+  # must not silently shift the remaining commands up into the wrong panes.
+  local made=1
+  for (( i = 1; i < n; i++ )); do
+    tmux split-window -v -t "$TMUX_SESSION" -c "$DIR" 2>/dev/null || break
+    tmux select-layout -t "$TMUX_SESSION" even-vertical >/dev/null 2>&1 || true
+    made=$(( made + 1 ))
+  done
+  if [[ "$made" -lt "$n" ]]; then
+    echo "note: this terminal only fits $made of the $n panes — the last $(( n - made )) were dropped."
+    echo "      Make the window taller and re-run, or open them by hand."
+  fi
+
+  local ids=() line
+  while IFS= read -r line; do ids+=("$line"); done \
+    < <(tmux list-panes -t "$TMUX_SESSION" -F '#{pane_id}')
+
+  local spec cmd rows landing=""
+  for (( i = 0; i < made && i < ${#ids[@]}; i++ )); do
+    spec="${specs[$i]}"; rows=""; cmd="$spec"
+    if [[ "$spec" == [0-9]*"|"* ]]; then rows="${spec%%|*}"; cmd="${spec#*|}"; fi
+    if [[ -z "$cmd" ]]; then
+      # First empty pane is where you land on attach, so you can type at once.
+      [[ -z "$landing" ]] && landing="${ids[$i]}"
+      continue
+    fi
+    tmux send-keys -t "${ids[$i]}" "$cmd" C-m
+    # Resized after every split, because select-layout even-vertical undoes it.
+    [[ -n "$rows" ]] && tmux resize-pane -t "${ids[$i]}" -y "$rows" 2>/dev/null || true
+  done
+
+  [[ -n "$landing" ]] && tmux select-pane -t "$landing" 2>/dev/null || true
+
+  tmux "${enter[@]}"
+}
+
 # ── Commands ─────────────────────────────────────────────────────────────────
 
 build() {
@@ -177,13 +297,18 @@ start() {
     case "$arg" in
       real|mock)     mode="$arg" ;;
       local|registry) images="$arg" ;;
-      *) echo "usage: ./stack start [real|mock] [registry|local]" >&2; exit 1 ;;
+      --no-tmux)     export NO_TMUX=1 ;;
+      *) echo "usage: ./stack start [real|mock] [registry|local] [--no-tmux]" >&2; exit 1 ;;
     esac
   done
 
-  if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+  # An existing session means the stack is already up in some mode; re-attach
+  # rather than reconfiguring agentd out from under it. (tmux_wall would attach
+  # too, but only after a `compose up` that could swap real credentials for mock.)
+  if [[ -z "${NO_TMUX:-}" ]] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     echo "Session $TMUX_SESSION already exists. Attaching…"
-    exec tmux -2 attach -t "$TMUX_SESSION"
+    if [[ -n "${TMUX:-}" ]]; then exec tmux switch-client -t "$TMUX_SESSION"
+    else exec tmux -2 attach -t "$TMUX_SESSION"; fi
   fi
 
   if [[ "$images" == "registry" ]]; then registry_backends; else local_backends; fi
@@ -208,26 +333,16 @@ start() {
 
   compose up -d
 
-  echo "Creating tmux session $TMUX_SESSION…"
-  local size w h
-  size=$(stty size 2>/dev/null || echo "50 200")
-  h=$(echo -n "$size" | awk '{print $1}'); w=$(echo -n "$size" | awk '{print $2}')
-  tmux -2 new-session -d -s "$TMUX_SESSION" -x "${w:-200}" -y "$(( ${h:-50} - 1 ))"
-  for _ in 1 2 3; do
-    tmux split-window -v -t "$TMUX_SESSION"
-    tmux select-layout -t "$TMUX_SESSION" even-vertical
-  done
-
-  tmux send-keys -t 0 './stack logs agentd' C-m
-  tmux send-keys -t 1 './stack logs dind init-sandbox' C-m
-  tmux send-keys -t 2 './stack logs web postgres' C-m
-  # The status pane answers the question you actually have on attach: which
+  # One pane per group of services, a status pane, then two empty panes to work
+  # in. The status pane answers the question you actually have on attach: which
   # model am I talking to, and how many ports have I burned?
-  tmux send-keys -t 3 'clear; ./stack status' C-m
-  tmux resize-pane -t 3 -y 14 2>/dev/null || true
-  tmux select-pane -t 3 2>/dev/null || true
-
-  tmux -2 attach-session -t "$TMUX_SESSION"
+  tmux_wall \
+    './stack logs agentd' \
+    './stack logs dind init-sandbox' \
+    './stack logs web postgres' \
+    '14|clear; ./stack status' \
+    '' \
+    ''
 }
 
 stop() {
@@ -368,15 +483,579 @@ test_go() {
   ( cd go && AGENTKIT_TEST_POSTGRES_URL="$TESTDB_URL" go test -p 1 -count=1 "$@" ./... )
 }
 
+# ═════════════════════════════════════════════════════════════════════════════
+# THE DEVELOPMENT WORKFLOW — Agent Orange + Agent Wolf, wired together
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# `./stack wolf up` is the one command for developing Agent Wolf locally. It
+# stands up BOTH stacks against the REAL providers — real model, real Artifact
+# Registry, real Google sign-in — because the alternative is discovering
+# credential, image-reference and CSP bugs at deploy time.
+#
+# WHAT IS THE SAME HERE AS IN PRODUCTION, deliberately:
+#   * the model            a real, billable Anthropic key (`mock` opts out)
+#   * the session image    PULLED from Artifact Registry with your ADC, via
+#                          agentd's `ociregistry` backend — the production path
+#   * sign-in              real Google Identity Services, both halves
+#   * the project map      the object form, with a `wolf` project whose
+#                          api_key_env and allowed_origins are what production
+#                          would set
+#
+# WHAT DIFFERS, and it is a short list:
+#   * the origins          localhost:8080 / localhost:8081 rather than domains
+#   * the networking       wolf-api shares DinD's network namespace so that
+#                          nested session containers can reach it (see the
+#                          design doc's "Local topology and networking"). In a
+#                          deployment it is an ordinary service address, and
+#                          ORANGE_BASE_URL + WOLF_MCP_URL are the two variables
+#                          that carry the difference.
+#   * blob storage         snapshots stay on local disk unless you pass --gcs,
+#                          because the bucket is the shared production one
+#
+# 🔴 THIS SPENDS MONEY. Every researcher tick is an agent session against a
+# real model. The researcher schedule therefore keeps Wolf's own default (daily
+# at 06:00 UTC) rather than something fast: `--cron` is how you ask for ticks
+# you can actually watch, and it tells you what it will cost you in sessions.
+
+WOLF_REPO="${WOLF_REPO:-$(cd "$DIR/../agent-wolf" 2>/dev/null && pwd || true)}"
+WOLF_WEB_PORT="${WOLF_WEB_PORT:-8081}"
+WOLF_API_PORT="${WOLF_API_PORT:-8100}"
+WOLF_SECRET_FILE="$DIR/.stack-wolf-secrets.env"
+
+wolf_need_repo() {
+  if [[ -z "$WOLF_REPO" || ! -f "$WOLF_REPO/docker-compose.yml" ]]; then
+    echo "Cannot find the agent-wolf checkout." >&2
+    echo "Expected a sibling directory ../agent-wolf, or set WOLF_REPO=/path/to/agent-wolf." >&2
+    exit 1
+  fi
+}
+
+# ── Dev credentials: generated once, reused, never printed ───────────────────
+# STABLE ACROSS RUNS, not regenerated per invocation. Rotating the project API
+# key would orphan the credentials already baked into a running agentd — and
+# agentd resolves api_key_env exactly ONCE, at boot, so a rotation mid-session
+# leaves Wolf holding a key nothing accepts. `./stack wolf rotate` is the
+# deliberate way to change them.
+wolf_secrets() {
+  umask 077
+  if [[ ! -s "$WOLF_SECRET_FILE" ]]; then
+    {
+      echo "# Generated by ./stack wolf. LOCAL DEV credentials for a local stack."
+      echo "# Gitignored. Never commit, never print, never reuse in a deployment."
+      echo "export WOLF_API_KEY=$(openssl rand -hex 24)"
+      echo "export WOLF_MCP_TOKEN=$(openssl rand -hex 24)"
+      echo "export WOLF_SESSION_SECRET=$(openssl rand -hex 24)"
+      echo "export WOLF_SERIES_TOKEN_SECRET=$(openssl rand -hex 24)"
+    } > "$WOLF_SECRET_FILE"
+    echo "── generated $WOLF_SECRET_FILE (4 dev secrets; gitignored, chmod 600) ──"
+  fi
+  chmod 600 "$WOLF_SECRET_FILE"
+  # shellcheck source=/dev/null
+  . "$WOLF_SECRET_FILE"
+}
+
+# ── The project map, merged rather than replaced ─────────────────────────────
+# .env's map is a real setting and this does not edit it. It is read, upgraded
+# from the legacy flat form to the object form if needed, given a `wolf`
+# project, and exported — shell environment beats .env in compose, the same
+# trick local_backends/registry_backends use.
+#
+# Both halves matter: `api_key_env` is what lets Wolf authenticate to Orange
+# with X-API-Key, and `allowed_origins` is what the embed page's
+# Content-Security-Policy frame-ancestors is built from. Get the origin wrong
+# and the chat iframe is blocked by the browser, which looks like a broken UI
+# rather than a config error.
+wolf_project_map() {
+  local current origin
+  current="$(dotenv AGENTKIT_PROJECT_MAP)"
+  origin="http://localhost:${WOLF_WEB_PORT}"
+  python3 - "$current" "$origin" <<'PY'
+import json, sys
+raw, origin = sys.argv[1], sys.argv[2]
+d = json.loads(raw) if raw.strip() else {}
+if "users" in d or "projects" in d:
+    users, projects = d.get("users", {}), d.get("projects", {})
+else:
+    # The legacy flat form: email -> [projects]. Upgraded in place; the object
+    # form takes ONLY "users" and "projects", and agentd rejects a value that
+    # mixes the two forms.
+    users, projects = d, {}
+wolf = dict(projects.get("wolf", {}))
+wolf["api_key_env"] = "WOLF_API_KEY"
+others = [o for o in wolf.get("allowed_origins", []) if o != origin]
+wolf["allowed_origins"] = [origin] + others
+projects["wolf"] = wolf
+if not users:
+    # agentd refuses a map with neither half. Nobody could sign in to Orange's
+    # OWN console either, which is a confusing way to fail.
+    print("stack: AGENTKIT_PROJECT_MAP in .env names no users — "
+          "add {\"you@example.com\": [\"*\"]} before running the dev workflow",
+          file=sys.stderr)
+    sys.exit(1)
+print(json.dumps({"users": users, "projects": projects}, separators=(",", ":")))
+PY
+}
+
+# The dind container's real name, read from compose rather than assumed.
+# agent-wolf's compose defaults to "agent-orange-dind-1" — correct for a
+# checkout named agent-orange, wrong for anything else, and wrong silently:
+# wolf-api's network_mode would fail to resolve and the container never starts.
+wolf_dind_container() {
+  local id
+  id="$(compose ps -q dind 2>/dev/null | head -1 || true)"
+  [[ -n "$id" ]] || { echo "agent-orange's dind container is not running" >&2; return 1; }
+  docker inspect --format '{{.Name}}' "$id" | sed 's|^/||'
+}
+
+# ── DinD's INNER gateway, which is not the one the boot probe finds ──────────
+# wolf-api's own boot-time probe reads DinD's DEFAULT ROUTE, which in the
+# compose stack is the OUTER compose-network gateway — an address no nested
+# session container can reach. The address that works is docker0's own, inside
+# DinD. Measured: curl 172.17.0.1:8100/mcp -> 401 (reachable, credential
+# refused); curl <outer gateway>:8100/mcp -> exit 7 (no route). Setting
+# WOLF_MCP_URL explicitly wins over the probe, and a real deployment sets it
+# too — so this is not a local-only hack, it is the deployment behaviour.
+wolf_gateway() {
+  local dind addr
+  dind="$(wolf_dind_container)" || return 1
+  addr="$(docker exec "$dind" ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1 || true)"
+  [[ -n "$addr" ]] || { echo "could not read docker0's address inside $dind" >&2; return 1; }
+  printf '%s' "$addr"
+}
+
+# ── Who may sign in ─────────────────────────────────────────────────────────
+# EMPTY NEVER MEANS EVERYONE: wolf-api refuses to boot on an empty allowlist,
+# and defaulting it to "the emails Orange's own map already trusts" is the
+# least surprising thing for a dev stack.
+#
+# 🔴 ONE FUNCTION, because two callers needed this and the second one guessed.
+# `wolf_bootstrap` originally fell back to a literal "dev@localhost" while
+# `wolf_compose` did the real resolution — so wolf-api booted with the right
+# allowlist and the bootstrap died on a value nothing had configured, with an
+# error message about email formats that pointed nowhere near the cause.
+wolf_allowed_emails() {
+  local allowed
+  allowed="${WOLF_ALLOWED_EMAILS:-}"
+  [[ -n "$allowed" ]] || allowed="$(cd "$WOLF_REPO" && dotenv WOLF_ALLOWED_EMAILS)"
+  if [[ -z "$allowed" ]]; then
+    allowed="$(dotenv AGENTKIT_PROJECT_MAP | python3 -c '
+import json,sys
+raw=sys.stdin.read().strip()
+d=json.loads(raw) if raw else {}
+users=d.get("users", {} if "projects" in d else d)
+print(",".join(sorted(k for k in users if "@" in k)))')"
+  fi
+  if [[ -z "$allowed" ]]; then
+    echo "No sign-in allowlist. Set one of:" >&2
+    echo "  WOLF_ALLOWED_EMAILS=you@example.com ./stack wolf up" >&2
+    echo "  WOLF_ALLOWED_EMAILS=... in agent-wolf/.env" >&2
+    echo "  a real email in AGENTKIT_PROJECT_MAP in agent-orange/.env" >&2
+    return 1
+  fi
+  printf '%s' "$allowed"
+}
+
+# Everything wolf's compose needs, in one place. Resolved lazily so `up`,
+# `logs`, `down` and `status` cannot drift apart.
+wolf_compose() {
+  wolf_need_repo
+  wolf_secrets
+  local dind gateway allowed fred gclient base_image
+  dind="$(wolf_dind_container)" || exit 1
+  gateway="$(wolf_gateway)" || exit 1
+
+  allowed="$(wolf_allowed_emails)" || exit 1
+
+  # The FRED key and the Google client id are the same credentials Orange's .env
+  # already carries; read from wolf's .env first so it can override.
+  fred="${FRED_API_KEY:-$(cd "$WOLF_REPO" && dotenv FRED_API_KEY)}"
+  [[ -n "$fred" ]] || fred="$(dotenv FRED_API_KEY)"
+  gclient="${VITE_GOOGLE_CLIENT_ID:-$(cd "$WOLF_REPO" && dotenv VITE_GOOGLE_CLIENT_ID)}"
+  [[ -n "$gclient" ]] || gclient="$(dotenv GOOGLE_CLIENT_ID)"
+
+  base_image="${WOLF_BASE_IMAGE:-$(ar_registry)/session-wolf:${AO_IMAGE_TAG:-dev}}"
+
+  ( cd "$WOLF_REPO" && env \
+      ORANGE_DIND_CONTAINER="$dind" \
+      WOLF_WEB_PORT="$WOLF_WEB_PORT" \
+      WOLF_API_PORT="$WOLF_API_PORT" \
+      `# agentd, from inside DinD's netns — NOT a compose service name.` \
+      ORANGE_BASE_URL="http://localhost:8099" \
+      `# The BROWSER-reachable Orange origin. Must equal the VITE_ one below` \
+      `# and must be in the wolf project's allowed_origins, or the embed` \
+      `# iframe is blocked. Three places, one value; nothing checks that they` \
+      `# agree, which is why they are set together here.` \
+      ORANGE_PUBLIC_URL="http://localhost:${WEB_PORT}" \
+      VITE_ORANGE_PUBLIC_URL="http://localhost:${WEB_PORT}" \
+      VITE_GOOGLE_CLIENT_ID="$gclient" \
+      WOLF_MCP_URL="http://${gateway}:${WOLF_API_PORT}/mcp" \
+      WOLF_API_KEY="$WOLF_API_KEY" \
+      WOLF_MCP_TOKEN="$WOLF_MCP_TOKEN" \
+      WOLF_SESSION_SECRET="$WOLF_SESSION_SECRET" \
+      WOLF_SERIES_TOKEN_SECRET="$WOLF_SERIES_TOKEN_SECRET" \
+      WOLF_ALLOWED_EMAILS="$allowed" \
+      WOLF_TEST_LOGIN="${WOLF_TEST_LOGIN:-}" \
+      FRED_API_KEY="$fred" \
+      WOLF_BASE_IMAGE="$base_image" \
+      WOLF_SCHEDULE_CRON="${WOLF_SCHEDULE_CRON:-}" \
+      WOLF_CRITIC_CRON="${WOLF_CRITIC_CRON:-}" \
+      WOLF_POLL_INTERVAL_SECONDS="${WOLF_POLL_INTERVAL_SECONDS:-}" \
+      `# development, not production: WOLF_TEST_LOGIN is refused alongside` \
+      `# NODE_ENV=production, and this workflow is explicitly a dev one.` \
+      NODE_ENV=development \
+      LOG_LEVEL="${LOG_LEVEL:-info}" \
+      docker compose "$@" )
+}
+
+# What Orange needs in its environment to serve the wolf project. Exported
+# before `compose up`, so agentd resolves the API key at boot with it present.
+wolf_orange_env() {
+  wolf_secrets
+  local map; map="$(wolf_project_map)" || exit 1
+  export AGENTKIT_PROJECT_MAP="$map"
+  export WOLF_API_KEY WOLF_MCP_TOKEN
+  # Without this, WOLF_MCP_TOKEN reaches agentd but never reaches a session
+  # container, and every mcp__wolf__* call comes back 401.
+  export AGENTKIT_MCP_ENV=WOLF_MCP_TOKEN
+}
+
+wolf_wait() { # wolf_wait <label> <seconds> <cmd...>
+  local label="$1" secs="$2"; shift 2
+  local i=0
+  printf 'waiting for %s' "$label"
+  until "$@" >/dev/null 2>&1; do
+    printf '.'; i=$((i+1))
+    if [[ "$i" -ge "$secs" ]]; then echo; echo "timed out after ${secs}s waiting for $label" >&2; exit 1; fi
+    sleep 1
+  done
+  echo " up"
+}
+
+# Is <port> free, or already ours? `up` is idempotent, so a listener belonging
+# to one of OUR two compose projects is fine and a foreign one is fatal.
+#
+# 🔴 The first version of this check could never fail. It asked whether
+# `docker compose ps` printed anything — and it always does, because compose
+# prints a table HEADER even with nothing running. So the fatal branch was
+# unreachable and the guard was decoration. This version names the owning
+# container and reads its compose-project label, which is a question with a
+# real negative answer; `WEB_PORT=8090 ./stack wolf up` on a machine running
+# another stack is how you see it fire.
+wolf_check_port() {
+  local port="$1" owner project
+  ss -ltn 2>/dev/null | grep -qE "[:.]${port}[[:space:]]" || return 0
+
+  owner="$(docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+           | awk -v pat=":${port}->" 'index($0, pat) { print $1; exit }')"
+  if [[ -z "$owner" ]]; then
+    echo "Port $port is in use by a process that is not a Docker container." >&2
+    echo "Free it, or set WEB_PORT / WOLF_WEB_PORT and retry." >&2
+    return 1
+  fi
+  project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$owner" 2>/dev/null || true)"
+  case "$project" in
+    agent-orange|agent-wolf) return 0 ;;
+  esac
+  echo "Port $port is published by container '$owner'${project:+ (compose project '$project')}." >&2
+  echo "That is not one of ours. Set WEB_PORT / WOLF_WEB_PORT and retry:" >&2
+  echo "  WEB_PORT=8082 WOLF_WEB_PORT=8083 ./stack wolf up" >&2
+  return 1
+}
+
+wolf_image() {
+  wolf_need_repo
+  local tag="${1:-${AO_IMAGE_TAG:-dev}}"
+  # 🔴 RESOLVED BEFORE THE `cd`, and it has to be. `ar_registry` reads .env
+  # RELATIVE TO THE WORKING DIRECTORY, so `REGISTRY="$(ar_registry)"` written
+  # inside the subshell below resolves against agent-wolf/.env — which carries
+  # none of GCP_REGION/GCP_PROJECT/GCP_AR_REPO, and the command dies claiming
+  # the settings are missing while they sit in the file next door.
+  local reg; reg="$(ar_registry)"
+  echo "── step: publishing the wolf session image to $reg at :$tag ──"
+  ( cd "$WOLF_REPO" && REGISTRY="$reg" ./scripts/publish-image.sh "$tag" )
+}
+
+wolf_bootstrap() {
+  wolf_need_repo
+  wolf_secrets
+  local gateway base_image allowed
+  gateway="$(wolf_gateway)" || exit 1
+  # Resolved before any `cd`: ar_registry reads .env relative to the working
+  # directory, and agent-wolf's .env carries none of the GCP settings.
+  base_image="${WOLF_BASE_IMAGE:-$(ar_registry)/session-wolf:${AO_IMAGE_TAG:-dev}}"
+  allowed="$(wolf_allowed_emails)" || exit 1
+  # Idempotent by construction (W12): safe on a fresh database and a no-op on a
+  # seeded one. Run it after any change to WOLF_BASE_IMAGE, WOLF_MCP_URL or the
+  # critic cron — those live in the wolf project's SETTINGS row, not in the
+  # container's environment, so restarting wolf-api does not update them.
+  ( cd "$WOLF_REPO" && env \
+      ORANGE_BASE_URL="http://localhost:${WEB_PORT}" \
+      WOLF_API_KEY="$WOLF_API_KEY" \
+      WOLF_MCP_TOKEN="$WOLF_MCP_TOKEN" \
+      WOLF_MCP_URL="http://${gateway}:${WOLF_API_PORT}/mcp" \
+      WOLF_SESSION_SECRET="$WOLF_SESSION_SECRET" \
+      WOLF_ALLOWED_EMAILS="$allowed" \
+      WOLF_BASE_IMAGE="$base_image" \
+      WOLF_SCHEDULE_CRON="${WOLF_SCHEDULE_CRON:-}" \
+      WOLF_CRITIC_CRON="${WOLF_CRITIC_CRON:-}" \
+      npx --yes tsx scripts/bootstrap-project.ts )
+}
+
+wolf_up() {
+  wolf_need_repo
+  local mode="real" skip_image="" arg
+  while [[ $# -gt 0 ]]; do
+    arg="$1"; shift
+    case "$arg" in
+      real|mock)     mode="$arg" ;;
+      --skip-image)  skip_image=1 ;;
+      --cron)        export WOLF_SCHEDULE_CRON="${1:?--cron needs a 5-field cron expression}"; shift ;;
+      --gcs)         export AGENTKIT_BLOB_BACKEND=gcs
+                     export GCS_PREFIX="${GCS_PREFIX:-dev-${USER:-local}}" ;;
+      --test-login)  export WOLF_TEST_LOGIN="${WOLF_TEST_LOGIN:-dev@localhost:devpassword}" ;;
+      --no-tmux)     export NO_TMUX=1 ;;
+      *) echo "usage: ./stack wolf up [real|mock] [--cron EXPR] [--gcs] [--test-login] [--skip-image] [--no-tmux]" >&2; exit 1 ;;
+    esac
+  done
+
+  # ── Preflight, before anything slow ────────────────────────────────────────
+  if [[ "$mode" == "real" ]] && ! have_key; then
+    echo "No ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in the shell or .env." >&2
+    echo "Either set one, or: ./stack wolf up mock" >&2
+    exit 1
+  fi
+  local port
+  for port in "$WEB_PORT" "$WOLF_WEB_PORT"; do
+    wolf_check_port "$port" || exit 1
+  done
+
+  echo
+  echo "═══ the development workflow: Agent Orange + Agent Wolf ═══════════════"
+  if [[ "$mode" == "real" ]]; then
+    echo " model:   REAL — THIS WILL BILL. Every researcher tick is an agent session."
+  else
+    echo " model:   mock — deterministic and free (no script table: canned replies)"
+  fi
+  echo " images:  PULLED from $(ar_registry) (production's path)"
+  echo " orange:  http://localhost:${WEB_PORT}"
+  echo " wolf:    http://localhost:${WOLF_WEB_PORT}"
+  echo " blobs:   ${AGENTKIT_BLOB_BACKEND:-fs}${GCS_PREFIX:+ (prefix $GCS_PREFIX)}"
+  echo "═══════════════════════════════════════════════════════════════════════"
+  echo
+
+  # ── 1/6 the session image ─────────────────────────────────────────────────
+  if [[ -z "$skip_image" ]]; then
+    wolf_image
+  else
+    echo "── step 1/6: skipping the session image (--skip-image) ──"
+  fi
+
+  # ── 2/6 Orange, in registry mode, with the wolf project in its map ────────
+  echo
+  echo "── step 2/6: agent-orange (registry mode, wolf project wired in) ──"
+  registry_backends
+  echo registry > "$MODE_FILE"
+  [[ "$mode" == "mock" ]] && mock_model
+  wolf_orange_env
+  compose up -d --build
+
+  wolf_wait "orange /agent/sessions" 180 \
+    curl -fsS -o /dev/null -H "X-API-Key: ${WOLF_API_KEY}" "http://localhost:${WEB_PORT}/agent/sessions"
+
+  # The API key answering at all is the proof that the merged project map
+  # parsed AND that agentd resolved api_key_env at boot. A 401 here means the
+  # map did not take, and everything after would fail more confusingly.
+  echo "orange: the wolf project's API key is accepted"
+
+  # ── 3/6 Wolf ──────────────────────────────────────────────────────────────
+  echo
+  echo "── step 3/6: agent-wolf (sharing DinD's netns; web on ${WOLF_WEB_PORT}) ──"
+  wolf_compose up -d --build
+
+  wolf_wait "wolf /api/auth/me (401 = up and refusing anonymous)" 180 \
+    bash -c "[[ \"\$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:${WOLF_WEB_PORT}/api/auth/me')\" == 401 ]]"
+
+  # ── 4/6 bootstrap the project ─────────────────────────────────────────────
+  echo
+  echo "── step 4/6: bootstrapping the wolf project (settings, interviewer, critic) ──"
+  wolf_bootstrap
+
+  # ── 5/6 what it actually resolved to ──────────────────────────────────────
+  echo
+  echo "── step 5/6: resolved configuration ──"
+  wolf_env
+
+  # ── 6/6 ready ─────────────────────────────────────────────────────────────
+  #
+  # Every value here is computed into a variable FIRST. The previous version
+  # built this summary with `$(...)` and `${VAR:-a default containing (parens)
+  # and an apostrophe}` inline in the heredoc, and bash failed the whole block
+  # with "bad substitution" — after the stack was already up, so the run looked
+  # broken when nothing was. A summary is not the place to be clever.
+  local cron_line cron_hint login_line
+  if [[ -n "${WOLF_SCHEDULE_CRON:-}" ]]; then
+    cron_line="$WOLF_SCHEDULE_CRON  (you set it with --cron)"
+    cron_hint=""
+  else
+    cron_line="0 6 * * *  (Wolf's own default: daily at 06:00 UTC)"
+    cron_hint="  Pass --cron '*/15 * * * *' for ticks you can watch — but that is roughly
+  96 billable agent sessions a day, per live hypothesis."
+  fi
+  if [[ -n "${WOLF_TEST_LOGIN:-}" ]]; then
+    login_line="  --test-login is ON: POST /api/auth/dev-login is mounted for the Playwright
+  rig. The sign-in PAGE is Google-only and shows no form — nothing to click here."
+  else
+    login_line=""
+  fi
+
+  echo
+  echo "── step 6/6: ready ──"
+  echo
+  echo "  Wolf     http://localhost:${WOLF_WEB_PORT}      <- sign in here"
+  echo "  Orange   http://localhost:${WEB_PORT}      <- the operator console"
+  echo
+  echo "  Sign-in is real Google Identity Services. It needs, ONCE, in the Google"
+  echo "  Cloud console for this OAuth client:"
+  echo "      Authorized JavaScript origins  +=  http://localhost:${WOLF_WEB_PORT}"
+  echo "  Without it the Google button renders and the popup fails origin_mismatch."
+  [[ -n "$login_line" ]] && echo "$login_line"
+  echo
+  echo "  Researcher schedule: ${cron_line}"
+  [[ -n "$cron_hint" ]] && echo "$cron_hint"
+  echo
+  echo "  Logs      ./stack logs agentd   |   ./stack wolf logs"
+  echo "  Status    ./stack wolf status"
+  echo "  Config    ./stack wolf env"
+  echo "  Stop      ./stack wolf down"
+  echo
+  echo "  Opening the log wall (tmux session '$TMUX_SESSION'). Detach with C-b d —"
+  echo "  detaching leaves BOTH stacks running; './stack wolf down' is what stops them."
+  echo
+
+  # Both stacks' logs, one pane each, then two empty panes to work in. There is
+  # no status pane here on purpose: this summary is on the terminal underneath,
+  # and tmux restores it the moment you detach.
+  tmux_wall \
+    './stack logs agentd' \
+    './stack logs dind init-sandbox' \
+    './stack logs web postgres' \
+    './stack wolf logs wolf-api' \
+    './stack wolf logs wolf-web' \
+    '' \
+    ''
+}
+
+wolf_down() {
+  echo "── stopping agent-wolf ──"
+  wolf_compose down --remove-orphans 2>/dev/null || true
+  echo "── stopping agent-orange ──"
+  apply_saved_mode
+  compose down --remove-orphans
+  tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+  rm -f "$MODE_FILE"
+  echo "Stopped. (Dev secrets kept in $WOLF_SECRET_FILE — ./stack wolf rotate to replace.)"
+}
+
+wolf_logs() {
+  wolf_need_repo
+  if [[ -t 1 ]]; then wolf_compose logs -f --tail=100 "$@"
+  else wolf_compose logs --tail=100 "$@"; fi
+}
+
+# What the two stacks were CONFIGURED with. A declaration, not a behaviour —
+# every claim about what works is made by something that exercised it.
+#
+# Never `docker compose config` unredacted: it interpolates and prints
+# WOLF_API_KEY and friends in full, and piping it through grep does not help
+# because grep prints the whole matching line, value included.
+wolf_env() {
+  wolf_need_repo
+  # Configure Orange's half exactly as `up` does before reading it back, or the
+  # dump reports AGENTKIT_MCP_ENV as empty and the map as absent — describing a
+  # stack nobody runs. A config dump that differs from what the command
+  # configures is worse than no dump.
+  wolf_orange_env
+  registry_backends >/dev/null
+  local redact='s/(WOLF_API_KEY|WOLF_MCP_TOKEN|WOLF_SESSION_SECRET|WOLF_SERIES_TOKEN_SECRET|FRED_API_KEY|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|AGENTKIT_JWT_SECRET|WOLF_TEST_LOGIN)([^A-Za-z0-9_].*)$/\1: <redacted>/'
+  echo "--- agent-orange/agentd ---"
+  compose config 2>/dev/null | sed -E "$redact" \
+    | grep -E '^ +(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|AGENTKIT_MCP_ENV|AGENTKIT_BLOB_BACKEND|AGENTKIT_REGISTRY_BACKEND|AGENTKIT_REGISTRY_AUTH|BASE_IMAGE|WOLF_API_KEY|WOLF_MCP_TOKEN):' || true
+  echo "--- the wolf project in the map ---"
+  wolf_project_map | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["projects"], indent=2))' || true
+  echo "--- agent-wolf ---"
+  # Wolf's config cannot even be RESOLVED until Orange's dind container exists:
+  # WOLF_MCP_URL is read out of that container's routing table, and wolf-api's
+  # network_mode names it. Say so, rather than printing nothing and letting it
+  # read as "configured with no variables".
+  if ! wolf_dind_container >/dev/null 2>&1; then
+    echo "  (agent-orange's dind is not running — Wolf's config depends on it;"
+    echo "   run ./stack wolf up first)"
+    return 0
+  fi
+  wolf_compose config 2>/dev/null | sed -E "$redact" \
+    | grep -E '^ +(WOLF_API_KEY|WOLF_MCP_URL|WOLF_MCP_TOKEN|WOLF_BASE_IMAGE|WOLF_ALLOWED_EMAILS|WOLF_SCHEDULE_CRON|WOLF_POLL_INTERVAL_SECONDS|ORANGE_BASE_URL|ORANGE_PUBLIC_URL|VITE_ORANGE_PUBLIC_URL|VITE_GOOGLE_CLIENT_ID|FRED_API_KEY|NODE_ENV):' || true
+}
+
+wolf_status() {
+  echo "── agent-orange ───────────────────────────────────────────"
+  compose ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || echo "(not running)"
+  echo
+  echo "── agent-wolf ─────────────────────────────────────────────"
+  wolf_compose ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || echo "(not running)"
+  echo
+  echo "── model ──────────────────────────────────────────────────"
+  compose logs agentd 2>/dev/null | grep -iE 'model proxy|subscription mode' | tail -3 || echo "(agentd not up)"
+  echo
+  echo "── the wolf session image ─────────────────────────────────"
+  compose logs agentd 2>/dev/null | grep -iE 'session-wolf' | tail -2 || echo "(no pull logged yet)"
+  echo
+  echo "── sessions / host ports ──────────────────────────────────"
+  local n
+  n=$(sql "select count(*) from agent_sessions where deleted_at = 0;" 2>/dev/null | sed -n '3p' | tr -d ' ' || echo '?')
+  echo "live sessions: ${n:-?}   ( ./stack sessions | ./stack clean )"
+  echo
+  echo "Wolf   http://localhost:${WOLF_WEB_PORT}"
+  echo "Orange http://localhost:${WEB_PORT}"
+}
+
+wolf_rotate() {
+  # Deliberate, because it is not free: agentd resolved the old API key at boot,
+  # so Orange must be recreated for a new one to be accepted at all.
+  rm -f "$WOLF_SECRET_FILE"
+  wolf_secrets
+  echo "New dev secrets generated. Both stacks must be recreated to pick them up:"
+  echo "  ./stack wolf up"
+}
+
+wolf() {
+  local sub="${1:-up}"; shift || true
+  case "$sub" in
+    up)        wolf_up "$@" ;;
+    down)      wolf_down "$@" ;;
+    status)    wolf_status "$@" ;;
+    logs)      wolf_logs "$@" ;;
+    env)       wolf_env "$@" ;;
+    image)     wolf_image "$@" ;;
+    bootstrap) wolf_bootstrap "$@" ;;
+    rotate)    wolf_rotate "$@" ;;
+    *) echo "usage: ./stack wolf {up|down|status|logs|env|image|bootstrap|rotate}" >&2; exit 1 ;;
+  esac
+}
+
 help() {
-  sed -n '3,26p' "$0" | sed 's/^# \{0,1\}//'
+  # The header block, which is the documentation. Ends at the last comment line
+  # before `set -euo pipefail` — computed, not a pinned line number, because
+  # every previous edit to the header silently truncated this output.
+  local last
+  last=$(grep -n '^set -euo pipefail' "$0" | head -1 | cut -d: -f1)
+  sed -n "3,$((last - 1))p" "$0" | sed 's/^# \{0,1\}//'
 }
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 cmd="${1:-help}"
 shift || true
 case "$cmd" in
-  build|start|stop|restart|logs|psql|sql|status|sessions|clean|testdb|help) "$cmd" "$@" ;;
+  build|start|stop|restart|logs|psql|sql|status|sessions|clean|testdb|help|wolf) "$cmd" "$@" ;;
   publish-base|publish_base) publish_base "$@" ;;
   test-go|test_go) test_go "$@" ;;
   db) psql "$@" ;;

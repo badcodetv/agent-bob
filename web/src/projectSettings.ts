@@ -16,6 +16,11 @@
 //     accidentally uncaps their token spend. `PROJECT_SETTING_NUMERICS` carries
 //     the semantics as data so the form renders the truth rather than a guess,
 //     and it mirrors `ProjectSettings.normalize()` in the engine exactly.
+//  3. **The project-wide briefing is checked with the engine's own grammar.**
+//     `parseMemorySelector` is already a mirror of `agentdb/labels.go`; a
+//     second, stricter rule here would refuse selectors the server accepts.
+
+import { parseMemorySelector } from './memories.js'
 
 /** Default endpoint for the project-settings routes (GET and PUT share it). */
 export const PROJECT_SETTINGS_ENDPOINT = '/agent/project-settings'
@@ -38,6 +43,25 @@ export interface ProjectSettings {
   daily_tokens_hard: number
   briefing_max_bytes: number
   snapshot_ttl_days: number
+  /** Git projection (design 2026-09-09 §D). These five say *which repo* and
+   *  *which credentials*, and are deliberately NOT importable — the git
+   *  importer never writes them, or commit access to the repo would become the
+   *  power to redirect a project's projection. `git_token_env` and
+   *  `git_webhook_secret_env` are the NAMES of environment variables, never a
+   *  token or a secret: the first holds the push credential, the second the
+   *  shared secret GitHub signs inbound webhook deliveries with (G20). Empty
+   *  `git_remote` = projection off. Empty branch/subfolder mean the engine's
+   *  defaults, applied at read time, not stored. */
+  git_remote: string
+  git_branch: string
+  git_subfolder: string
+  git_token_env: string
+  git_webhook_secret_env: string
+  /** Project-wide briefing selectors (engine: ProjectSettings.Briefing,
+   *  design B1) — unioned into every worker's own briefing at composition
+   *  time, so a worker with none of its own still receives these. Each entry
+   *  must parse as a label selector; the server is authoritative on that. */
+  briefing: string[]
   updated_at: number
 }
 
@@ -55,6 +79,12 @@ export function defaultProjectSettings(project = ''): ProjectSettings {
     daily_tokens_hard: 0,
     briefing_max_bytes: DEFAULT_BRIEFING_MAX_BYTES,
     snapshot_ttl_days: DEFAULT_SNAPSHOT_TTL_DAYS,
+    git_remote: '',
+    git_branch: '',
+    git_subfolder: '',
+    git_token_env: '',
+    git_webhook_secret_env: '',
+    briefing: [],
     updated_at: 0,
   }
 }
@@ -73,6 +103,8 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     r[k] && typeof r[k] === 'object' && !Array.isArray(r[k])
       ? (r[k] as Record<string, unknown>)
       : {}
+  const strArray = (k: keyof ProjectSettings) =>
+    Array.isArray(r[k]) ? (r[k] as unknown[]).filter((v): v is string => typeof v === 'string') : []
   return {
     project: str('project', base.project),
     base_image: str('base_image', base.base_image),
@@ -84,6 +116,12 @@ export function coerceProjectSettings(raw: unknown, project = ''): ProjectSettin
     daily_tokens_hard: num('daily_tokens_hard', base.daily_tokens_hard),
     briefing_max_bytes: num('briefing_max_bytes', base.briefing_max_bytes),
     snapshot_ttl_days: num('snapshot_ttl_days', base.snapshot_ttl_days),
+    git_remote: str('git_remote', base.git_remote),
+    git_branch: str('git_branch', base.git_branch),
+    git_subfolder: str('git_subfolder', base.git_subfolder),
+    git_token_env: str('git_token_env', base.git_token_env),
+    git_webhook_secret_env: str('git_webhook_secret_env', base.git_webhook_secret_env),
+    briefing: strArray('briefing'),
     updated_at: num('updated_at', 0),
   }
 }
@@ -242,6 +280,11 @@ export type FieldErrors = Record<string, string>
  */
 export function validateProjectSettings(s: ProjectSettings): FieldErrors {
   const errors: FieldErrors = {}
+  const briefing = validateProjectBriefing(s.briefing)
+  const firstBad = Object.keys(briefing)[0]
+  if (firstBad !== undefined) {
+    errors.briefing = briefing[Number(firstBad)]
+  }
   for (const spec of PROJECT_SETTING_NUMERICS) {
     const v = s[spec.key]
     if (!Number.isFinite(v) || !Number.isInteger(v)) {
@@ -268,4 +311,30 @@ export function projectSettingsBody(
 ): Omit<ProjectSettings, 'project' | 'updated_at'> & { rationale?: string } {
   const { project: _project, updated_at: _updatedAt, ...body } = s
   return rationale.trim() === '' ? body : { ...body, rationale: rationale.trim() }
+}
+
+/**
+ * Per-entry errors for the project-wide briefing, keyed by index.
+ *
+ * The rule is the ENGINE's, borrowed rather than restated:
+ * `parseMemorySelector` is already a mirror of `agentdb/labels.go`'s parser,
+ * written for the memory browser, and the server applies exactly that parser
+ * to each entry of `ProjectSettings.Briefing`. A second, stricter rule here
+ * would refuse selectors the server accepts, which is worse than not checking
+ * at all — the human would have no way to find out they were wrong.
+ *
+ * A blank entry is an error rather than a silent drop: a row that vanishes
+ * when you save it reads as a bug.
+ */
+export function validateProjectBriefing(entries: string[]): Record<number, string> {
+  const errors: Record<number, string> = {}
+  entries.forEach((entry, i) => {
+    if (entry.trim() === '') {
+      errors[i] = 'empty — write a selector or remove the row'
+      return
+    }
+    const parsed = parseMemorySelector(entry)
+    if (parsed.error !== null) errors[i] = parsed.error
+  })
+  return errors
 }

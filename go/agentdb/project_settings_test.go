@@ -70,6 +70,7 @@ func TestProjectSettingsPutRoundTrip(t *testing.T) {
 				DailyTokensHard:   4_000_000,
 				BriefingMaxBytes:  4096,
 				SnapshotTTLDays:   7,
+				Briefing:          SelectorList{"name=label-registry", "kind=house-style"},
 			},
 			check: func(t *testing.T, got *ProjectSettings) {
 				if got.BaseImage != "acme/base:v3" || got.SystemPrompt != "you work for acme" {
@@ -84,6 +85,9 @@ func TestProjectSettingsPutRoundTrip(t *testing.T) {
 				}
 				if got.AttentionChannel["kind"] != "webhook" {
 					t.Fatalf("attention_channel lost: %+v", got.AttentionChannel)
+				}
+				if len(got.Briefing) != 2 || got.Briefing[0] != "name=label-registry" || got.Briefing[1] != "kind=house-style" {
+					t.Fatalf("briefing: %+v", got.Briefing)
 				}
 			},
 		},
@@ -156,6 +160,7 @@ func TestProjectSettingsPutIsWholeObject(t *testing.T) {
 		Project: "acme", BaseImage: "acme/base:v1", SystemPrompt: "first",
 		MCPConfig:       JSONMap{"gmail": map[string]any{"url": "http://x"}},
 		DailyTokensHard: 500, SnapshotTTLDays: 90,
+		Briefing: SelectorList{"name=label-registry"},
 	}, ConfigWrite{}); err != nil {
 		t.Fatalf("first put: %v", err)
 	}
@@ -184,6 +189,9 @@ func TestProjectSettingsPutIsWholeObject(t *testing.T) {
 	if got.SnapshotTTLDays != 0 {
 		t.Fatalf("whole-object write must clear snapshot_ttl_days, got %d", got.SnapshotTTLDays)
 	}
+	if len(got.Briefing) != 0 {
+		t.Fatalf("whole-object write must clear briefing, got %v", got.Briefing)
+	}
 
 	// Exactly one row: a second PUT updates, it does not insert.
 	var count int64
@@ -207,6 +215,8 @@ func TestProjectSettingsValidation(t *testing.T) {
 		{"negative hard budget", &ProjectSettings{Project: "acme", DailyTokensHard: -1}},
 		{"negative briefing cap", &ProjectSettings{Project: "acme", BriefingMaxBytes: -1}},
 		{"negative ttl", &ProjectSettings{Project: "acme", SnapshotTTLDays: -1}},
+		{"empty briefing selector", &ProjectSettings{Project: "acme", Briefing: SelectorList{"  "}}},
+		{"unparseable briefing selector", &ProjectSettings{Project: "acme", Briefing: SelectorList{"kind in (unterminated"}}},
 	}
 	s := newProjectSettingsTestStore(t)
 	for _, tc := range tests {

@@ -124,6 +124,9 @@ func TestLivePG_ConcurrentMigrationsAreSerialised(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = s.Close() })
 	var names []string
 	if err := s.DB().Raw("SELECT name FROM agentdb_migrations ORDER BY name").Scan(&names).Error; err != nil {
 		t.Fatalf("read migration table: %v", err)
@@ -157,6 +160,9 @@ func TestLivePG_ConcurrentMigrationsWithOnePending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bootstrap open: %v", err)
 	}
+	// Release the pool when this test ends. Registered here so it runs LAST
+	// (t.Cleanup is LIFO) — data cleanups registered below still need it open.
+	t.Cleanup(func() { _ = s.Close() })
 	// Un-apply the newest migration. Every migration body in this repo is
 	// written idempotently (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS), so
 	// re-running it is safe; what was never safe is two processes racing to

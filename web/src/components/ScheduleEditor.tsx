@@ -57,6 +57,16 @@ export interface ScheduleEditorProps {
   /** Known worker names for the picker. Free text without them. */
   workerOptions?: string[]
   /**
+   * The worker a NEW schedule is for, prefilled into the draft.
+   *
+   * Opened from a worker's own Triggers tab, the answer is already known — the
+   * screen is that worker's — and asking for it again meant `validateSchedule`
+   * held Save disabled until the human retyped a name the page was already
+   * displaying (DI9). Ignored when editing an existing schedule, whose worker
+   * comes from the stored row.
+   */
+  defaultWorker?: string
+  /**
    * Compile a natural-language description into a cron expression. Defaults to
    * the deterministic built-in; a host may inject a model-backed compiler with
    * the same contract (propose, never save, refuse rather than guess).
@@ -72,9 +82,11 @@ export default function ScheduleEditor({
   error = null,
   saving = false,
   workerOptions = [],
+  defaultWorker = '',
   compileCronDescription = compileCron,
 }: ScheduleEditorProps) {
-  const seed = () => (schedule ? { ...schedule } : newScheduleDraft())
+  const seed = () =>
+    schedule ? { ...schedule } : { ...newScheduleDraft(), worker: defaultWorker }
   const [draft, setDraft] = useState<ScheduleDraft>(seed)
   const [rationale, setRationale] = useState('')
   const [dirty, setDirty] = useState(false)

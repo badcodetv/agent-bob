@@ -87,6 +87,25 @@ const REVEAL_RULES: Record<NavConditionalEntry, (counts: NavCounts) => boolean> 
   chart: (c) => c.subscriptions > 0 || c.workers >= 2,
 }
 
+/**
+ * The conditional entries at runtime, taken from `REVEAL_RULES`'s own keys so
+ * the list and the rules cannot drift apart.
+ */
+export const NAV_CONDITIONAL = Object.keys(REVEAL_RULES) as NavConditionalEntry[]
+
+/**
+ * True once every conditional entry has been revealed.
+ *
+ * Reveals are sticky and one-way, so at that point nothing further can ever
+ * appear and a caller watching for changes has nothing left to watch for. The
+ * shell uses it to stop polling (DI12) — a nav that re-counts forever would
+ * spend four requests a tick on a question that has been settled.
+ */
+export function everythingRevealed(sticky: Iterable<NavEntry>): boolean {
+  const held = new Set<NavEntry>(sticky)
+  return NAV_CONDITIONAL.every((e) => held.has(e))
+}
+
 export interface NavRevealResult {
   /** What to draw, in canonical order. */
   visible: NavEntry[]

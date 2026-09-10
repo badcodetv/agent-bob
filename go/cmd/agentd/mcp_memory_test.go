@@ -46,6 +46,11 @@ type fakeMemoryStore struct {
 	// independent of the vector it was handed. RD3 is precisely the gap
 	// between those two numbers, so the test needs to be able to open it.
 	reportsEmbedded *bool
+
+	// ifCurrent records every compare-and-swap id the tools passed through, and
+	// casConflict, when set, is the conflict CreateMemoryIfCurrent returns.
+	ifCurrent   []string
+	casConflict *agentdb.ErrMemoryNotCurrent
 }
 
 func newFakeMemoryStore() *fakeMemoryStore {
@@ -72,6 +77,17 @@ func (f *fakeMemoryStore) CreateMemory(_ context.Context, m *agentdb.Memory, emb
 	f.createdV = append(f.createdV, emb)
 	f.byID[stored.Project+"|"+stored.ID] = &stored
 	return &stored, embedded, nil
+}
+
+// CreateMemoryIfCurrent records the compare-and-swap argument and, when
+// casConflict is set, loses the race — the tools' whole job on that path is the
+// sentence it hands back to the model.
+func (f *fakeMemoryStore) CreateMemoryIfCurrent(ctx context.Context, m *agentdb.Memory, emb []float32, ifCurrent string) (*agentdb.Memory, bool, error) {
+	f.ifCurrent = append(f.ifCurrent, ifCurrent)
+	if f.casConflict != nil {
+		return nil, false, *f.casConflict
+	}
+	return f.CreateMemory(ctx, m, emb)
 }
 
 func (f *fakeMemoryStore) GetMemory(_ context.Context, project, id string) (*agentdb.Memory, error) {
@@ -898,12 +914,116 @@ func TestMemoryToolsSearchNarrowingArgs(t *testing.T) {
 			t.Fatalf("search: %v", err)
 		}
 		q := store.searches[0]
-		if q.Since != 0 || q.Until != 0 || q.LatestPer != "" {
-			t.Fatalf("unset narrowing args must stay zero, got since=%d until=%d latest_per=%q",
-				q.Since, q.Until, q.LatestPer)
+		if q.Since != 0 || q.Until != 0 || q.LatestPer != "" || q.CreatedByWorker != "" {
+			t.Fatalf("unset narrowing args must stay zero, got since=%d until=%d latest_per=%q created_by_worker=%q",
+				q.Since, q.Until, q.LatestPer, q.CreatedByWorker)
 		}
 		if q.LabelSelector != "kind=fact" || q.Query != "refunds" {
 			t.Fatalf("the existing fields changed: %+v", q)
+		}
+	})
+}
+
+// TestMemoryToolsSearchCreatedByWorker covers Decision B3 (design
+// design/2026-09-08-memory-coordinated-organisation.md, ticket T3): a queryable
+// provenance filter, with the "self" sentinel resolved server-side so it
+// cannot be forged.
+func TestMemoryToolsSearchCreatedByWorker(t *testing.T) {
+	newTools := func() (*memoryTools, *fakeMemoryStore) {
+		store := newFakeMemoryStore()
+		return testMemoryTools(store, embedding.NewMock()), store
+	}
+
+	// Acceptance: "self" returns only the caller's own memories — i.e. it
+	// resolves to THIS caller's worker name, not the literal string "self".
+	t.Run(`"self" resolves to the caller's own worker name`, func(t *testing.T) {
+		tools, store := newTools()
+		caller := mcpCaller{Project: "acme", SessionID: "sess-1", Worker: "email-answerer", Identified: true}
+		if _, err := tools.search(context.Background(), caller,
+			json.RawMessage(`{"created_by_worker":"self"}`)); err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if got := store.searches[0].CreatedByWorker; got != "email-answerer" {
+			t.Fatalf("created_by_worker = %q, want the caller's own worker name %q", got, "email-answerer")
+		}
+	})
+
+	// Acceptance: "self" cannot be spoofed — it is derived purely from the
+	// caller's own session identity, so two different callers asking for
+	// "self" in the SAME call shape get two different, correct answers. There
+	// is no argument the model can pass to make "self" resolve to anyone else.
+	t.Run(`"self" cannot be spoofed by any argument`, func(t *testing.T) {
+		tools, store := newTools()
+		alice := mcpCaller{Project: "acme", SessionID: "sess-a", Worker: "alice-worker", Identified: true}
+		bob := mcpCaller{Project: "acme", SessionID: "sess-b", Worker: "bob-worker", Identified: true}
+
+		// Same literal arguments for both callers, including an attempt to
+		// smuggle another worker's name in via label_selector — a filter, not
+		// an identity, and it must not influence resolution of "self".
+		raw := json.RawMessage(`{"created_by_worker":"self","label_selector":"worker=bob-worker"}`)
+		if _, err := tools.search(context.Background(), alice, raw); err != nil {
+			t.Fatalf("alice search: %v", err)
+		}
+		if _, err := tools.search(context.Background(), bob, raw); err != nil {
+			t.Fatalf("bob search: %v", err)
+		}
+		if got := store.searches[0].CreatedByWorker; got != "alice-worker" {
+			t.Fatalf("alice's self = %q, want %q", got, "alice-worker")
+		}
+		if got := store.searches[1].CreatedByWorker; got != "bob-worker" {
+			t.Fatalf("bob's self = %q, want %q", got, "bob-worker")
+		}
+	})
+
+	// Acceptance: a plain worker name filters correctly, and is passed through
+	// verbatim regardless of who is asking.
+	t.Run("a plain worker name reaches the store verbatim", func(t *testing.T) {
+		tools, store := newTools()
+		if _, err := tools.search(context.Background(), testCaller(),
+			json.RawMessage(`{"created_by_worker":"some-other-worker"}`)); err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if got := store.searches[0].CreatedByWorker; got != "some-other-worker" {
+			t.Fatalf("created_by_worker = %q, want %q", got, "some-other-worker")
+		}
+	})
+
+	// Acceptance: a worker-attached CHAT session still has a worker identity
+	// (mcpserver.go:536 sets caller.Worker from the session row even when the
+	// session is a chat, not a job run) — [rev2] of Decision B3 — so "self"
+	// must resolve there too, not just from a job dispatch.
+	t.Run(`"self" works for a worker-attached chat session`, func(t *testing.T) {
+		tools, store := newTools()
+		chatCaller := mcpCaller{Project: "acme", SessionID: "chat-1", Worker: "architect", Identified: true}
+		if _, err := tools.search(context.Background(), chatCaller,
+			json.RawMessage(`{"created_by_worker":"self"}`)); err != nil {
+			t.Fatalf("search: %v", err)
+		}
+		if got := store.searches[0].CreatedByWorker; got != "architect" {
+			t.Fatalf("created_by_worker = %q, want %q", got, "architect")
+		}
+	})
+
+	// Acceptance: a session with no worker identity at all — a plain human
+	// chat, Identified true but Worker empty — gets an explanatory error, not
+	// an empty result list. An empty list would read as "you have no
+	// memories"; the true answer is "this question has no meaning here".
+	t.Run(`"self" is refused with an explanatory error when there is no worker identity`, func(t *testing.T) {
+		tools, store := newTools()
+		humanCaller := mcpCaller{Project: "acme", SessionID: "human-1", Worker: "", Identified: true}
+		result, err := tools.search(context.Background(), humanCaller,
+			json.RawMessage(`{"created_by_worker":"self"}`))
+		if err == nil {
+			t.Fatal("want a refusal, got a result")
+		}
+		if result != nil {
+			t.Fatalf("want a nil result alongside the error, got %+v", result)
+		}
+		if !strings.Contains(err.Error(), "no worker identity") {
+			t.Fatalf("error should explain the refusal, got: %v", err)
+		}
+		if len(store.searches) != 0 {
+			t.Fatal("the store must not be reached: this must not come back as an empty result list")
 		}
 	})
 }
@@ -920,7 +1040,7 @@ func TestMemoryToolsSearchSchemaAdmitsNarrowingArgs(t *testing.T) {
 		}
 	}
 	props, _ := schema["properties"].(map[string]any)
-	for _, want := range []string{"since", "until", "latest_per"} {
+	for _, want := range []string{"since", "until", "latest_per", "created_by_worker"} {
 		if _, ok := props[want]; !ok {
 			t.Fatalf("memory_search schema is missing %q", want)
 		}

@@ -73,5 +73,26 @@ func MustOpen(postgresURL string) *Store {
 // runs on the machines that have a database.
 func NewStore(gdb *gorm.DB) *Store { return &Store{gdb: gdb} }
 
+// Close releases the connection pool this Store owns.
+//
+// It exists because Open builds a pool and, until this method, nothing could
+// ever hand it back: a process that opened several Stores held every pool for
+// its own lifetime. Production opens one Store and keeps it, so that cost was
+// invisible there — but a TEST BINARY opens one per test, and the agentdb
+// package alone accumulated enough idle connections to exhaust Postgres's
+// default max_connections of 100, failing later tests at connect time with
+// "sorry, too many clients already". The failure landed on whichever test ran
+// last, never on the one that leaked, which is why it read as a flake.
+//
+// Do NOT call this on a Store built with NewStore: there the caller owns the
+// *gorm.DB and closing it out from under them is not this type's business.
+func (s *Store) Close() error {
+	sqlDB, err := s.gdb.DB()
+	if err != nil {
+		return fmt.Errorf("agentdb: close: %w", err)
+	}
+	return sqlDB.Close()
+}
+
 // DB returns the underlying *gorm.DB for advanced queries.
 func (s *Store) DB() *gorm.DB { return s.gdb }

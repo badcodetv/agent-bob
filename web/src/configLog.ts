@@ -48,6 +48,11 @@ import { formatCompactTime } from './timefmt.js'
 /** The read route this UI reads by default; mounted in go/httpapi. */
 export const CONFIG_LOG_ENDPOINT = '/agent/config-events'
 
+/** The revert route for one record (design §D; go/httpapi/config_events.go). */
+export function configRevertPath(eventId: string, endpoint = CONFIG_LOG_ENDPOINT): string {
+  return `${endpoint}/${encodeURIComponent(eventId)}/revert`
+}
+
 // ---------------------------------------------------------------------------
 // The record (§15.2)
 // ---------------------------------------------------------------------------
@@ -79,6 +84,19 @@ export type ConfigAction = (typeof CONFIG_ACTIONS)[number]
 /** One record in the append-only configuration log. */
 export interface ConfigEvent {
   id: string
+  /**
+   * The per-project sequence number, and the ONLY total order this log has.
+   *
+   * `created_at` is a millisecond wall clock and the id is a random uuid, so
+   * two writes inside one millisecond have no order at all by those two
+   * fields. `seq` is allocated inside the config-event transaction, so seq
+   * order IS commit order — which is the order the rows were actually written
+   * in, and therefore the order a diff must be computed against.
+   *
+   * 0 when the server did not send it (an older agentd), which is why the
+   * changelog falls back to the clock rather than assuming it is there.
+   */
+  seq: number
   project: string
   actor_worker: string
   actor_session: string
@@ -101,6 +119,7 @@ export function coerceConfigEvent(raw: unknown): ConfigEvent {
   const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
   const ev: ConfigEvent = {
     id: str(r.id),
+    seq: num(r.seq),
     project: str(r.project),
     actor_worker: str(r.actor_worker),
     actor_session: str(r.actor_session),
@@ -365,9 +384,19 @@ export function buildChangelog(
   options: BuildChangelogOptions = {},
 ): ChangelogEntry[] {
   const { projectId = '' } = options
+  // By `seq` when every record has one — it is commit order, and it is total.
+  // Two changes to the same worker inside one millisecond sort arbitrarily by
+  // the clock, and this list is what the diffs are computed against, so an
+  // arbitrary order there produces a diff against the wrong neighbour.
+  //
+  // The fallback is not defensive tidiness: an older agentd sends no `seq` at
+  // all, and sorting a whole page to 0 would be strictly worse than the clock.
+  const hasSeq = events.length > 0 && events.every((e) => e.seq > 0)
   const oldestFirst = events
     .slice()
-    .sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))
+    .sort((a, b) =>
+      hasSeq ? a.seq - b.seq : a.created_at - b.created_at || a.id.localeCompare(b.id),
+    )
 
   /** key → the last prompt-carrying event seen for it. */
   const lastPrompt = new Map<string, { id: string; text: string }>()
@@ -622,4 +651,66 @@ export function extractConfigEvents(payload: unknown): ConfigEvent[] {
         (payload as Record<string, unknown>).events)
       : null
   return Array.isArray(raw) ? raw.map(coerceConfigEvent) : []
+}
+
+// ---------------------------------------------------------------------------
+// Revert (design §D) — which entries can be put back, and which cannot
+// ---------------------------------------------------------------------------
+
+/**
+ * Entity kinds with no inverse, and the sentence saying why.
+ *
+ * These mirror the store's own refusals rather than inventing new ones: an
+ * entry the browser offers and the server then refuses is worse than one the
+ * browser never offered, because the human has already decided to click it.
+ */
+const NO_INVERSE: Partial<Record<ConfigEntityKind, string>> = {
+  topology: 'Applying an org chart wrote several things at once, so there is no single change to put back. Revert the individual entries it created instead.',
+  image: 'Published images are kept forever — there is nothing to put back to.',
+  skill: 'Installed skills are kept forever — there is nothing to put back to.',
+}
+
+/** Why one entry cannot be reverted, or null when it can. */
+export interface RevertBlock {
+  reason: string
+}
+
+/**
+ * Decide, for a page of entries, which ones offer the revert action.
+ *
+ * Two rules, both the server's:
+ *
+ *  1. only the NEWEST change to a thing can be put back. Every entry carries
+ *     the whole new state of the row it changed, so putting an older one back
+ *     would silently erase every change made to that thing since — which is
+ *     the one outcome a human clicking "put it back" would never expect.
+ *  2. some kinds have no inverse at all (above).
+ *
+ * Computed from the loaded page, so it can be wrong at the edge: a page that
+ * starts mid-history could show an entry as newest when a change above the cut
+ * touched the same thing. That is why the server checks again and its refusal
+ * is rendered verbatim — this is a courtesy, not the gate.
+ */
+export function revertBlocks(entries: ChangelogEntry[]): Map<string, RevertBlock> {
+  const blocked = new Map<string, RevertBlock>()
+  const newestSeen = new Set<string>()
+  // `entries` is newest-first, so the first time a key appears is its newest.
+  for (const entry of entries) {
+    const noInverse = NO_INVERSE[entry.entity.kind]
+    if (noInverse !== undefined) {
+      blocked.set(entry.id, { reason: noInverse })
+      continue
+    }
+    if (newestSeen.has(entry.entity.key)) {
+      blocked.set(entry.id, {
+        reason:
+          'Something changed ' +
+          (entry.entity.name === '' ? 'this' : entry.entity.name) +
+          ' after this one. Revert to the newest version first — going back this far would throw away that later change too, without saying so.',
+      })
+      continue
+    }
+    newestSeen.add(entry.entity.key)
+  }
+  return blocked
 }

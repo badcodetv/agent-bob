@@ -372,7 +372,19 @@ export default function AgentChat(props: AgentChatProps) {
   }, [onOpenArtifactViewer])
 
   return (
-    <Box sx={{ display: 'flex', flex: 1, minHeight: 0 }}>
+    // 🔴 `minWidth: 0` on the ROOT ROW too, not just on the chat column inside
+    // it. Measured, in a real browser, inside the embed iframe at a 610px
+    // rail: this element computed `min-width: auto` → min-content 628px and
+    // held itself 18px wider than its 610px parent, so the panel scrolled
+    // sideways and Send sat off the edge. The column below already carried
+    // `minWidth: 0`, which is why this looked fixed and was not — a
+    // shrinkable child inside an unshrinkable parent shrinks nothing.
+    //
+    // Neither `minHeight: 0` nor `minWidth: 0` is cosmetic here: they are the
+    // two halves of the same flexbox rule, and only the height half was ever
+    // written down. This component is embedded in a narrow rail by design
+    // (docs/19-embedding.md), so it must survive any width.
+    <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
       {/* Chat area */}
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
         {/* Messages */}
@@ -732,6 +744,21 @@ export default function AgentChat(props: AgentChatProps) {
                 disabled={isStreaming}
                 sx={{
                   flex: 1,
+                  // 🔴 `minWidth: 0` OR THE COMPOSER CANNOT NARROW AT ALL.
+                  //
+                  // A flex item defaults to `min-width: auto`, which is its
+                  // MIN-CONTENT width — and a bare `<textarea>`'s min-content
+                  // is its `cols` default, about 522px at this font size. So
+                  // `flex: 1` was a lie: the textarea could grow but never
+                  // shrink, and the whole composer had a hard floor of ~628px.
+                  //
+                  // Measured in a real browser inside the embed iframe at a
+                  // 459px rail: document scrollWidth 628 vs clientWidth 459.
+                  // The overflow pushed Send off the right edge and put a
+                  // horizontal scrollbar under a chat panel, which is how this
+                  // was reported. It is invisible in the full-width console
+                  // because 628px always fitted there.
+                  minWidth: 0,
                   p: '8px 12px',
                   border: '1px solid', borderColor: 'divider',
                   borderRadius: '8px',

@@ -172,6 +172,119 @@ describe('endpoint overrides reach fetch', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The resume-time reconnect gate.
+//
+// 🔴 It used to be `status === 'active' || status === 'streaming'`, and the
+// SERVER writes neither: `go/cmd/agentd/dispatch.go` writes `"creating"` then
+// `"running"`, and `'running'` is not even in `AgentSession['status']`. Every
+// resume of a real session therefore SKIPPED the probe, so a turn started by
+// anything other than this browser tab — an embedder seeding a conversation,
+// another tab, a reload mid-turn — was never reattached. The transcript showed
+// the persisted history and then sat silent while the turn streamed nowhere.
+//
+// The first test is the regression. The second is its limit: a terminal
+// session must not be probed at all.
+describe('resume reattaches to an in-flight turn', () => {
+  let originalFetch: typeof globalThis.fetch
+
+  const stub = (session: Record<string, unknown>, activeQuery: unknown) => {
+    const calls: string[] = []
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+      const urlStr = String(url)
+      calls.push(urlStr)
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      if (urlStr.includes('/query-events')) return json({ events: [] })
+      if (urlStr.includes('/messages')) return json({ messages: [], total: 0 })
+      if (urlStr.includes('/artifacts')) return json({ artifacts: [] })
+      if (urlStr.includes('/reconnect') || urlStr.includes('/stream')) {
+        // An SSE response that ends immediately: enough to prove the reattach
+        // was attempted, without simulating a turn.
+        return new Response('event: query_complete\ndata: {}\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (urlStr.includes('/status')) return json({ sandboxState: 'running', activeQuery })
+      if (urlStr.includes('/agent/session/')) return json(session)
+      return json({})
+    }) as typeof globalThis.fetch
+    return calls
+  }
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    vi.restoreAllMocks()
+  })
+
+  it('🔴 probes and reattaches for the status the SERVER actually writes ("running")', async () => {
+    const calls = stub(
+      { id: 'sess-run', status: 'running', workflow_id: 'agent' },
+      { queryId: 'q-sess-run-1' },
+    )
+
+    const { result } = renderHook(() => useAgentSession({ apiBaseUrl: '' }))
+    await act(async () => {
+      await result.current.resumeSession('sess-run')
+    })
+
+    await waitFor(() => {
+      expect(calls.some((c) => c.includes('/reconnect') || c.includes('/stream'))).toBe(true)
+    })
+    // The reattach carries the queryId the probe reported: a reconnect without
+    // one attaches to nothing and persists nothing.
+    expect(calls.some((c) => c.includes('q-sess-run-1'))).toBe(true)
+
+    await act(async () => {
+      result.current.clearSession()
+    })
+  })
+
+  it('does not reattach when the server says nothing is in flight', async () => {
+    const calls = stub({ id: 'sess-idle', status: 'running', workflow_id: 'agent' }, null)
+
+    const { result } = renderHook(() => useAgentSession({ apiBaseUrl: '' }))
+    await act(async () => {
+      await result.current.resumeSession('sess-idle')
+    })
+
+    expect(calls.some((c) => c.includes('/reconnect'))).toBe(false)
+    expect(result.current.error).toBeNull()
+
+    await act(async () => {
+      result.current.clearSession()
+    })
+  })
+
+  it('THE LIMIT: a terminal session is not probed for an active query at all', async () => {
+    // `error` and `cancelled` cannot have a turn in flight, and probing them
+    // would surface a status-unknown banner on a session that is simply over.
+    const calls = stub(
+      { id: 'sess-dead', status: 'cancelled', workflow_id: 'agent' },
+      { queryId: 'q-should-not-be-used' },
+    )
+
+    const { result } = renderHook(() => useAgentSession({ apiBaseUrl: '' }))
+    await act(async () => {
+      await result.current.resumeSession('sess-dead')
+    })
+
+    expect(calls.some((c) => c.includes('/reconnect'))).toBe(false)
+
+    await act(async () => {
+      result.current.clearSession()
+    })
+  })
+})
+
 // RD20: `create_error` is populated on provisioning failure and served on the
 // session route, and web/src had ZERO consumers of it — a session that never
 // came up rendered as a bare `status: "error"` with an empty transcript.

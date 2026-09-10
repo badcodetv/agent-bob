@@ -290,7 +290,10 @@ export function agentEventReducer(state: AgentEventState, event: AgentSSEEvent):
               if (inner.__ask_user) {
                 next.askedQuestions = new Map(next.askedQuestions)
                 next.askedQuestions.set(toolCallId, {
-                  question: inner.question, options: inner.options,
+                  // `?? []`: AskUserCard maps over this with no guard, so a
+                  // marker with no `options` would throw inside React and
+                  // blank the whole chat panel rather than skip one card.
+                  question: inner.question, options: inner.options ?? [],
                   allowFreetext: inner.allow_freetext || false,
                   context: inner.context || '', toolCallId, answered: false,
                 })
@@ -386,7 +389,8 @@ export function agentEventReducer(state: AgentEventState, event: AgentSSEEvent):
     case 'ask_user': {
       const questionInfo: AskUserQuestionInfo = {
         question: data.question as string,
-        options: data.options as AskUserQuestionInfo['options'],
+        // `?? []` for the same reason as the marker path above.
+        options: (data.options ?? []) as AskUserQuestionInfo['options'],
         allowFreetext: (data.allowFreetext as boolean) || false,
         context: (data.context as string) || '',
         toolCallId: (data.toolCallId as string) || '',

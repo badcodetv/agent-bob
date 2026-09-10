@@ -283,10 +283,18 @@ func TestWorkersHTTP_FreezeAndUnfreezeRoundTrip(t *testing.T) {
 	if store.rows["acme/quality-scorer"].Frozen != false {
 		t.Fatalf("unfreeze not stored")
 	}
-	// And an omitted field means false, per this route's replace semantics.
+	// DI11 inverted this. It read "an omitted field means false, per this
+	// route's replace semantics" — which pinned the RULE, not a safety
+	// property. The safety property is the one above: an explicit unfreeze
+	// must land. An OMITTED frozen now keeps the stored value, because a save
+	// that says nothing about freezing must not quietly thaw a worker a human
+	// froze.
 	put(`{"description":"scores email","frozen":true}`)
-	if got := put(`{"description":"scores email"}`); got.Frozen {
-		t.Fatalf("PUT is create-or-replace: an omitted frozen must read as false, got %+v", got)
+	if got := put(`{"description":"scores email"}`); !got.Frozen {
+		t.Fatalf("an omitted frozen must KEEP the stored true (DI11), got %+v", got)
+	}
+	if !store.rows["acme/quality-scorer"].Frozen {
+		t.Fatalf("the store must still hold frozen=true after a PUT that omitted it")
 	}
 }
 
@@ -536,4 +544,243 @@ func TestWorkersHTTP_MuxRouting(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unmounted worker route: want 404, got %d", rec.Code)
 	}
+}
+
+// T27 (from DI2, found live during T1): a PUT that omits a field must not
+// erase it.
+//
+// The handler used to build a fresh agentdb.NewWorker and assign Description,
+// SystemPrompt, MCPConfig, Image and Briefing from the body unconditionally, so
+// installing a new prompt with {"system_prompt": …} wrote every other one of
+// those five as its zero value. It did that silently: 200, and a read-back echo
+// that looked right because it echoed what had just been stored. That is how
+// the architect lost its briefing.
+//
+// Absent (or an explicit JSON null) now keeps the stored value; an explicit
+// "", {} or [] still clears it, which is why these five could not simply be
+// merged. Asserted against the STORE, never the echo — the echo is what made
+// the original defect invisible.
+func TestWorkersHTTP_PutKeepsOmittedFields(t *testing.T) {
+	existing := func() *agentdb.Worker {
+		w := agentdb.NewWorker("acme", "architect")
+		w.Description = "designs the roster"
+		w.SystemPrompt = "You are the architect."
+		w.Image = "orange/architect:v3"
+		w.MCPConfig = agentdb.JSONMap{"servers": "core"}
+		w.Briefing = agentdb.SelectorList{"name=label-registry", "kind=charter"}
+		return w
+	}
+
+	// One field at a time, so a failure names the field rather than the row.
+	keeps := []struct {
+		name string
+		body string
+	}{
+		{"omitting briefing keeps it", `{"system_prompt":"You are the architect, revised."}`},
+		{"null briefing keeps it", `{"briefing":null}`},
+		{"omitting system_prompt keeps it", `{"description":"designs the roster, revised"}`},
+		{"omitting mcp_config keeps it", `{"description":"designs the roster, revised"}`},
+		{"omitting image keeps it", `{"description":"designs the roster, revised"}`},
+		{"omitting description keeps it", `{"image":"orange/architect:v4"}`},
+	}
+	for _, tc := range keeps {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeWorkerStore(existing())
+			h := workerHandlers(t, store, nil)
+			rec := httptest.NewRecorder()
+			h.PutWorker(rec, workerReq("PUT", "/agent/workers/architect", "architect", tc.body))
+			if rec.Code != 200 {
+				t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+			}
+			stored := store.rows["acme/architect"]
+			if stored == nil {
+				t.Fatalf("nothing stored: %#v", store.rows)
+			}
+			want := existing()
+			if !strings.Contains(tc.body, `"briefing"`) || strings.Contains(tc.body, `"briefing":null`) {
+				if len(stored.Briefing) != len(want.Briefing) {
+					t.Errorf("briefing: want %#v, got %#v", want.Briefing, stored.Briefing)
+				}
+			}
+			if !strings.Contains(tc.body, `"system_prompt"`) && stored.SystemPrompt != want.SystemPrompt {
+				t.Errorf("system_prompt: want %q, got %q", want.SystemPrompt, stored.SystemPrompt)
+			}
+			if !strings.Contains(tc.body, `"mcp_config"`) && len(stored.MCPConfig) != len(want.MCPConfig) {
+				t.Errorf("mcp_config: want %#v, got %#v", want.MCPConfig, stored.MCPConfig)
+			}
+			if !strings.Contains(tc.body, `"image"`) && stored.Image != want.Image {
+				t.Errorf("image: want %q, got %q", want.Image, stored.Image)
+			}
+			if !strings.Contains(tc.body, `"description"`) && stored.Description != want.Description {
+				t.Errorf("description: want %q, got %q", want.Description, stored.Description)
+			}
+		})
+	}
+
+	// Clearing must stay possible, or Briefing becomes append-only over HTTP.
+	clears := []struct {
+		name  string
+		body  string
+		check func(*testing.T, *agentdb.Worker)
+	}{
+		{
+			name: "explicit empty briefing clears it",
+			body: `{"briefing":[]}`,
+			check: func(t *testing.T, w *agentdb.Worker) {
+				if len(w.Briefing) != 0 {
+					t.Errorf("briefing: want cleared, got %#v", w.Briefing)
+				}
+			},
+		},
+		{
+			name: "explicit empty system_prompt clears it",
+			body: `{"system_prompt":""}`,
+			check: func(t *testing.T, w *agentdb.Worker) {
+				if w.SystemPrompt != "" {
+					t.Errorf("system_prompt: want cleared, got %q", w.SystemPrompt)
+				}
+			},
+		},
+		{
+			name: "explicit empty mcp_config clears it",
+			body: `{"mcp_config":{}}`,
+			check: func(t *testing.T, w *agentdb.Worker) {
+				if len(w.MCPConfig) != 0 {
+					t.Errorf("mcp_config: want cleared, got %#v", w.MCPConfig)
+				}
+			},
+		},
+		{
+			name: "explicit empty image clears it",
+			body: `{"image":""}`,
+			check: func(t *testing.T, w *agentdb.Worker) {
+				if w.Image != "" {
+					t.Errorf("image: want cleared, got %q", w.Image)
+				}
+			},
+		},
+	}
+	for _, tc := range clears {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeWorkerStore(existing())
+			h := workerHandlers(t, store, nil)
+			rec := httptest.NewRecorder()
+			h.PutWorker(rec, workerReq("PUT", "/agent/workers/architect", "architect", tc.body))
+			if rec.Code != 200 {
+				t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+			}
+			stored := store.rows["acme/architect"]
+			if stored == nil {
+				t.Fatalf("nothing stored: %#v", store.rows)
+			}
+			tc.check(t, stored)
+		})
+	}
+}
+
+// The other half of the rule: on CREATE there is no stored value, so an
+// omitted field is its zero value and nothing about the existing behaviour
+// changes. TestWorkersHTTP_PutDefaultsAndEcho covers the defaults; this pins
+// that keep-on-absent did not accidentally teach the handler to look up a row
+// that is not there.
+func TestWorkersHTTP_PutCreateIsUnchangedByKeepOnAbsent(t *testing.T) {
+	store := newFakeWorkerStore()
+	h := workerHandlers(t, store, nil)
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/newcomer", "newcomer", `{"description":"brand new"}`))
+	if rec.Code != 200 {
+		t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+	}
+	stored := store.rows["acme/newcomer"]
+	if stored == nil {
+		t.Fatalf("nothing stored: %#v", store.rows)
+	}
+	if stored.Description != "brand new" {
+		t.Errorf("description = %q", stored.Description)
+	}
+	if stored.SystemPrompt != "" || stored.Image != "" || stored.Briefing != nil || stored.MCPConfig != nil {
+		t.Errorf("a created worker must carry zero values for what the body omitted: %+v", stored)
+	}
+}
+
+// DI11: the three control fields keep on absent too, so the route has ONE rule.
+//
+// T27 made description, system_prompt, mcp_config, image and briefing keep
+// their stored value when a PUT omits them, and deliberately left
+// max_instances, enabled and frozen replacing to their defaults. That split
+// meant a caller saving only a prompt silently thawed a frozen worker,
+// re-enabled a disabled one and reset its concurrency to 1 — the three fields
+// a human uses to CONTROL a worker, each failing in the unsafe direction. Every
+// other writer already keeps: the agents' worker_update is a read-modify-write
+// and the git importer is a field merge. This route was the odd one out.
+func TestWorkersHTTP_PutKeepsOmittedControlFields(t *testing.T) {
+	existing := func() *agentdb.Worker {
+		w := agentdb.NewWorker("acme", "scorer")
+		w.SystemPrompt = "You score answers."
+		w.MaxInstances = 4
+		w.Enabled = false
+		w.Frozen = true
+		return w
+	}
+
+	t.Run("omitted control fields keep the stored values", func(t *testing.T) {
+		store := newFakeWorkerStore(existing())
+		h := workerHandlers(t, store, nil)
+		rec := httptest.NewRecorder()
+		h.PutWorker(rec, workerReq("PUT", "/agent/workers/scorer", "scorer",
+			`{"system_prompt":"You score answers, revised."}`))
+		if rec.Code != 200 {
+			t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+		}
+		// Read from the STORE, never the echo — the echo is what hid DI2.
+		got := store.rows["acme/scorer"]
+		if !got.Frozen {
+			t.Error("frozen: a prompt-only PUT thawed a frozen worker")
+		}
+		if got.Enabled {
+			t.Error("enabled: a prompt-only PUT re-enabled a disabled worker")
+		}
+		if got.MaxInstances != 4 {
+			t.Errorf("max_instances: want 4 kept, got %d", got.MaxInstances)
+		}
+		if got.SystemPrompt != "You score answers, revised." {
+			t.Errorf("the field that WAS sent must still land, got %q", got.SystemPrompt)
+		}
+	})
+
+	t.Run("explicit values still win, including false and a lower count", func(t *testing.T) {
+		store := newFakeWorkerStore(existing())
+		h := workerHandlers(t, store, nil)
+		rec := httptest.NewRecorder()
+		h.PutWorker(rec, workerReq("PUT", "/agent/workers/scorer", "scorer",
+			`{"enabled":true,"frozen":false,"max_instances":2}`))
+		if rec.Code != 200 {
+			t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+		}
+		got := store.rows["acme/scorer"]
+		if got.Frozen || !got.Enabled || got.MaxInstances != 2 {
+			t.Errorf("explicit control values were not applied: %+v", got)
+		}
+		if got.SystemPrompt != "You score answers." {
+			t.Errorf("an omitted prompt must still be kept (T27), got %q", got.SystemPrompt)
+		}
+	})
+
+	t.Run("a store read that fails is refused, never written over", func(t *testing.T) {
+		// Falling through to NewWorker's defaults here would be the same wipe,
+		// arriving only when the database hiccups. So the read failing must
+		// mean nothing is written at all.
+		store := newFakeWorkerStore(existing())
+		store.err = errors.New("connection reset")
+		h := workerHandlers(t, store, nil)
+		rec := httptest.NewRecorder()
+		h.PutWorker(rec, workerReq("PUT", "/agent/workers/scorer", "scorer",
+			`{"system_prompt":"You score answers, revised."}`))
+		if rec.Code != http.StatusInternalServerError {
+			t.Fatalf("want 500 on a failed read, got %d body=%s", rec.Code, rec.Body)
+		}
+		if store.writes != 0 {
+			t.Fatalf("a PUT whose read failed must not write; writes=%d", store.writes)
+		}
+	})
 }

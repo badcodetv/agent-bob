@@ -72,6 +72,7 @@ package agentdb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -476,6 +477,11 @@ type ConfigEventQuery struct {
 	// timestamp cursor would either skip or repeat records at a page boundary.
 	// A caller pages by passing the seq of the last record it received.
 	BeforeSeq int64
+	// Seq addresses ONE record by its per-project sequence number (0 = any).
+	// It is how a caller that saw a record in a list — or in a `config.changed`
+	// event — fetches exactly that record again, without paging back to it and
+	// without depending on the uuid, which nothing else in the product renders.
+	Seq int64
 }
 
 // configEntityScanCap bounds the rows an Entity-filtered query reads before it
@@ -511,6 +517,9 @@ func (s *Store) ListConfigEvents(ctx context.Context, q ConfigEventQuery) ([]*Co
 	if q.BeforeSeq > 0 {
 		db = db.Where("seq < ?", q.BeforeSeq)
 	}
+	if q.Seq > 0 {
+		db = db.Where("seq = ?", q.Seq)
+	}
 
 	// The entity filter is two-phase: narrow to the kind's actions in SQL, then
 	// match the key in Go. The SQL limit must therefore become a scan cap —
@@ -542,6 +551,37 @@ func (s *Store) ListConfigEvents(ctx context.Context, q ConfigEventQuery) ([]*Co
 		out = []*ConfigEvent{}
 	}
 	return out, nil
+}
+
+// ErrConfigEventNotFound is "no such record in this project" — including a
+// record that exists in ANOTHER project, which is the same answer on purpose:
+// a caller must not be able to learn that an id is real by the shape of the
+// refusal (P5).
+var ErrConfigEventNotFound = errors.New("agentdb: config event not found")
+
+// GetConfigEvent returns one record by id, scoped to the project.
+//
+// The project is an ARGUMENT, not a filter the caller applies afterwards, for
+// the reason above: there is one query, and it cannot be written in a way that
+// forgets the scope.
+func (s *Store) GetConfigEvent(ctx context.Context, project, id string) (*ConfigEvent, error) {
+	if strings.TrimSpace(project) == "" {
+		return nil, fmt.Errorf("agentdb: GetConfigEvent requires a project (P5)")
+	}
+	if strings.TrimSpace(id) == "" {
+		return nil, fmt.Errorf("%w: empty id", ErrConfigEventNotFound)
+	}
+	var ev ConfigEvent
+	err := s.gdb.WithContext(ctx).Model(&ConfigEvent{}).
+		Where("project = ? AND id = ?", project, id).
+		First(&ev).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: %s", ErrConfigEventNotFound, id)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("agentdb: get config event: %w", err)
+	}
+	return &ev, nil
 }
 
 // filterByEntity keeps the records whose payload keys to ref, newest first,
@@ -853,6 +893,45 @@ var ConfigMutationExempt = map[string]string{
 		"guard installed (it never does: the guard is a test fixture)",
 	"ClearScheduleProvisionFailures": "the reset half of NoteScheduleProvisionFailure; same runtime-state " +
 		"reasoning, and a config event on every SUCCESSFUL firing would be worse still",
+	// The git projection's own bookkeeping (G22, gitprojection.go). All six
+	// are §15.3 rule 3 runtime state — the same class as
+	// MarkProjectEventDelivered and NoteScheduleEvaluated. They write ONE
+	// table, git_projection_state, which is not a projection of configuration
+	// and is not under the write guard: a watermark advancing, a lease being
+	// taken or a git failure being recorded is progress nobody decided, and
+	// logging it would append rows to the changelog on every render, push and
+	// poll forever.
+	"AcquireGitProjectionLease": "§15.3 rule 3: the projection's one-writer-per-clone lease (§F). Runtime " +
+		"coordination between agentd processes, taken and released around every render and push; nobody " +
+		"decided anything and there is no verb for it in §15.3's closed vocabulary",
+	"ReleaseGitProjectionLease": "§15.3 rule 3: the release half of AcquireGitProjectionLease",
+	"MarkGitProjectionRendered": "§15.3 rule 3: the OUTBOUND watermark — which config-log sequence the " +
+		"published tree reflects (§F). It is a record of how far a loop has got, exactly like " +
+		"MarkProjectEventDelivered, and the configuration change it followed is ALREADY in the log; that " +
+		"is what it points at",
+	"MarkGitProjectionPushed": "§15.3 rule 3: the same watermark, one step later — the commit that reached " +
+		"the remote",
+	"MarkGitProjectionImported": "§15.3 rule 3: the INBOUND watermark. The changes an import applies are " +
+		"each logged as their own config event by the store methods that apply them (that is the whole " +
+		"design: git writes nothing the store did not serialise); this column only records how far the " +
+		"importer has read",
+	"ClearGitProjectionQuarantine": "§15.3 rule 3: the retraction half of NoteGitProjectionFailure, " +
+		"and exempt for the same reason it is. A clean import or bootstrap withdraws the quarantine it " +
+		"had recorded, so the console stops reporting a file the operator has already fixed — a stale " +
+		"red banner is how an operator learns to ignore banners. Nobody decided anything; the WHERE " +
+		"clause is deliberately narrow so a clean INBOUND run can never erase an OUTBOUND push failure",
+	"NoteGitProjectionFailure": "§15.3 rule 3: why the last publish failed — an unrenderable field, a " +
+		"diverged remote, an unreachable host — and which KIND of failure that was. An observation " +
+		"written by a loop that retries every interval, like NoteScheduleProvisionFailure, and a " +
+		"changelog entry per failed poll would bury the log it shares",
+	"PutGitProjectionNotes": "§15.3 rule 3: the per-file half of the same observation (G23) — which file " +
+		"quarantined the last inbound push, and which edits were understood and deliberately not " +
+		"applied. It writes git_projection_notes, a bounded operator's view of the MOST RECENT import " +
+		"run that is replaced wholesale on every pass; nobody decided anything and §15.3's closed " +
+		"vocabulary has no verb for it. The changes an import actually applied are each logged as their " +
+		"own config event by the store methods that apply them — that record is complete and is not " +
+		"this one",
+
 	"MarkCustomImageReaped": "storage GC, not curation: the snapshot_ttl_days reaper (§5, B4) deleted the bytes " +
 		"and stamps the catalogue row so resolution fails loudly instead of pointing at nothing (§13.7). " +
 		"No agent decided it and §15.3's closed vocabulary has no verb for it. Like DeleteCustomImage it " +

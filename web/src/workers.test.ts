@@ -122,14 +122,31 @@ describe('workerBody', () => {
     expect(body.frozen).toBe(false)
   })
 
-  it('always sends frozen explicitly — PUT replaces, and an omitted frozen unfreezes', () => {
+  // The title used to end "PUT replaces, and an omitted frozen unfreezes". That
+  // stopped being true at DI11 — the route keeps an omitted frozen now — but
+  // the body still says what the human saw, so the assertion stands.
+  it('always sends frozen explicitly', () => {
     expect(workerBody({ ...newWorkerDraft(), name: 'w', frozen: true }).frozen).toBe(true)
     expect('frozen' in workerBody({ ...newWorkerDraft(), name: 'w' })).toBe(true)
   })
 
-  it('preserves null vs [] on briefing — the engine keeps them distinct', () => {
+  // Was: "preserves null vs [] on briefing — the engine keeps them distinct".
+  // T27 changed what those two mean ON THE WIRE. The route now reads an absent
+  // or null briefing as KEEP THE STORED ONE, so a null reaching the server is
+  // no longer a way to say "no selectors" — it is a way to say nothing at all.
+  // The draft still uses null for "no selectors" (removing the last row sets
+  // it), so the body has to turn that into the explicit empty list that clears.
+  // Sending null instead would make "remove every selector, save" a no-op.
+  it('sends briefing verbatim — null and [] mean different things (T27)', () => {
+    // null = "leave the stored briefing alone", [] = "clear it". Coercing
+    // either way breaks something real: null → [] makes a freeze look like a
+    // briefing change and costs the config log its `worker_freeze` action,
+    // and [] → null makes "remove every selector, save" a silent no-op.
     expect(workerBody({ ...newWorkerDraft(), name: 'w' }).briefing).toBeNull()
     expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: [] }).briefing).toEqual([])
+    expect(workerBody({ ...newWorkerDraft(), name: 'w', briefing: ['kind=x'] }).briefing).toEqual([
+      'kind=x',
+    ])
   })
 
   it('trims the image — a stray space is a silent resolution failure', () => {
