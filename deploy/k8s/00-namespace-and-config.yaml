@@ -19,7 +19,7 @@ data:
 
   # Where a human clicking a session permalink lands. Must match the Ingress
   # host in 40-ingress.yaml, including the scheme.
-  public-base-url: "https://orange.example.com"
+  public-base-url: "https://bob.example.com"
 
   # The session base image published by deploy/publish-base.sh. Prefer the
   # specific tag over :latest — Agent Bob records the digest each session
