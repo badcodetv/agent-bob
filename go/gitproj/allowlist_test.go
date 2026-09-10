@@ -279,7 +279,7 @@ func TestCheckRenderableUnknownAndNever(t *testing.T) {
 // so strict that ordinary configuration stops rendering.
 func TestCheckRenderableAcceptsPlainFields(t *testing.T) {
 	err := CheckRenderable(StructProjectSettings, map[string]any{
-		"BaseImage":         "orange/example:v3",
+		"BaseImage":         "bob/example:v3",
 		"SystemPrompt":      "You are the wolf project.",
 		"MaxConcurrentJobs": 4,
 		"Briefing":          agentdb.SelectorList{"kind=lesson"},

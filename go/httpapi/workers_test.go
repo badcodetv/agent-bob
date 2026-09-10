@@ -565,7 +565,7 @@ func TestWorkersHTTP_PutKeepsOmittedFields(t *testing.T) {
 		w := agentdb.NewWorker("acme", "architect")
 		w.Description = "designs the roster"
 		w.SystemPrompt = "You are the architect."
-		w.Image = "orange/architect:v3"
+		w.Image = "bob/architect:v3"
 		w.MCPConfig = agentdb.JSONMap{"servers": "core"}
 		w.Briefing = agentdb.SelectorList{"name=label-registry", "kind=charter"}
 		return w
@@ -581,7 +581,7 @@ func TestWorkersHTTP_PutKeepsOmittedFields(t *testing.T) {
 		{"omitting system_prompt keeps it", `{"description":"designs the roster, revised"}`},
 		{"omitting mcp_config keeps it", `{"description":"designs the roster, revised"}`},
 		{"omitting image keeps it", `{"description":"designs the roster, revised"}`},
-		{"omitting description keeps it", `{"image":"orange/architect:v4"}`},
+		{"omitting description keeps it", `{"image":"bob/architect:v4"}`},
 	}
 	for _, tc := range keeps {
 		t.Run(tc.name, func(t *testing.T) {

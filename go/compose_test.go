@@ -313,11 +313,11 @@ func TestComposeJobMCPMerge(t *testing.T) {
 			name:    "union of disjoint sets",
 			project: agentdb.MCPServers{"notion": httpServer("http://notion:8080/sse")},
 			worker:  agentdb.MCPServers{"gmail": stdioServer("gmail-mcp")},
-			core:    agentdb.MCPServers{"orange": httpServer("http://agentd:8080/mcp")},
+			core:    agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
 			want: agentdb.MCPServers{
 				"notion": httpServer("http://notion:8080/sse"),
 				"gmail":  stdioServer("gmail-mcp"),
-				"orange": httpServer("http://agentd:8080/mcp"),
+				"bob":    httpServer("http://agentd:8080/mcp"),
 			},
 		},
 		{
@@ -328,10 +328,10 @@ func TestComposeJobMCPMerge(t *testing.T) {
 		},
 		{
 			name:    "core is non-overridable — it beats the worker",
-			project: agentdb.MCPServers{"orange": stdioServer("project-fake")},
-			worker:  agentdb.MCPServers{"orange": stdioServer("worker-fake")},
-			core:    agentdb.MCPServers{"orange": httpServer("http://agentd:8080/mcp")},
-			want:    agentdb.MCPServers{"orange": httpServer("http://agentd:8080/mcp")},
+			project: agentdb.MCPServers{"bob": stdioServer("project-fake")},
+			worker:  agentdb.MCPServers{"bob": stdioServer("worker-fake")},
+			core:    agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
+			want:    agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
 		},
 	}
 
@@ -357,7 +357,7 @@ func TestComposeJobMCPMerge(t *testing.T) {
 // composition must never write back into the worker or project row it read.
 func TestComposeJobMCPMergeDoesNotMutateInputs(t *testing.T) {
 	in := baseInput()
-	core := agentdb.MCPServers{"orange": httpServer("http://agentd:8080/mcp")}
+	core := agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")}
 	in.CoreMCP = core
 	in.Worker.MCPConfig = jsonMapOf(agentdb.MCPServers{"gmail": stdioServer("gmail-mcp")})
 
@@ -415,7 +415,7 @@ func TestComposeJobMCPInvalid(t *testing.T) {
 		{
 			name: "core config is validated too",
 			mutate: func(in *ComposeJobInput) {
-				in.CoreMCP = agentdb.MCPServers{"orange": {}}
+				in.CoreMCP = agentdb.MCPServers{"bob": {}}
 			},
 			wantErr:  "exactly one transport",
 			wantName: "core mcp servers",
