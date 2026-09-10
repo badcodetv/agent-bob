@@ -605,7 +605,7 @@ func TestGitBackfillResumesAfterACrashWithoutDuplicating(t *testing.T) {
 // every later commit would rest on a state the project never passed through.
 func TestGitBackfillStopsAtAnUnrenderableState(t *testing.T) {
 	rig := newBackfillRig(t, "wolf")
-	const secret = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+	const secret = "https://hooks.slack.com/services/T00/B00/XXXXnotarealtoken"
 
 	rig.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerCreate, backfillWorker("copywriter", "v1"), "create", "architect"))
 	rig.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerPromptWrite, backfillWorker("copywriter", "v2"), "sharpen", "architect"))

@@ -441,7 +441,7 @@ The board says: hold.
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestRenderTreeRefusesLiteralAttentionURL(t *testing.T) {
-	const secret = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+	const secret = "https://hooks.slack.com/services/T00/B00/XXXXnotarealtoken"
 
 	st := goldenState()
 	st.Settings.AttentionChannel = agentdb.JSONMap{"kind": "webhook", "url": secret}
