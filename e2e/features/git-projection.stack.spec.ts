@@ -213,7 +213,7 @@ async function projectedProject(
   await writeSettings(client, {
     git_remote: remotePath(client.project),
     git_branch: 'main',
-    git_subfolder: 'orange',
+    git_subfolder: 'bob',
     git_webhook_secret_env: WEBHOOK_SECRET_ENV,
   })
 
@@ -288,16 +288,16 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     await unproject(project)
   })
 
-  test('the first render publishes the whole project under orange/', async () => {
+  test('the first render publishes the whole project under bob/', async () => {
     const tip = await remoteTip(project!)
     expect(tip).not.toBe('')
 
     expect(
-      await remoteFile(project!, 'orange/settings.md', tip),
-      'orange/settings.md must exist at the tip',
+      await remoteFile(project!, 'bob/settings.md', tip),
+      'bob/settings.md must exist at the tip',
     ).not.toBeNull()
 
-    const editor = await remoteFile(project!, 'orange/workers/editor.md', tip)
+    const editor = await remoteFile(project!, 'bob/workers/editor.md', tip)
     expect(editor).not.toBeNull()
     expect(splitFile(editor!).body.trim()).toBe(EDITOR_PROMPT)
 
@@ -343,7 +343,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     }
 
     // And the file at that commit really says the new prompt.
-    const file = await remoteFile(project!, 'orange/workers/editor.md', commit.sha)
+    const file = await remoteFile(project!, 'bob/workers/editor.md', commit.sha)
     expect(file).not.toBeNull()
     expect(splitFile(file!).body.trim()).toBe(NEW_PROMPT)
     expect(splitFile(file!).frontmatter).toContain('name: editor')
@@ -380,7 +380,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     request,
   }) => {
     const tip = await remoteTip(project!)
-    const rendered = await remoteFile(project!, 'orange/workers/editor.md', tip)
+    const rendered = await remoteFile(project!, 'bob/workers/editor.md', tip)
     expect(rendered).not.toBeNull()
 
     const HUMAN_PROMPT = 'You edit copy. Prefer plain words, and cut every second adjective.'
@@ -389,7 +389,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     const seqBefore = (await newestEvent(client)).seq
 
     await humanPush(project!, MESSAGE, {
-      'orange/workers/editor.md': withBody(rendered!, HUMAN_PROMPT),
+      'bob/workers/editor.md': withBody(rendered!, HUMAN_PROMPT),
     })
 
     const delivery = await postWebhook(request, project!)
@@ -432,8 +432,8 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     request,
   }) => {
     const tip = await remoteTip(project!)
-    const editorFile = (await remoteFile(project!, 'orange/workers/editor.md', tip))!
-    const scribeFile = (await remoteFile(project!, 'orange/workers/scribe.md', tip))!
+    const editorFile = (await remoteFile(project!, 'bob/workers/editor.md', tip))!
+    const scribeFile = (await remoteFile(project!, 'bob/workers/scribe.md', tip))!
     expect(editorFile).toBeTruthy()
     expect(scribeFile).toBeTruthy()
 
@@ -450,8 +450,8 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     const broken = '---\nname: scribe\nenabled: [unclosed\n---\n\nAlso must not be applied.\n'
 
     const pushed = await humanPush(project!, 'a good edit and a broken one', {
-      'orange/workers/editor.md': withBody(editorFile, GOOD),
-      'orange/workers/scribe.md': broken,
+      'bob/workers/editor.md': withBody(editorFile, GOOD),
+      'bob/workers/scribe.md': broken,
     })
 
     const delivery = await postWebhook(request, project!)
@@ -465,7 +465,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
       RENDER_TIMEOUT,
       'agentd to report the quarantine',
     )
-    expect(logs).toContain('orange/workers/scribe.md')
+    expect(logs).toContain('bob/workers/scribe.md')
     expect(logs).toContain('nothing was applied')
 
     // …and an operator reading the console sees it too: the quarantine is
@@ -479,7 +479,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
       RENDER_TIMEOUT,
       'the projection status to report a quarantine',
     )
-    expect(after.quarantine.map((q) => q.path)).toContain('orange/workers/scribe.md')
+    expect(after.quarantine.map((q) => q.path)).toContain('bob/workers/scribe.md')
     expect(after.quarantine.map((q) => q.reason).join('\n')).toContain('malformed frontmatter')
 
     // NOTHING was applied. Not the broken file, and not the good one beside it.
@@ -550,7 +550,7 @@ test.describe('git projection: a literal secret makes a project unrenderable', (
     expect(await publishedSeqs(project!)).not.toContain(String(innocent.seq))
 
     // The secret is in no published file…
-    const settingsFile = await remoteFile(project!, 'orange/settings.md', tipBefore)
+    const settingsFile = await remoteFile(project!, 'bob/settings.md', tipBefore)
     expect(settingsFile ?? '').not.toContain(SECRET)
 
     // …in nothing agentd printed. This is the check that would catch a
