@@ -145,10 +145,22 @@ spec:
             # legacy dev-open demo, which has NO auth — do not expose that.
             - name: GOOGLE_CLIENT_ID
               valueFrom: {configMapKeyRef: {name: agent-orange-config, key: google-client-id, optional: true}}
+            # MUST be "email:password" if set at all — parseTestLogin
+            # (googleauth.go:597) rejects a bare password and the caller is
+            # must(), so a lone secret string is a boot fatal. It also grants
+            # EVERY project in the map. Prefer google-client-id; leave this
+            # secret uncreated. Playbook D2.
             - name: AGENTKIT_TEST_LOGIN
               valueFrom: {secretKeyRef: {name: agent-orange, key: test-login, optional: true}}
+            # Required whenever a login mode is on — an empty value is a boot
+            # fatal, not a default. See the ConfigMap's own note, and
+            # design/2026-09-09-kubernetes-deployment-playbook.md D1.
             - name: AGENTKIT_PROJECT_MAP
               valueFrom: {configMapKeyRef: {name: agent-orange-config, key: project-map, optional: true}}
+            # Which of agentd's OWN env vars reach a session container, by name.
+            # Unset = none, silently. See the ConfigMap's note (playbook D3).
+            - name: AGENTKIT_MCP_ENV
+              valueFrom: {configMapKeyRef: {name: agent-orange-config, key: mcp-env, optional: true}}
             # Storage backends. GCS for blobs, Artifact Registry for images —
             # the same two the local stack can use, and the reason the pod needs
             # Google credentials at all.

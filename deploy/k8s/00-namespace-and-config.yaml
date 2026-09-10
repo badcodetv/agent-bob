@@ -40,9 +40,44 @@ data:
 
   # Google sign-in. Empty means fall back to test-login (see the Secret), which
   # is fine for a prototype behind a URL nobody knows and NOT fine otherwise.
+  # EDIT: paste the client id from your local .env.
   google-client-id: ""
 
   # Projects, as the object form documented in docs/19-embedding.md. A project
   # named here can carry an API key resolved from the named env var at boot.
-  # Leave empty until another application needs to embed this one.
-  project-map: ""
+  #
+  # NOT OPTIONAL WHEN A LOGIN MODE IS ON, whatever the "OPTIONAL" heading above
+  # says. Setting google-client-id or the test-login Secret with this left empty
+  # is a boot FATAL, not a degraded mode — go/cmd/agentd/main.go:543:
+  #
+  #   [agentd] login modes require a project map: set AGENTKIT_PROJECT_MAP or
+  #   AGENTKIT_PROJECT_MAP_FILE
+  #
+  # loadProjectSettingsOptional (googleauth.go:240) returns nil for an empty
+  # string, and the login block rejects nil. The pod then CrashLoopBackOffs with
+  # that one line as the only clue. See
+  # design/2026-09-09-kubernetes-deployment-playbook.md D1.
+  #
+  # "users" maps an email to the projects it may open; "*" is the wildcard —
+  # every project in the map, plus the right to create new ones from the
+  # console. "projects" carries per-project ops config (api_key_env,
+  # allowed_origins) and may be empty. An object form with NEITHER key fails
+  # boot.
+  #
+  # EDIT: add Jack's address alongside Kai's when he needs access.
+  project-map: |
+    {"users":{"kaiyadavenport@gmail.com":["*"]},"projects":{}}
+
+  # The allowlist of environment variable names forwarded from agentd INTO every
+  # session container — the only channel by which an MCP server's credential
+  # reaches the process that needs it (go/cmd/agentd/mcpenv.go). Comma-separated,
+  # e.g. "WOLF_MCP_TOKEN,GMAIL_API_KEY".
+  #
+  # Empty means nothing is forwarded, silently: an MCP tool needing a key simply
+  # never gets one, and nothing fails at boot to tell you. Each name listed must
+  # ALSO exist as an env var on the agentd container (from the Secret below), or
+  # it is logged as missing at boot and forwarded as nothing.
+  #
+  # Ten names are REFUSED rather than forwarded — AGENTKIT_JWT_SECRET,
+  # ANTHROPIC_API_KEY, DATABASE_URL and friends. That refusal is the point.
+  mcp-env: ""
