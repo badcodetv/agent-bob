@@ -2214,7 +2214,26 @@ and the console's editor sets the draft to `null` when the last selector is
 removed. Under the new rule `null` means KEEP, so "remove every selector, save"
 would have become a silent no-op. It now sends `[]`, which is the explicit clear.
 That is the general shape of the hazard in this change: a client that used null
-to mean "nothing" now says "don't touch".
+to mean "nothing" now says "don't touch". *(Superseded by DI14: `workerBody` now
+sends the draft verbatim, and the editor keeps `[]` when the last selector is
+removed, so null and `[]` stay distinct end to end.)*
+
+**Resolved 2026-09-10, before the merge to `main`, on Kai's decision.** All eight
+fields are keep-on-absent now, so the route has one rule: create-or-keep.
+Omitted on create still means the default. The deciding facts, checked in the
+code before changing anything: the HTTP PUT was the ONLY writer that reset
+anything (the agents' `worker_update` reads and patches; the git importer
+field-merges, citing DI2), and all three reset directions were the unsafe ones —
+a silent thaw, a silent re-enable that resumes spending, and a silent drop to
+one instance. `TestWorkersHTTP_FreezeAndUnfreezeRoundTrip`'s last assertion
+pinned the rule rather than a safety property (its real concern — that an
+explicit unfreeze lands — still holds), so it was inverted with its reason.
+Written test-first: `TestWorkersHTTP_PutKeepsOmittedControlFields` failed on all
+three fields against the T27 handler before the fix.
+
+`examples/web`'s `enableInterviewer` now sends only `{enabled: true}`. Its old
+whole-row body had carried `briefing: worker.briefing ?? []` — DI14's hazard,
+turning "no briefing" into "clear it" — which the simplification also removes.
 
 ### DI12 (T26) — the console's progressive nav never re-counts, so a tab cannot appear until a reload
 

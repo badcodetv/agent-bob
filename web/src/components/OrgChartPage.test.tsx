@@ -565,7 +565,7 @@ describe('the node toggles (OC4)', () => {
     })
   })
 
-  it('disables without thawing a frozen worker — PUT is create-or-replace', async () => {
+  it('disables without thawing a frozen worker', async () => {
     const user = userEvent.setup()
     renderChart()
     await waitFor(() => expect(screen.getByTestId('node-fee-scorer')).toBeTruthy())

@@ -142,18 +142,17 @@ export async function startOnboarding(opts: StartOnboardingOptions): Promise<str
 /**
  * Enable the interviewer if it exists and is switched off.
  *
- * The read-then-write stays, and T27 is why it is still worth explaining.
+ * The body is just `{enabled: true}`, and that is now exactly right.
  *
- * It used to be load-bearing against total loss: `PUT /agent/workers/{name}`
- * wrote every omitted field as its zero value, so a PUT of `{enabled: true}`
- * alone erased the interviewer's system prompt. T27 fixed that — description,
- * system_prompt, mcp_config, image and briefing are now keep-on-absent.
- *
- * But the fix did not reach all eight fields: max_instances, enabled and frozen
- * still replace on absent (DI11 records the split). So a PUT of `{enabled:
- * true}` alone would today reset max_instances to 1 and thaw a frozen
- * interviewer. Sending the whole row is correct under either rule and needs no
- * knowledge of which field is which, so that is what this does.
+ * This used to round-trip every field, because `PUT /agent/workers/{name}`
+ * wrote whatever a body omitted as a zero or a default: `{enabled: true}` alone
+ * erased the interviewer's system prompt before T27, and would have reset
+ * max_instances and thawed a frozen interviewer before DI11. The route keeps
+ * every omitted field now, so saying only what is changing is correct — and
+ * safer than the round-trip was, which sent `briefing: worker.briefing ?? []`
+ * and so turned "this worker has no briefing" into "clear it" (DI14's hazard).
+ * The GET stays: it is how this learns there is an interviewer to enable, and
+ * that it is not enabled already.
  */
 async function enableInterviewer(
   call: (path: string, init?: RequestInit) => Promise<Response>,
@@ -164,17 +163,7 @@ async function enableInterviewer(
   if (worker.enabled === true) return;
   await call(`/agent/workers/${INTERVIEWER}`, {
     method: "PUT",
-    body: JSON.stringify({
-      description: worker.description ?? "",
-      system_prompt: worker.system_prompt ?? "",
-      mcp_config: worker.mcp_config ?? {},
-      image: worker.image ?? "",
-      briefing: worker.briefing ?? [],
-      max_instances: worker.max_instances ?? 1,
-      enabled: true,
-      frozen: worker.frozen ?? false,
-      rationale: "re-entering onboarding",
-    }),
+    body: JSON.stringify({ enabled: true, rationale: "re-entering onboarding" }),
   });
 }
 

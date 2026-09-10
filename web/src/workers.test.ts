@@ -122,7 +122,10 @@ describe('workerBody', () => {
     expect(body.frozen).toBe(false)
   })
 
-  it('always sends frozen explicitly — PUT replaces, and an omitted frozen unfreezes', () => {
+  // The title used to end "PUT replaces, and an omitted frozen unfreezes". That
+  // stopped being true at DI11 — the route keeps an omitted frozen now — but
+  // the body still says what the human saw, so the assertion stands.
+  it('always sends frozen explicitly', () => {
     expect(workerBody({ ...newWorkerDraft(), name: 'w', frozen: true }).frozen).toBe(true)
     expect('frozen' in workerBody({ ...newWorkerDraft(), name: 'w' })).toBe(true)
   })

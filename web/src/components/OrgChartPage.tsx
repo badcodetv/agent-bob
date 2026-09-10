@@ -27,8 +27,9 @@
 //     never called undo (§6.4 rule 3, §11 rule 2): it is a forward write and
 //     the button says what it does.
 //   - a node's menu toggles enabled and frozen through `useWorkers.save`, which
-//     carries ALL fields including `frozen` — an omitted `frozen` on a
-//     create-or-replace PUT is a silent thaw.
+//     carries ALL fields including `frozen`. Until DI11 that was a guard — an
+//     omitted `frozen` read as false and silently thawed the worker. The route
+//     keeps omitted fields now; the whole row is still what gets sent.
 //   - schedules are NOT editable here (K3). A clock is a deep link to
 //     Automation, where that row lives.
 //
@@ -365,8 +366,10 @@ export default function OrgChartPage({
     async (rationale: string) => {
       if (toggle === null) return
       setBusy(true)
-      // Read-modify-write the WHOLE row: PUT is create-or-replace, and a body
-      // that dropped `frozen` would thaw a frozen worker on its way past.
+      // Read-modify-write the WHOLE row. Before DI11 that was the only thing
+      // stopping a dropped `frozen` from thawing the worker on its way past;
+      // the route keeps omitted fields now, but a body carrying exactly the row
+      // the human saw is still the clearest thing to put in the config log.
       const saved = await saveWorker(
         { ...toggle.worker, [toggle.field]: !toggle.worker[toggle.field] },
         rationale,

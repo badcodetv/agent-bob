@@ -122,18 +122,23 @@ misconfigured credential never silently authenticates as anonymous.
 | `briefing` | list of label selectors injected as briefing sections (§7.4) |
 | `enabled` | disabled workers ignore subscriptions; manual chat still allowed |
 
-**`PUT` has two absent-field rules, so send the whole row.** `description`, `system_prompt`,
-`mcp_config`, `image` and `briefing` are **keep-on-absent**: leaving one out changes nothing about
-it, and an explicit `""`, `{}` or `[]` clears it. `max_instances`, `enabled` and `frozen` are
-still **replace-on-absent**: leaving one out writes the default (`1`, `true`, `false`). So a script
-that toggles `enabled` and sends nothing else will silently reset `max_instances` and thaw a frozen
-worker. Read-modify-write the whole row — it is correct under either rule — and note that such a
-change is logged as `worker_update` rather than `worker_disable`.
+**`PUT` keeps whatever you leave out.** Every field is **keep-on-absent**: a body that omits a
+field (or sends it as `null`) leaves the stored value alone, and creating a worker that does not
+exist yet gives omitted fields their defaults (`max_instances` 1, `enabled` true, `frozen` false).
+To clear something, say so: `""`, `{}` or `[]` for `description`, `system_prompt`, `mcp_config`,
+`image` and `briefing`, and an explicit value for the three that cannot be empty. So
+`{"enabled": false}` on its own disables a worker and changes nothing else — and is logged as
+`worker_disable`, because it is the only field that moved.
 
-> The five used to replace on absent too, which meant a caller sending one field erased the other
-> four with a 200 and a read-back echo that looked correct. That is how the architect lost its
-> briefing during the design's first live run. The split above is the fix landing on five of the
-> eight fields; whether the remaining three should follow is an open decision, not an oversight.
+One consequence to know: on this route a `briefing` of `null` means *leave it alone* and `[]`
+means *clear it*. A client that coerces one into the other breaks something real either way.
+
+> This route used to replace omitted fields with zeros and defaults. A caller sending one field
+> erased the other four content fields with a 200 and a read-back echo that looked correct — that is
+> how the architect lost its briefing during the design's first live run — and a save that said
+> nothing about `frozen` silently thawed a frozen worker. The content fields were fixed first
+> (T27), the control fields second (DI11). Every other writer — the agents' `worker_update` and the
+> git importer — already worked this way.
 
 ### What a job's prompt is made of (§6.2)
 

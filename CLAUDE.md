@@ -112,12 +112,11 @@ Agent Orange. Three pieces:
 > discovery (`docs/product/25-cooperative-patterns.md` §5). That was observed against the real
 > model in T1.
 >
-> Two behaviours changed late and are easy to trip over. `PUT /agent/workers/{name}` now has **two**
-> absent-field rules — `description`, `system_prompt`, `mcp_config`, `image` and `briefing` keep on
-> absent; `max_instances`, `enabled` and `frozen` still replace on absent — so **send the whole
-> row** (T27, and DI11 for why it is split). And on that route a briefing of `null` means *leave it
-> alone* while `[]` means *clear it*; coercing one to the other breaks something real in either
-> direction (DI14).
+> Two behaviours changed late and are easy to trip over. `PUT /agent/workers/{name}` now **keeps
+> every field a body omits** — it is create-or-keep, not create-or-replace (T27 for the content
+> fields, DI11 for `max_instances`/`enabled`/`frozen`, which used to reset and could silently thaw a
+> frozen worker). And on that route a briefing of `null` means *leave it alone* while `[]` means
+> *clear it*; coercing one to the other breaks something real in either direction (DI14).
 >
 > **The git projection** (`design/2026-09-09-git-projection.md`, **complete on this branch — 27 of
 > 27 tickets**) makes a project's configuration readable, diffable and editable as markdown in a git

@@ -18,28 +18,32 @@ type WorkersStore interface {
 	DeleteWorker(ctx context.Context, project, name string, cw agentdb.ConfigWrite) error
 }
 
-// workerBody is the PUT payload, and it has TWO absent-field rules. Which one
-// applies to a field is stated on the field.
+// workerBody is the PUT payload. ONE rule for every field: leaving a field out
+// keeps whatever the stored row holds, and on create — when there is no stored
+// row — it takes the default (NewWorker's). This route is create-or-KEEP, not
+// create-or-replace.
 //
-// Description, SystemPrompt, MCPConfig, Image and Briefing are KEEP-ON-ABSENT
-// (T27, from DI2): leaving one out changes nothing about it. They used to be
-// replace-on-absent like the rest, which meant a caller sending one field
-// erased the other four without saying so.
+// It took two steps to get here. T27 (from DI2) made Description, SystemPrompt,
+// MCPConfig, Image and Briefing keep on absent, because sending one field used
+// to erase the other four without saying so. DI11 then brought MaxInstances,
+// Enabled and Frozen into line: while they still replaced on absent, a caller
+// saving only a prompt silently thawed a frozen worker, re-enabled a disabled
+// one and reset its concurrency to 1 — the three fields a human uses to
+// CONTROL a worker, each failing in the unsafe direction. Every other writer
+// already kept (the agents' worker_update reads and patches; the git importer
+// field-merges), so this route was the only one that did not.
 //
-// MaxInstances, Enabled and Frozen remain REPLACE-ON-ABSENT: leaving one out
-// writes this route's default (1, true, false). They are pointers so that a
-// meaningful zero value (0, false) is distinguishable from "not supplied".
-// TestWorkersHTTP_FreezeAndUnfreezeRoundTrip pins that directly. The split is
-// not satisfying, and DI11 records it as a decision still to be taken rather
-// than as a thing anyone intended.
+// Clearing stays explicit: "" / {} / [] for the five that can be empty, and an
+// explicit value for the three that cannot. The pointers exist only so that a
+// meaningful zero ("", 0, false) can be told apart from "not supplied".
 //
 // Frozen rides THIS route deliberately: the JWT-guarded HTTP API is the human
 // path, so freeze and unfreeze are one more field on the ordinary worker write
 // (mirroring how Enabled is toggled) rather than a parallel endpoint. The core
 // MCP server — the workers' path — never exposes the field at all.
 type workerBody struct {
-	// The five keep-on-absent fields (T27, from DI2). Absent or JSON `null`
-	// keeps whatever the stored row holds; an explicit "", {} or [] clears it.
+	// Every field keeps on absent (see above). Absent or JSON `null` keeps the
+	// stored value; an explicit "", {} or [] clears the five that can be empty.
 	//
 	// The three strings need pointers to tell "" apart from absent. The two
 	// composites do not: encoding/json already leaves a slice or map nil for
@@ -51,9 +55,9 @@ type workerBody struct {
 	MCPConfig    agentdb.JSONMap      `json:"mcp_config"`    // nil → keep, {} → clear
 	Image        *string              `json:"image"`         // nil → keep
 	Briefing     agentdb.SelectorList `json:"briefing"`      // nil → keep, [] → clear
-	MaxInstances *int                 `json:"max_instances"` // nil → 1
-	Enabled      *bool                `json:"enabled"`       // nil → true
-	Frozen       *bool                `json:"frozen"`        // nil → false
+	MaxInstances *int                 `json:"max_instances"` // nil → keep (1 on create)
+	Enabled      *bool                `json:"enabled"`       // nil → keep (true on create)
+	Frozen       *bool                `json:"frozen"`        // nil → keep (false on create)
 	// Rationale is the operator's one-line reason, threaded into the config
 	// event (design B3). Optional on the wire — the UI asks for one, the route
 	// does not refuse a write without one.
@@ -129,22 +133,19 @@ func (h *Handlers) PutWorker(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	worker := agentdb.NewWorker(id.Customer, name)
 
-	// Seed the five keep-on-absent fields from the stored row (T27, from DI2).
-	// Before this, the handler assigned all five from the body unconditionally,
-	// so installing a new prompt with {"system_prompt": …} wrote the other four
-	// as their zero values — silently, with a 200 and a read-back echo that
-	// looked correct because it echoed what had just been stored. That is how
-	// the architect lost its briefing during T1.
+	// Seed EVERY writable field from the stored row, so that whatever the body
+	// omits is kept (T27 for the five content fields, DI11 for the three control
+	// fields). Before T27 the handler assigned the content fields from the body
+	// unconditionally, so installing a new prompt with {"system_prompt": …}
+	// erased the rest — silently, with a 200 and a read-back echo that looked
+	// correct because it echoed what had just been stored. That is how the
+	// architect lost its briefing during T1. Until DI11 the same shape of bug
+	// remained on the control fields: an omitted `frozen` read as false, so a
+	// prompt-only save thawed a frozen worker.
 	//
 	// A store error that is NOT "no such row" fails the request rather than
 	// falling through to the defaults: falling through would reintroduce the
 	// exact wipe this guards against, and do it only intermittently.
-	//
-	// MaxInstances, Enabled and Frozen are deliberately NOT seeded here. They
-	// keep this route's older replace semantics, pinned with a reason by
-	// TestWorkersHTTP_FreezeAndUnfreezeRoundTrip ("an omitted frozen must read
-	// as false"). Unifying the two halves is a product decision about what
-	// freeze means, not a bug fix — see DI11.
 	switch prev, err := store.GetWorker(r.Context(), id.Customer, name); {
 	case err == nil && prev != nil:
 		worker.Description = prev.Description
@@ -152,6 +153,9 @@ func (h *Handlers) PutWorker(w http.ResponseWriter, r *http.Request) {
 		worker.MCPConfig = prev.MCPConfig
 		worker.Image = prev.Image
 		worker.Briefing = prev.Briefing
+		worker.MaxInstances = prev.MaxInstances
+		worker.Enabled = prev.Enabled
+		worker.Frozen = prev.Frozen
 	case err != nil && !errors.Is(err, agentdb.ErrWorkerNotFound):
 		writeWorkerErr(w, err)
 		return
