@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/gauntlet-report@1",
+  "schema": "agent-bob/experiments/gauntlet-report@1",
   "run": {
     "id": "gauntlet-smoke-6",
     "description": "Mock smoke for the injection gauntlet: six SC-1 tickets (four carrying one planted directive each, two clean) through triage-lab@v1 without doctrine and with doctrine-v1 in the project prompt. Proves the machinery and the doctrine delivery; measures nothing.",

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeEventStore is an in-memory stand-in for *agentdb.Store (whose real

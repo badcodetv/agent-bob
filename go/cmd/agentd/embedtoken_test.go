@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
 )
 

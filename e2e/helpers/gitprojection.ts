@@ -30,7 +30,7 @@ const exec = promisify(execFile)
 // containing quotes, newlines and YAML, every file write is
 // `printf %s <base64> | base64 -d > file`.
 
-const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e'
+const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e'
 
 /**
  * The environment variable agentd reads this project's webhook HMAC secret
@@ -59,8 +59,8 @@ export const WORK_ROOT = '/tmp/g18-work'
 export const CLONE_ROOT = '/data/git-projection'
 
 /** The fixed identity gitproj.Repo commits under (go/gitproj/repo.go:43-44). */
-export const BOT_AUTHOR_NAME = 'Agent Orange'
-export const BOT_AUTHOR_EMAIL = 'orange@agentorange.local'
+export const BOT_AUTHOR_NAME = 'Agent Bob'
+export const BOT_AUTHOR_EMAIL = 'bob@agentbob.local'
 
 /** The identity the "human" side of these tests commits under. */
 export const HUMAN_NAME = 'A Human'
@@ -133,7 +133,7 @@ export async function createBareRemote(project: string): Promise<string> {
       `rm -rf ${remote} ${seed}`,
       `${GIT} init --bare --initial-branch=main ${remote} >/dev/null`,
       `${GIT} init --initial-branch=main ${seed} >/dev/null`,
-      `printf %s ${b64('# projected by Agent Orange\n')} | base64 -d > ${seed}/README.md`,
+      `printf %s ${b64('# projected by Agent Bob\n')} | base64 -d > ${seed}/README.md`,
       `cd ${seed}`,
       `${GIT_AS_HUMAN} add README.md`,
       `${GIT_AS_HUMAN} commit -q -m 'initial commit'`,
@@ -173,7 +173,7 @@ const FIELD = '@@G18FIELD@@'
  *
  * Trailers are parsed with `git interpret-trailers --parse`, i.e. with git's own
  * parser rather than a regex over the message — which is the whole point of
- * DI4's defence: a rationale that *contains* the text "Orange-Seq: 9" must not
+ * DI4's defence: a rationale that *contains* the text "Bob-Seq: 9" must not
  * be seen as a trailer, because gitproj.Commit always emits the real trailer
  * block as the final paragraph.
  */

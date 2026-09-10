@@ -29,7 +29,7 @@ const exec = promisify(execFile)
 // exactly the runs that died before `afterEach`. Hence a check outside the
 // tests: measure before, measure after, and make the difference a failure.
 
-const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e'
+const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e'
 
 /**
  * The size of agentd's sandbox port pool (AGENTKIT_PORT_RANGE_START..END).

@@ -18,9 +18,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // ── a store that behaves like agentdb's, without a database ──────────────────

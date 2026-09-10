@@ -26,7 +26,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/docker-compose.yml" -f "$ROOT/docker-compose.stack-e2e.yml" --project-name agent-orange-stack-e2e)
+COMPOSE=(docker compose -f "$ROOT/docker-compose.yml" -f "$ROOT/docker-compose.stack-e2e.yml" --project-name agent-bob-stack-e2e)
 WEB_URL="${STACK_BASE_URL:-http://localhost:8080}"
 MODE_FILE="$ROOT/e2e/.stack-e2e-mode"
 

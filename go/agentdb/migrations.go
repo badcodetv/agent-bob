@@ -718,7 +718,7 @@ var agentMigrations = []migration{
 		`,
 	},
 	{
-		// Session names (T6 of design/2026-08-06-embeddable-agent-orange.md):
+		// Session names (T6 of design/2026-08-06-embeddable-agent-bob.md):
 		// the stable handle an embedding application addresses a session by,
 		// because it cannot know a uuid it did not mint and should not have to
 		// store one to render an iframe.
@@ -749,7 +749,7 @@ var agentMigrations = []migration{
 	},
 	{
 		// Session-mode schedules (T9 of
-		// design/2026-08-06-embeddable-agent-orange.md): a schedule may target a
+		// design/2026-08-06-embeddable-agent-bob.md): a schedule may target a
 		// long-lived NAMED session instead of a worker, and deliver its `input`
 		// to that session as the next message rather than starting a fresh job
 		// in a fresh container.

@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
+	"github.com/badcodetv/agent-bob/httpapi"
 	"github.com/golang-jwt/jwt/v5"
 )
 

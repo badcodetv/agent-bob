@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentkittest"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/fleet"
+	"github.com/badcodetv/agent-bob/agentkittest"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/fleet"
 )
 
 // makeMock returns a MockExecutionEnvironment with the given capabilities.

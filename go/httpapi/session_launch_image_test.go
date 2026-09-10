@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // GET /agent/session/{id} must return the environment provenance the runner
@@ -38,8 +38,8 @@ func TestGetSession_ReturnsLaunchImageProvenance_LivePG(t *testing.T) {
 	// The pair that makes the record worth keeping: a mutable tag, and the
 	// immutable thing it pointed at on the day this session ran.
 	const (
-		ref    = "europe-west1-docker.pkg.dev/webkit-servers/agent-orange/agent-wolf:latest"
-		digest = "europe-west1-docker.pkg.dev/webkit-servers/agent-orange/agent-wolf@sha256:" +
+		ref    = "europe-west1-docker.pkg.dev/webkit-servers/agent-bob/agent-wolf:latest"
+		digest = "europe-west1-docker.pkg.dev/webkit-servers/agent-bob/agent-wolf@sha256:" +
 			"7777777777777777777777777777777777777777777777777777777777777777"
 	)
 

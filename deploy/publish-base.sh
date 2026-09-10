@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# publish-base.sh — build the Agent Orange session base images and push them to
+# publish-base.sh — build the Agent Bob session base images and push them to
 # YOUR container registry.
 #
 # Downstream projects build their own image FROM one of these. Until you have run this once, there is nothing for them to point at:
@@ -21,7 +21,7 @@
 #
 # Both get the tag you asked for AND `latest`. Prefer the specific tag in a
 # project's Dockerfile: `latest` is a moving target, which is the whole reason
-# Agent Orange records the digest a session actually launched from.
+# Agent Bob records the digest a session actually launched from.
 #
 # PUSH_LATEST=false leaves `latest` alone. Use it for development publishes —
 # a shared registry means moving `latest` moves it for everyone, which is
@@ -34,7 +34,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-: "${REGISTRY:?set REGISTRY, e.g. REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange}"
+: "${REGISTRY:?set REGISTRY, e.g. REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob}"
 
 # The default tag is the commit you built from, so an image in the registry can
 # always be traced back to a tree. `-dirty` when it would be a lie: the bytes in
@@ -92,7 +92,7 @@ for repo in "$BASE_REPO" "$CORE_REPO"; do
 done
 
 # The digest is the point: it is what a project should pin when it wants "these
-# exact bytes", and what Agent Orange records on every session launched from it.
+# exact bytes", and what Agent Bob records on every session launched from it.
 core_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$CORE_REPO:$TAG" 2>/dev/null || true)"
 
 cat <<EOF

@@ -11,7 +11,7 @@ package agentdb
 // readers drifting apart again.
 //
 // The shape below is CAPTURED, not designed. It was read out of the running
-// e2e stack's Postgres on 2026-07-28 (`agent-orange-stack-e2e-postgres-1`,
+// e2e stack's Postgres on 2026-07-28 (`agent-bob-stack-e2e-postgres-1`,
 // 942 stored query rows) with:
 //
 //	SELECT jsonb_pretty(e)

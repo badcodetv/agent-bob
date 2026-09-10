@@ -27,8 +27,8 @@ import (
 
 	dockertypes "github.com/docker/docker/api/types"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // ---------------------------------------------------------------------------

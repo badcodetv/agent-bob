@@ -23,7 +23,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Charter is what the interview deposits. It describes the project's purpose

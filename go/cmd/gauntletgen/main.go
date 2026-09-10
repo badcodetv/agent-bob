@@ -42,12 +42,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/triagelab"
+	"github.com/badcodetv/agent-bob/triagelab"
 )
 
 // TruthsSchema versions the gauntlet truths document. Deliberately not
 // triagelabgen's: a rig that speaks one must refuse the other.
-const TruthsSchema = "agent-orange/triagelab/gauntlet-truths@1"
+const TruthsSchema = "agent-bob/triagelab/gauntlet-truths@1"
 
 // ── The manifest ────────────────────────────────────────────────────────────
 

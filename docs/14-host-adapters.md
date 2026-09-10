@@ -1,6 +1,6 @@
 # 14 — Host adapters reference
 
-This is the single document a **host application author** reads when wiring Agent Orange into their
+This is the single document a **host application author** reads when wiring Agent Bob into their
 product. It answers "what do I have to implement to use this?" in one place: every extension
 interface the library consumes, the exact method signatures (copied from source), the contract each
 method must honour, lifecycle and gotchas, whether the interface is required or optional, and which
@@ -24,7 +24,7 @@ DinD daemon). The pre-built HTTP host is `go/cmd/agentd` — see [15 — Standal
 3. **Plugins** — in-image tool plugins ([07](07-in-image-agent.md)) and browser render plugins
    ([05](05-event-streaming.md#rendering-in-the-web-package)), plus the base image the sessions launch from.
 
-> **This document describes the engine only.** Agent Orange also ships a **product layer** — projects,
+> **This document describes the engine only.** Agent Bob also ships a **product layer** — projects,
 > workers, memory, events, schedules, named images and skills — which sits on these seams rather than
 > beside them. It is entirely optional to a host, and where it plugs in is collected under
 > *[Product-layer seams](#product-layer-seams)* below. The spec is [`docs/product/`](product/); the

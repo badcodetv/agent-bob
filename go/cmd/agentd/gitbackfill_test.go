@@ -34,8 +34,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // ── fakes ───────────────────────────────────────────────────────────────────
@@ -366,7 +366,7 @@ func (r *backfillRig) history(project string) []backfillCommit {
 			r.t.Fatalf("read body of %s: %v", sha, err)
 		}
 		c := backfillCommit{subject: strings.TrimSpace(subject), body: body, trailers: map[string]string{}}
-		for _, key := range []string{"Orange-Project", "Orange-Seq", "Orange-Event", "Orange-Action", "Orange-Actor-Worker", "Orange-Actor-Session"} {
+		for _, key := range []string{"Bob-Project", "Bob-Seq", "Bob-Event", "Bob-Action", "Bob-Actor-Worker", "Bob-Actor-Session"} {
 			v, _, err := runGit(context.Background(), dir, "log", "-1",
 				"--format=%(trailers:key="+key+",valueonly,only)", sha)
 			if err != nil {
@@ -468,20 +468,20 @@ func TestGitBackfillReplaysTheLogInSeqOrder(t *testing.T) {
 		if c.subject != w.subject {
 			t.Errorf("commit %d subject = %q, want %q", i+1, c.subject, w.subject)
 		}
-		if c.trailers["Orange-Seq"] != strconv.Itoa(i+1) {
-			t.Errorf("commit %d Orange-Seq = %q, want %d — seq order IS commit order", i+1, c.trailers["Orange-Seq"], i+1)
+		if c.trailers["Bob-Seq"] != strconv.Itoa(i+1) {
+			t.Errorf("commit %d Bob-Seq = %q, want %d — seq order IS commit order", i+1, c.trailers["Bob-Seq"], i+1)
 		}
-		if c.trailers["Orange-Action"] != w.action {
-			t.Errorf("commit %d Orange-Action = %q, want %q", i+1, c.trailers["Orange-Action"], w.action)
+		if c.trailers["Bob-Action"] != w.action {
+			t.Errorf("commit %d Bob-Action = %q, want %q", i+1, c.trailers["Bob-Action"], w.action)
 		}
-		if c.trailers["Orange-Project"] != "wolf" {
-			t.Errorf("commit %d Orange-Project = %q, want wolf", i+1, c.trailers["Orange-Project"])
+		if c.trailers["Bob-Project"] != "wolf" {
+			t.Errorf("commit %d Bob-Project = %q, want wolf", i+1, c.trailers["Bob-Project"])
 		}
-		if c.trailers["Orange-Event"] != fmt.Sprintf("ev-wolf-%d", i+1) {
-			t.Errorf("commit %d Orange-Event = %q, want ev-wolf-%d", i+1, c.trailers["Orange-Event"], i+1)
+		if c.trailers["Bob-Event"] != fmt.Sprintf("ev-wolf-%d", i+1) {
+			t.Errorf("commit %d Bob-Event = %q, want ev-wolf-%d", i+1, c.trailers["Bob-Event"], i+1)
 		}
-		if c.trailers["Orange-Actor-Worker"] != w.actor {
-			t.Errorf("commit %d Orange-Actor-Worker = %q, want %q", i+1, c.trailers["Orange-Actor-Worker"], w.actor)
+		if c.trailers["Bob-Actor-Worker"] != w.actor {
+			t.Errorf("commit %d Bob-Actor-Worker = %q, want %q", i+1, c.trailers["Bob-Actor-Worker"], w.actor)
 		}
 	}
 	// The rationale of THAT event is the body of THAT commit.
@@ -533,9 +533,9 @@ func TestGitBackfillNoOpEventCommitsNothingAndStillAdvances(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want 2 commits for 3 events (one changed nothing renderable), got %d: %+v", len(got), got)
 	}
-	if got[0].trailers["Orange-Seq"] != "1" || got[1].trailers["Orange-Seq"] != "2" {
+	if got[0].trailers["Bob-Seq"] != "1" || got[1].trailers["Bob-Seq"] != "2" {
 		t.Errorf("commits are seq %s and %s; want 1 and 2 — the no-op event must not commit",
-			got[0].trailers["Orange-Seq"], got[1].trailers["Orange-Seq"])
+			got[0].trailers["Bob-Seq"], got[1].trailers["Bob-Seq"])
 	}
 	// 🔴 The walk advanced past the no-op.
 	if got, want := rig.state.renderedSeq("wolf"), int64(3); got != want {
@@ -583,7 +583,7 @@ func TestGitBackfillResumesAfterACrashWithoutDuplicating(t *testing.T) {
 	}
 	var seqs []string
 	for _, c := range got {
-		seqs = append(seqs, c.trailers["Orange-Seq"])
+		seqs = append(seqs, c.trailers["Bob-Seq"])
 	}
 	if strings.Join(seqs, ",") != "1,2,3,4,5" {
 		t.Errorf("commit seqs = %s, want 1,2,3,4,5 with no duplicate", strings.Join(seqs, ","))
@@ -635,8 +635,8 @@ func TestGitBackfillStopsAtAnUnrenderableState(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("want the 2 commits made before the refusal, got %d: %+v", len(got), got)
 	}
-	if got[1].trailers["Orange-Seq"] != "2" {
-		t.Errorf("last commit is seq %s, want 2 — nothing after the refusal may be committed", got[1].trailers["Orange-Seq"])
+	if got[1].trailers["Bob-Seq"] != "2" {
+		t.Errorf("last commit is seq %s, want 2 — nothing after the refusal may be committed", got[1].trailers["Bob-Seq"])
 	}
 	if got, want := rig.state.renderedSeq("wolf"), int64(2); got != want {
 		t.Errorf("watermark = %d, want %d — it must name the last event that DID publish", got, want)

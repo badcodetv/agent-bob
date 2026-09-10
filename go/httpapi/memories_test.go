@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeMemories records the query it was handed and returns a canned page, so the

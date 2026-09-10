@@ -62,7 +62,7 @@ export default async function globalTeardown(): Promise<void> {
         `  If the count is right but the containers are ORPHANS — running with no session row — ` +
         `suspect the create/delete race instead: a session deleted while its background create is ` +
         `still provisioning loses its row and gets its container anyway, and nothing reaps that. ` +
-        `Check with: docker compose -p agent-orange-stack-e2e exec -T dind docker ps --filter name=sandbox-\n` +
+        `Check with: docker compose -p agent-bob-stack-e2e exec -T dind docker ps --filter name=sandbox-\n` +
         `  Not deleted automatically: on a shared stack a container may belong to someone else's run.`,
     )
   }

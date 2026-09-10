@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // recordingStore (session_createerror_test.go) is the only test store that keeps

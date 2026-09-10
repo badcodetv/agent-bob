@@ -28,7 +28,7 @@ const exec = promisify(execFile)
 // (docker-compose.stack-e2e.yml), so this mints exactly the credential a real
 // job carries — including, when asked, a deliberately broken one.
 
-const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e'
+const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e'
 const MCP_URL = process.env.STACK_MCP_URL || 'http://localhost:8099/mcp'
 /** Matches AGENTKIT_JWT_SECRET in docker-compose.stack-e2e.yml. */
 const JWT_SECRET = process.env.AGENTKIT_JWT_SECRET || 'stack-e2e-secret'

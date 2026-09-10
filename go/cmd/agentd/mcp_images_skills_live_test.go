@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/imageregistry"
 	"github.com/google/uuid"
 )
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 	"github.com/google/uuid"
 )
 
@@ -29,7 +29,7 @@ import (
 
 // liveCapturedQueryEvents is a REAL stored `agent_query_events.events` value,
 // read out of the running e2e stack's Postgres on 2026-07-28
-// (`agent-orange-stack-e2e-postgres-1`). Middle envelopes are elided for
+// (`agent-bob-stack-e2e-postgres-1`). Middle envelopes are elided for
 // length; the `query_complete` is verbatim apart from the two numbers. Note
 // where the usage lives — nested under `data.usage`, camelCase, on the LAST
 // envelope, not flat snake_case on the first.

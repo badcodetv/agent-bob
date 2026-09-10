@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // TestIndexIsNotDurableAcrossRestart pins what this store IS: bytes in the

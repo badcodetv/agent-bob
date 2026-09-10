@@ -1,17 +1,17 @@
-# CLAUDE.md — operating guide for Agent Orange
+# CLAUDE.md — operating guide for Agent Bob
 
-Read this first. It tells an agent what Agent Orange is, how the repo is laid out, how to build and
+Read this first. It tells an agent what Agent Bob is, how the repo is laid out, how to build and
 run it, and the rules to keep it healthy.
 
 ## Who
 
 BadCode is two people: **Kai Davenport** (main developer) and **Jack** (lead creative
 designer). Either may be the user in a session. BadCode's marketing manager is the first real
-Agent Orange use case (`docs/product/17-product-spec.md` §8.8).
+Agent Bob use case (`docs/product/17-product-spec.md` §8.8).
 
-## What Agent Orange is
+## What Agent Bob is
 
-Agent Orange is a **reusable runtime for container-backed AI agent sessions**. You create a
+Agent Bob is a **reusable runtime for container-backed AI agent sessions**. You create a
 **session** configured with a system prompt, a base image, MCP tools, and skills; the runtime
 provisions a container, runs an in-image agent harness inside it, and streams the conversation back
 over SSE. Sessions are interactive (message back and forth), durable (state persisted), and
@@ -25,9 +25,9 @@ rewrite each other's prompts through MCP tools — that self-improvement loop is
 definition of done. Spec: `docs/product/`. Operating guide: `docs/18-workers-memory-events.md`.
 
 It was forked wholesale from an in-house Go runtime ("agentkit"); this repo is now the canonical
-Agent Orange. Three pieces:
+Agent Bob. Three pieces:
 
-- **Go orchestration core** (`go/`) — module `github.com/binocarlos/badcode-agent-orange`. The
+- **Go orchestration core** (`go/`) — module `github.com/badcodetv/agent-bob`. The
   `Runner`, session lifecycle, container control, image registry, persistence, event pipeline. This
   is the library a host app embeds.
 - **In-image agent** (`sandbox/`, TypeScript) — the control server that runs *inside* each session
@@ -58,8 +58,8 @@ Agent Orange. Three pieces:
 > as a green test — the caveat is stated in MIGRATION.md.
 > The plan and current state live in **`MIGRATION.md`** — read it before doing migration work.
 >
-> **Embeddable Orange** (`design/2026-08-06-embeddable-agent-orange.md`, in progress on this
-> branch) makes Agent Orange a singleton service other applications embed. Built so far: project
+> **Embeddable Orange** (`design/2026-08-06-embeddable-agent-bob.md`, in progress on this
+> branch) makes Agent Bob a singleton service other applications embed. Built so far: project
 > **API keys** (`X-API-Key`, resolved at boot from env vars named by the project map's new object
 > form — no table, no UI); **embed tokens** (`POST /agent/embed-token`, ≤1h, session-scoped) and an
 > **embed page** (`GET /embed/session/{name}#token=…`) served with CSP `frame-ancestors`;
@@ -142,7 +142,7 @@ Agent Orange. Three pieces:
 > and CI goes red until you decide; that is the guard working. And **git cannot forget**: anything
 > rendered is in history permanently, for everyone with repository access, forks included.
 > If you change the commit trailer format, read **DI4** first — rationales are model-written, git
-> parses the last paragraph as trailers, and `Orange-Seq:` decides whose commit a commit is. Never
+> parses the last paragraph as trailers, and `Bob-Seq:` decides whose commit a commit is. Never
 > read trailers by grepping the message.
 
 > ⚠️ **Read this before running it on a project you care about.** Approving a charter creates an
@@ -297,7 +297,7 @@ Product layer (all Postgres-only, all in `go/agentdb/` + `go/cmd/agentd/`):
 
 1. **Liftability invariant.** The `go/` module must import **nothing** from any host app — CI
    (`.github/workflows/ci.yml`) enforces this. Keep the engine self-contained.
-2. **Module path** is `github.com/binocarlos/badcode-agent-orange`. Don't reintroduce the old
+2. **Module path** is `github.com/badcodetv/agent-bob`. Don't reintroduce the old
    `bayes-price/agentkit` path or any Platinum coupling.
 3. **`migration-reference/` is reference, not code.** Don't build it, import it, or wire it into the
    module. Port *from* it deliberately (see `MIGRATION.md`).
@@ -311,7 +311,7 @@ Product layer (all Postgres-only, all in `go/agentdb/` + `go/cmd/agentd/`):
    registry-agnostic build+push → **GCP (priority)** → automation. Phase 4 is **built** — GCS
    `BlobStore` in `extension/gcsblob`, ADC registry auth in `imageregistry/auth`, selection in
    `cmd/agentd/backends.go` — and **recorded** as verified against the live project on 2026-06-25
-   (`webkit-servers` / `europe-west1`, repo `agent-orange`, bucket `webkit-servers-agent-orange`;
+   (`webkit-servers` / `europe-west1`, repo `agent-bob`, bucket `webkit-servers-agent-bob`;
    `deploy/gcp/setup.sh` provisions all of it). Nothing under those paths has changed since, so the
    record still describes today's code, but it is testimony rather than a re-runnable check — see
    MIGRATION.md §4a/§4b. Phases 2, 3 and 5 remain, plus two loose ends in Phase 1 (the

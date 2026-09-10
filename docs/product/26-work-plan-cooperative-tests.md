@@ -965,7 +965,7 @@ memory paths are untested by a green `go test ./...`.
 
 ## 4. Verdict
 
-Agent Orange is an unusually good substrate for the STRUCTURAL half of this pattern space and a weak
+Agent Bob is an unusually good substrate for the STRUCTURAL half of this pattern space and a weak
 one for the EVIDENTIAL half. Nodes, edges, a clock, one flat shared state, and — the genuinely rare
 part — a fully rewritable, config-logged, attributed, self-routable org chart mean that most
 cooperative topologies people actually run are expressible today, in configuration, with no engine

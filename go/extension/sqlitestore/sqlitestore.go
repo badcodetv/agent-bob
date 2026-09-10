@@ -25,11 +25,11 @@ import (
 
 	_ "modernc.org/sqlite" // register "sqlite" driver
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/filesblob"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/filesblob"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // Store is a SQLite-backed RunnerStore.

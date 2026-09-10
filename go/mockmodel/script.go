@@ -3,7 +3,7 @@ package mockmodel
 import (
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/modelproxy"
+	"github.com/badcodetv/agent-bob/modelproxy"
 )
 
 // ScriptBuilder builds a Script declaratively via a fluent API.

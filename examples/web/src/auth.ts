@@ -30,7 +30,7 @@ export interface AuthState {
   loginToken?: string;
 }
 
-const STORAGE_KEY = "agent-orange-auth";
+const STORAGE_KEY = "agent-bob-auth";
 
 export async function fetchAuthConfig(apiBase: string): Promise<AuthConfig> {
   const r = await fetch(`${apiBase}/auth/config`);

@@ -12,9 +12,9 @@ const exec = promisify(execFile)
 //   - reading `config_events` (no read route yet — helpers/configlog.ts)
 //   - seeding a session's `mcp_servers` (no write path at all — see below)
 
-const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e'
-const PG_USER = process.env.POSTGRES_USER || 'agentorange'
-const PG_DB = process.env.POSTGRES_DB || 'agentorange'
+const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e'
+const PG_USER = process.env.POSTGRES_USER || 'agentbob'
+const PG_DB = process.env.POSTGRES_DB || 'agentbob'
 
 /** Runs one SQL statement in the stack's postgres and returns raw stdout. */
 export async function psql(sql: string): Promise<string> {

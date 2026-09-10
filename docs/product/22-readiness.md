@@ -434,7 +434,7 @@ was never real.
   being invisible.
 - [x] **RD22 — Postgres credentials are undocumented and the volume initialises once.**
   `docker-compose.yml:69` builds `DATABASE_URL` from `POSTGRES_USER`/`PASSWORD`/`DB`, defaulting to
-  the literal `agentorange`; `.env.example` has **zero** `POSTGRES` hits. The trap: `pg-data`
+  the literal `agentbob`; `.env.example` has **zero** `POSTGRES` hits. The trap: `pg-data`
   initialises on first `up`, so setting a password afterwards re-renders `DATABASE_URL` but not the
   database, and agentd dies with raw gorm text naming neither the `postgres` service nor the stale
   volume.

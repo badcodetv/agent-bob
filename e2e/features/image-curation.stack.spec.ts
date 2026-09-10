@@ -39,7 +39,7 @@ const exec = promisify(execFile)
 // offline: same tool, same auth, same provenance — only the decision to call is
 // the test's rather than the model's.
 
-const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e'
+const COMPOSE_PROJECT = process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e'
 
 /** The file each burned version carries, so a container can say what it is. */
 const MARKER = '/workspace/.toolbox-marker'

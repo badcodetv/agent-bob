@@ -298,7 +298,7 @@ is what delivers *"a quick summary without having to open and resume the convers
 | --- | --- |
 | `api/src/hypothesis/store.ts` | Read `report-template` as trusted; read `report` as untrusted; third board read |
 | `api/src/routes/hypotheses.ts` | Board carries `headline`; detail carries `report` metadata and drift |
-| `api/src/orange/client.ts` | R1 adds `getMemoryById` and `getCurrentMemory` — W2's scope omits the full-content reads (audit A5), and the frame cannot be served from snippets |
+| `api/src/bob/client.ts` | R1 adds `getMemoryById` and `getCurrentMemory` — W2's scope omits the full-content reads (audit A5), and the frame cannot be served from snippets |
 | `api/src/config.ts` | `WOLF_REPORT_MAX_BYTES` (default 512000) and `WOLF_SERIES_MAX_POINTS` (default 5000). **Owned by R2**, which is the first ticket to consume them — R7 must not re-add them |
 | `api/src/app.ts` | Mount the report router |
 | `.env.example` | Document both new variables |
@@ -326,7 +326,7 @@ semantically searchable, so nothing is lost.
 
 ### Orange routes consumed — no Go changes
 
-This feature adds nothing to agent-orange, but it consumes **four** routes, not two:
+This feature adds nothing to agent-bob, but it consumes **four** routes, not two:
 
 | Route | Used for |
 | --- | --- |
@@ -522,7 +522,7 @@ Revision 4 applies these; they are listed here so nothing is lost in the fold.
 | **X1** | Gains the end-to-end report leg (see R12), and `e2e/run.sh` must accept an optional spec-name filter so `./e2e/run.sh report-layer` is a defined command. |
 | **W2** | Its route list becomes exhaustive and closed, and must include `GET /agent/memories/{id}` and `GET /agent/memories/current?name=` — the full-content reads the frame route depends on (audit A5). |
 | **§ Pinned technology choices** | New row: HTML sanitisation → **`isomorphic-dompurify` 2.x**, server-side only, one sanitiser in the tree, pulls `jsdom` into `api/`. |
-| **§ Parallelism and file ownership** | New rows, all strictly serial: `api/src/hypothesis/store.ts` (R1 → R8), `api/src/config.ts` + `.env.example` (R2 only, within this feature), `api/src/app.ts` (R7), `api/src/routes/hypotheses.ts` (R8), `api/src/orange/client.ts` (W2 → R1), `web/package.json` (R9 → R10), `web/src/App.tsx` (R10). |
+| **§ Parallelism and file ownership** | New rows, all strictly serial: `api/src/hypothesis/store.ts` (R1 → R8), `api/src/config.ts` + `.env.example` (R2 only, within this feature), `api/src/app.ts` (R7), `api/src/routes/hypotheses.ts` (R8), `api/src/bob/client.ts` (W2 → R1), `web/package.json` (R9 → R10), `web/src/App.tsx` (R10). |
 
 ---
 
@@ -545,8 +545,8 @@ different files owned by different tickets, so read both before writing either.
   and reports. No routes, no rendering, no sanitising.
 - **Repo:** agent-wolf
 - **Files:** create `api/src/report/kinds.ts`, `api/src/report/kinds.test.ts`; modify
-  `api/src/hypothesis/store.ts`, `api/src/hypothesis/store.test.ts`, `api/src/orange/client.ts`,
-  `api/src/orange/client.test.ts`.
+  `api/src/hypothesis/store.ts`, `api/src/hypothesis/store.test.ts`, `api/src/bob/client.ts`,
+  `api/src/bob/client.test.ts`.
 - **Acceptance criteria:**
   - `TRUSTED_KINDS` is an exported frozen set containing exactly `hypothesis`, `hypothesis-spec`,
     `verdict`, `evaluation`, `report-template` — **enumerated, never counted**. A test asserts
@@ -880,7 +880,7 @@ different files owned by different tickets, so read both before writing either.
     with a tamper warning.
   - **Drift leg:** a tick filling an undeclared slot shows the drift notice and does not render it.
   - Full gates pass: `cd api && yarn typecheck && yarn test`; `cd web && yarn typecheck && yarn
-    test`; and in agent-orange `cd go && go build ./... && go vet ./... && go test ./...`.
+    test`; and in agent-bob `cd go && go build ./... && go vet ./... && go test ./...`.
 - **TDD:** no.
 - **Validation:** `./e2e/run.sh report-layer` plus the three gate command groups above. *(X1 must
   give `run.sh` an optional spec-name filter — see § "Amendments to existing tickets".)*

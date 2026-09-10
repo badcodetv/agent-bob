@@ -18,7 +18,7 @@ what we build **on top of it**, and nothing here may violate the engine rules in
 
 ## 1. The declarative goal
 
-**Agent Orange is a runtime for durable, container-backed agent sessions, organised into
+**Agent Bob is a runtime for durable, container-backed agent sessions, organised into
 projects, on which self-improving arrangements of workers can be composed with prompts alone.**
 
 The system is defined by a deliberately small set of atoms. Everything else — workers,
@@ -87,7 +87,7 @@ one of them, the feature loses.
 - **P7 — Engine invariants hold.** The `go/` module imports nothing from host apps;
   `go build ./...` stays green; installation Dockerfiles never set CMD/ENTRYPOINT; heavy test
   coverage in the existing table-test style accompanies every change.
-- **P8 — Append-only everywhere.** Nothing in Agent Orange is ever destructively updated;
+- **P8 — Append-only everywhere.** Nothing in Agent Bob is ever destructively updated;
   current state is always a *view* over an append-only history. Memories are immutable rows
   (§7.1), sessions are immutable transcripts, images and skills gain versions rather than
   losing them (§13–§14), and configuration itself — every worker hire, prompt rewrite,

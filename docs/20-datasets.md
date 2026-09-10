@@ -1,6 +1,6 @@
 # 20 — Datasets, and the memory append route
 
-> **Who this is for.** An application embedding Agent Orange that needs (a) somewhere to keep a
+> **Who this is for.** An application embedding Agent Bob that needs (a) somewhere to keep a
 > shared numeric time series that agents read and rewrite, and (b) a way to write state of its own
 > that an agent cannot forge. Those are the two things Orange could not do before
 > `design/2026-08-20-agent-wolf.md`, and this document is what shipped for them.

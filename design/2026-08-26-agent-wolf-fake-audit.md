@@ -889,7 +889,7 @@ the fact — `orange/client.test.ts:99-118` is the model — and expose a call c
 only thing protecting the market-data cache (`mcp/seriesdownload.test.ts:246`, §2.16).
 
 And, critically, **one fidelity test suite over the shared fake**, in the `report_fixture` style
-(`report.test.ts:1552-1660`) — driving it through the real `OrangeClient` and asserting each
+(`report.test.ts:1552-1660`) — driving it through the real `BobClient` and asserting each
 parameter's behaviour. That suite is the thing that makes every downstream defence honest, and it
 is the only defence that a mutation of fixture code can ever have.
 

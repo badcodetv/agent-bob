@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // TestWorkerFinishedCarriesAttentionRequested is the defect H2 and E2 both

@@ -10,9 +10,9 @@
 #
 # Build (after core exists):
 #   docker build -f installations/example/Dockerfile \
-#     --build-arg BASE_IMAGE=agent-orange-core:dev \
-#     -t agent-orange-example:dev installations/example
-ARG BASE_IMAGE=agent-orange-core:dev
+#     --build-arg BASE_IMAGE=agent-bob-core:dev \
+#     -t agent-bob-example:dev installations/example
+ARG BASE_IMAGE=agent-bob-core:dev
 FROM ${BASE_IMAGE}
 
 # --- Example project runtime layer (replace per project) -------------------

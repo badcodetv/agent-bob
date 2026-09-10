@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/binocarlos/badcode-agent-orange/modelproxy"
+	"github.com/badcodetv/agent-bob/modelproxy"
 )
 
 func main() {

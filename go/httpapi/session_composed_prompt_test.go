@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // GET /agent/session/{id} must return the composition provenance C2 writes on

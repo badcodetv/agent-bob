@@ -25,10 +25,10 @@ import (
 	"strings"
 	"testing"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/charter"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/charter"
+	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
 const registryContentForDispatch = "kind=draft — a newsletter written but not sent."

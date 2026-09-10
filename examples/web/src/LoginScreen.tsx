@@ -59,7 +59,7 @@ export default function LoginScreen({
   return (
     <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", bgcolor: "#f8fafc" }}>
       <Paper sx={{ p: 4, width: 360, display: "flex", flexDirection: "column", gap: 2 }} data-testid="login-screen">
-        <Typography variant="h5" sx={{ fontWeight: 600 }}>Agent Orange</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 600 }}>Agent Bob</Typography>
         <Typography variant="body2" color="text.secondary">Sign in to your projects</Typography>
         {error && <Alert severity="error">{error}</Alert>}
 

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	"github.com/badcodetv/agent-bob/extension"
 	"github.com/golang-jwt/jwt/v5"
 )
 

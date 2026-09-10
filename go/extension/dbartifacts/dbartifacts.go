@@ -46,9 +46,9 @@ import (
 	"io"
 	"path"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/extension"
 	"github.com/google/uuid"
 )
 

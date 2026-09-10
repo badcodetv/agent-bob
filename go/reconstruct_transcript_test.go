@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/badcodetv/agent-bob/events"
 )
 
 // TestReconstructTranscriptCarriesToolActivity is the counterpart to

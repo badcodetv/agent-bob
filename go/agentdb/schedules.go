@@ -89,7 +89,7 @@ type Schedule struct {
 	// TargetSession is the NAME (Session.Name, never a uuid) of a long-lived
 	// session a firing sends Input to as its next message, instead of starting
 	// a fresh job in a fresh container (migration 036; T9 of
-	// design/2026-08-06-embeddable-agent-orange.md).
+	// design/2026-08-06-embeddable-agent-bob.md).
 	//
 	// A name and not an id because the schedule outlives nothing else about the
 	// session: an embedding application that stored `hypothesis-a` in its own

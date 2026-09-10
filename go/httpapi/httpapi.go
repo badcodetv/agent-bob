@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // Identity is the authenticated principal the host extracts from a request. The

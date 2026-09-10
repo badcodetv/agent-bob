@@ -33,8 +33,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/extension"
 )
 
 // projectConfigStore is the narrow read seam the provider needs. `*agentdb.Store`

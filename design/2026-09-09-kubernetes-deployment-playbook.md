@@ -1,4 +1,4 @@
-# Kubernetes Deployment Playbook — Agent Orange on `prodcluster`
+# Kubernetes Deployment Playbook — Agent Bob on `prodcluster`
 
 > **HOW TO USE THIS:** Work top to bottom. Every command is meant to be pasted.
 > Section 2 must be done before section 4, or the pod boots and immediately
@@ -26,7 +26,7 @@ want the single-command version.
 
 ## 0. What this deploys, and what it does not
 
-**Deploys:** Agent Orange itself — the API/orchestrator (`agentd`), its
+**Deploys:** Agent Bob itself — the API/orchestrator (`agentd`), its
 Docker-in-Docker daemon, Postgres with pgvector, the web console, and a public
 HTTPS entry point.
 
@@ -56,7 +56,7 @@ HTTPS entry point.
 Containers in a single Kubernetes pod share a network namespace by definition,
 so **one pod with two containers reproduces compose exactly**. Splitting them
 across two pods would need a Service enumerating 100 ports and pod IPs that
-move. This is why the `agent-orange` Deployment has a `dind` container and an
+move. This is why the `agent-bob` Deployment has a `dind` container and an
 `agentd` container side by side.
 
 The `agentd` Service is named **`dind`** because `deploy/web.nginx.conf` proxies
@@ -74,9 +74,9 @@ as `bookingsystem`, `forum`, `franchisecloud`, `nocode-works` and the rest.
 Second, **Kubernetes cannot see session containers.** They are started by the
 Docker daemon *inside* the pod, so the scheduler does not know they exist and
 cannot stop them competing for the node's 2 CPUs. The node currently has roughly
-790 milli-CPU unreserved; Agent Orange's own four containers request 420 of it.
+790 milli-CPU unreserved; Agent Bob's own four containers request 420 of it.
 
-This was decided knowingly on 2026-09-09: the node is quiet, and Agent Orange is
+This was decided knowingly on 2026-09-09: the node is quiet, and Agent Bob is
 IO-bound on remote model APIs rather than CPU-bound. Recorded here so the
 decision is not mistaken later for an oversight.
 
@@ -98,11 +98,11 @@ All read-only, or server-side dry runs that wrote nothing.
 | Ingress external IP | **`104.155.75.230`** — every `*.badcode.tv` host already points here |
 | Certificates | ✅ `ClusterIssuer/letsencrypt-prod`, `READY=True` |
 | Storage class | ✅ `standard-rwo` (default), `WaitForFirstConsumer`, expandable |
-| Namespace `agent-orange` | ❌ does not exist yet |
-| Artifact Registry repo | ✅ `europe-west1-docker.pkg.dev/webkit-servers/agent-orange`, 874 MB, last written 2026-09-07 |
+| Namespace `agent-bob` | ❌ does not exist yet |
+| Artifact Registry repo | ✅ `europe-west1-docker.pkg.dev/webkit-servers/agent-bob`, 874 MB, last written 2026-09-07 |
 | Images already in it | `session-base`, `session-core`, `session-wolf` (all tagged `dev`), plus three digest-named snapshot images. **No `agentd`, no `web` — `publish-images.sh` has never run.** |
-| GCS bucket | ✅ `webkit-servers-agent-orange`, `EUROPE-WEST1` |
-| Runtime service account | ✅ `agent-orange-runtime@webkit-servers.iam.gserviceaccount.com` (created by `deploy/gcp/setup.sh`; holds `roles/storage.objectAdmin` on the bucket and `roles/artifactregistry.writer` on the repo) |
+| GCS bucket | ✅ `webkit-servers-agent-bob`, `EUROPE-WEST1` |
+| Runtime service account | ✅ `agent-bob-runtime@webkit-servers.iam.gserviceaccount.com` (created by `deploy/gcp/setup.sh`; holds `roles/storage.objectAdmin` on the bucket and `roles/artifactregistry.writer` on the repo) |
 | Docker credential helpers | ✅ both `gcr.io` and `europe-west1-docker.pkg.dev` configured in `~/.docker/config.json` |
 | `orange.badcode.tv` | ❌ **NXDOMAIN** — the DNS record does not exist yet |
 | `secrets/gcp-key.json` | 🔴 **is an empty root-owned DIRECTORY**, not a key file (§2, D4) |
@@ -198,9 +198,9 @@ project uses an MCP server that needs a key.
 ```
 
 ```yaml
-# 20-agent-orange.yaml, in the agentd container's env:
+# 20-agent-bob.yaml, in the agentd container's env:
             - name: AGENTKIT_MCP_ENV
-              valueFrom: {configMapKeyRef: {name: agent-orange-config, key: mcp-env, optional: true}}
+              valueFrom: {configMapKeyRef: {name: agent-bob-config, key: mcp-env, optional: true}}
 ```
 
 Each name you list must also exist as an env var on `agentd` (from a Secret),
@@ -225,7 +225,7 @@ accordingly, and it is already covered by `.gitignore`):
 ```sh
 sudo rm -rf secrets/gcp-key.json
 gcloud iam service-accounts keys create secrets/gcp-key.json \
-  --iam-account=agent-orange-runtime@webkit-servers.iam.gserviceaccount.com \
+  --iam-account=agent-bob-runtime@webkit-servers.iam.gserviceaccount.com \
   --project=webkit-servers
 ```
 
@@ -233,7 +233,7 @@ gcloud iam service-accounts keys create secrets/gcp-key.json \
 you would rather re-run the whole provisioning step.
 
 > **Longer-term:** Workload Identity would remove this key file entirely by
-> binding the Kubernetes service account to `agent-orange-runtime`. Out of scope
+> binding the Kubernetes service account to `agent-bob-runtime`. Out of scope
 > for the first deploy; worth doing before this is anything but a prototype.
 
 ---
@@ -245,8 +245,8 @@ Fill these in before you start. Everything in section 4 refers back to them.
 | # | Value | Recommendation | Why |
 | --- | --- | --- | --- |
 | 1 | **Public hostname** | `orange.badcode.tv` | Matches `forum.badcode.tv`, `n8n.badcode.tv`. Needs a DNS **A record → `104.155.75.230`**. Currently NXDOMAIN. |
-| 2 | **Registry** | `europe-west1-docker.pkg.dev/webkit-servers/agent-orange` | Artifact Registry, *not* `gcr.io`. The repo is already provisioned there, the runtime service account already has `artifactregistry.writer` **on that repo specifically**, the session images are already in it, and both publish scripts default to it. Using `gcr.io` (as `forum` does) would mean re-granting IAM for no gain. |
-| 3 | **Session base image** | `…/agent-orange/session-core:<tag>` | What a session container runs. Pin the **specific tag**, not `:latest` — Agent Orange records the digest each session launched from, and a moving tag makes that record the only way to tell two environments apart. |
+| 2 | **Registry** | `europe-west1-docker.pkg.dev/webkit-servers/agent-bob` | Artifact Registry, *not* `gcr.io`. The repo is already provisioned there, the runtime service account already has `artifactregistry.writer` **on that repo specifically**, the session images are already in it, and both publish scripts default to it. Using `gcr.io` (as `forum` does) would mean re-granting IAM for no gain. |
+| 3 | **Session base image** | `…/agent-bob/session-core:<tag>` | What a session container runs. Pin the **specific tag**, not `:latest` — Agent Bob records the digest each session launched from, and a moving tag makes that record the only way to tell two environments apart. |
 | 4 | **Login mode** | Google (`GOOGLE_CLIENT_ID` from your `.env`) | See D2. Password login grants every project in the map. |
 | 5 | **Who can log in** | `kaiyadavenport@gmail.com` → `["*"]` | The project map from D1. Add Jack when he needs access. |
 
@@ -289,7 +289,7 @@ getent hosts orange.badcode.tv     # must print 104.155.75.230
 ### Step 2 — Apply the four fixes from section 2
 
 D1 and D3 edit `deploy/k8s/00-namespace-and-config.yaml` and
-`deploy/k8s/20-agent-orange.yaml`. D2 is a choice, not an edit. D4 is the
+`deploy/k8s/20-agent-bob.yaml`. D2 is a choice, not an edit. D4 is the
 `gcloud iam service-accounts keys create` above.
 
 ### Step 3 — Edit the two files carrying your specifics
@@ -298,11 +298,11 @@ D1 and D3 edit `deploy/k8s/00-namespace-and-config.yaml` and
 
 ```yaml
   public-base-url: "https://orange.badcode.tv"
-  base-image: "europe-west1-docker.pkg.dev/webkit-servers/agent-orange/session-core:<TAG from step 4>"
+  base-image: "europe-west1-docker.pkg.dev/webkit-servers/agent-bob/session-core:<TAG from step 4>"
   gcp-project: "webkit-servers"        # already correct
   gcp-region: "europe-west1"           # already correct
-  gcp-ar-repo: "agent-orange"          # already correct
-  gcs-bucket: "webkit-servers-agent-orange"   # already correct
+  gcp-ar-repo: "agent-bob"          # already correct
+  gcs-bucket: "webkit-servers-agent-bob"   # already correct
   google-client-id: "<the value from your local .env>"
   project-map: |
     {"users":{"kaiyadavenport@gmail.com":["*"]},"projects":{}}
@@ -322,8 +322,8 @@ built `FROM`. Distinct from step 5, and confusing the two is the easiest mistake
 in this whole document.
 
 ```sh
-cd /home/kai/projects/badcode/agent-orange
-export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange
+cd /home/kai/projects/badcode/agent-bob
+export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob
 ./deploy/publish-base.sh
 ```
 
@@ -337,11 +337,11 @@ shared tag for everyone.
 
 ### Step 5 — Publish the SERVICE images
 
-Agent Orange itself. Compose builds these locally; Kubernetes cannot build, so
+Agent Bob itself. Compose builds these locally; Kubernetes cannot build, so
 they must be pushed. **Neither has ever been pushed to this registry.**
 
 ```sh
-export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange
+export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob
 ./deploy/publish-images.sh
 ```
 
@@ -364,17 +364,17 @@ Secrets are created **by hand**, never by a script whose output might be
 committed.
 
 ```sh
-kubectl create namespace agent-orange
+kubectl create namespace agent-bob
 
 PGPASS="$(openssl rand -hex 24)"
 
-kubectl -n agent-orange create secret generic agent-orange \
+kubectl -n agent-bob create secret generic agent-bob \
   --from-literal=postgres-password="$PGPASS" \
-  --from-literal=database-url="postgres://agentorange:${PGPASS}@postgres:5432/agentorange?sslmode=disable" \
+  --from-literal=database-url="postgres://agentbob:${PGPASS}@postgres:5432/agentbob?sslmode=disable" \
   --from-literal=jwt-secret="$(openssl rand -hex 32)" \
   --from-literal=anthropic-api-key='sk-ant-…'
 
-kubectl -n agent-orange create secret generic agent-orange-gcp \
+kubectl -n agent-bob create secret generic agent-bob-gcp \
   --from-file=key.json=./secrets/gcp-key.json
 ```
 
@@ -399,7 +399,7 @@ Full admission on the real API server. Writes nothing.
 
 ```sh
 cd deploy/k8s
-REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange \
+REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob \
 IMAGE_TAG=<tag from step 5> \
 ./apply.sh --dry-run
 ```
@@ -410,8 +410,8 @@ what blocked it — and finding that out now costs nothing.
 > **🟡 On the FIRST run this stops after one line.** Verified 2026-09-09:
 >
 > ```
-> namespace/agent-orange created (server dry run)
-> Error from server (NotFound): namespaces "agent-orange" not found
+> namespace/agent-bob created (server dry run)
+> Error from server (NotFound): namespaces "agent-bob" not found
 > ```
 >
 > That is not a defect in the manifests. A server dry run writes nothing, so the
@@ -422,7 +422,7 @@ what blocked it — and finding that out now costs nothing.
 > an empty container, and step 6 needs it anyway), then rehearse the rest.
 >
 > ```sh
-> kubectl create namespace agent-orange     # real, not a dry run
+> kubectl create namespace agent-bob     # real, not a dry run
 > REGISTRY=… IMAGE_TAG=… ./apply.sh --dry-run
 > ```
 >
@@ -430,7 +430,7 @@ what blocked it — and finding that out now costs nothing.
 > validation still checks every field against the server's schema:
 >
 > ```sh
-> for f in 10-postgres.yaml 20-agent-orange.yaml 30-web.yaml 40-ingress.yaml; do
+> for f in 10-postgres.yaml 20-agent-bob.yaml 30-web.yaml 40-ingress.yaml; do
 >   sed -e 's#IMAGE_AGENTD#reg/agentd:t#' -e 's#IMAGE_WEB#reg/web:t#' "$f" \
 >     | kubectl apply --dry-run=client --validate=strict -f - >/dev/null \
 >     && echo "OK  $f"
@@ -442,7 +442,7 @@ what blocked it — and finding that out now costs nothing.
 ### Step 8 — Apply
 
 ```sh
-REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange \
+REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob \
 IMAGE_TAG=<tag from step 5> \
 ./apply.sh
 ```
@@ -451,17 +451,17 @@ IMAGE_TAG=<tag from step 5> \
 `sed` and pipes each file to `kubectl apply -f -`, in order:
 
 ```
-00-namespace-and-config.yaml → 10-postgres.yaml → 20-agent-orange.yaml
+00-namespace-and-config.yaml → 10-postgres.yaml → 20-agent-bob.yaml
 → 30-web.yaml → 40-ingress.yaml
 ```
 
 ### Step 9 — Watch it come up
 
 ```sh
-kubectl -n agent-orange get pods -w
+kubectl -n agent-bob get pods -w
 ```
 
-Expect: `postgres-0` Running, then `agent-orange-…` with **2/2** containers
+Expect: `postgres-0` Running, then `agent-bob-…` with **2/2** containers
 Ready, then `web-…`. The `dind` container has a `docker info` readiness probe
 with a 10-second initial delay, so 2/2 takes a moment.
 
@@ -475,7 +475,7 @@ Run these in order. Each answers a different question.
 line — it tells you whether you are about to spend money or talk to the mock:
 
 ```sh
-kubectl -n agent-orange logs deploy/agent-orange -c agentd | grep -i "model proxy"
+kubectl -n agent-bob logs deploy/agent-bob -c agentd | grep -i "model proxy"
 ```
 
 `ANTHROPIC_API_KEY unset → MOCK model proxy` means the secret is not arriving.
@@ -485,7 +485,7 @@ anything, that line is the proof.
 **2. Did it boot at all, and with what?**
 
 ```sh
-kubectl -n agent-orange logs deploy/agent-orange -c agentd | head -40
+kubectl -n agent-bob logs deploy/agent-bob -c agentd | head -40
 ```
 
 Look for the project-map line (`project map: N mapped account(s)`), the login
@@ -504,11 +504,11 @@ time** — it just quietly does nothing. Confirm the absence of:
 **4. Did the certificate issue?**
 
 ```sh
-kubectl -n agent-orange get ingress
-kubectl -n agent-orange get certificate
+kubectl -n agent-bob get ingress
+kubectl -n agent-bob get certificate
 ```
 
-`READY=True` on the certificate. If it stays False, `kubectl -n agent-orange
+`READY=True` on the certificate. If it stays False, `kubectl -n agent-bob
 describe certificate` names the ACME failure, and the usual cause is DNS.
 
 **5. Does the front door work?**
@@ -524,7 +524,7 @@ message. **The first one is slow** — the daemon pulls the session base image o
 first use, not at startup. That is the pull, not a hang. Watch it:
 
 ```sh
-kubectl -n agent-orange logs deploy/agent-orange -c dind --tail=50
+kubectl -n agent-bob logs deploy/agent-bob -c dind --tail=50
 ```
 
 **7. What did it cost the node?**
@@ -547,14 +547,14 @@ re-apply the old one:
 IMAGE_TAG=<previous tag> ./apply.sh
 ```
 
-`kubectl -n agent-orange rollout undo deploy/agent-orange` also works, but note
+`kubectl -n agent-bob rollout undo deploy/agent-bob` also works, but note
 the Deployment strategy is `Recreate`: there is a gap with no `agentd` running.
 
 **Stop it without losing data** — scale to zero. The PersistentVolumeClaims and
 the Postgres StatefulSet survive:
 
 ```sh
-kubectl -n agent-orange scale deploy/agent-orange --replicas=0
+kubectl -n agent-bob scale deploy/agent-bob --replicas=0
 ```
 
 **🔴 Full teardown, destroying everything.** Deleting the namespace deletes the
@@ -563,7 +563,7 @@ worker, dataset and config event goes with it, irrecoverably. There are no
 backups.
 
 ```sh
-kubectl delete namespace agent-orange
+kubectl delete namespace agent-bob
 ```
 
 ---
@@ -574,7 +574,7 @@ The short loop, once the one-time setup is done:
 
 ```sh
 git commit …                                    # avoid a -dirty tag
-export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange
+export REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob
 ./deploy/publish-images.sh                      # note the tag it prints
 cd deploy/k8s && IMAGE_TAG=<that tag> ./apply.sh
 ```
@@ -633,7 +633,7 @@ Beyond five, but worth knowing:
 
 `forum/deploy/manual_deploy.sh` is a single file with `build` and `deploy`
 functions, invoked as `./manual_deploy.sh build` / `./manual_deploy.sh deploy`.
-Agent Orange already has both halves as separate scripts, which is arguably
+Agent Bob already has both halves as separate scripts, which is arguably
 better — publishing the **session base** and publishing the **services** are
 genuinely different acts with different cadences. If you want the single
 entry point anyway:
@@ -652,7 +652,7 @@ IFS=$'\n\t'
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-export REGISTRY="${REGISTRY:-europe-west1-docker.pkg.dev/webkit-servers/agent-orange}"
+export REGISTRY="${REGISTRY:-europe-west1-docker.pkg.dev/webkit-servers/agent-bob}"
 
 tag() {
   local sha dirty=''

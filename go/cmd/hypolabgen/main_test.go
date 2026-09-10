@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/hypolab"
+	"github.com/badcodetv/agent-bob/hypolab"
 )
 
 // writeManifest drops a manifest into a temp dir and returns its path.

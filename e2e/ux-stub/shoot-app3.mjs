@@ -20,7 +20,7 @@ const go = async (page, view) => {
 const browser = await chromium.launch()
 for (const scheme of ['light', 'dark']) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme })
-  await page.addInitScript((a) => localStorage.setItem('agent-orange-auth', a), auth)
+  await page.addInitScript((a) => localStorage.setItem('agent-bob-auth', a), auth)
   await page.goto('http://localhost:5181/')
   await page.waitForTimeout(1800)
   await shot(page, `desk-${scheme}`)

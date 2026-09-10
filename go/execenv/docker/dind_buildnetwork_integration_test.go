@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
+	"github.com/badcodetv/agent-bob/execenv"
 )
 
 // Gated: requires a real DinD daemon. Run with AGENTKIT_DIND_IT=1.

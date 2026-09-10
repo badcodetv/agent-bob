@@ -8,7 +8,7 @@ package imageregistry
 import (
 	"context"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
+	"github.com/badcodetv/agent-bob/execenv"
 )
 
 // ImageRegistry provides images to an ExecutionEnvironment and persists images

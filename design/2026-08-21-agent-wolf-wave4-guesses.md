@@ -221,7 +221,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W5.4 The public API surface of the store (names and shapes W8/W9/W10/W15/W22 will call)
 
 - **Plan said:** Only that store.ts exists, owns the trust primitives, and that W15 adds readTemplate/readLatestReport and W10 adds the evaluation append and its summary parser.
-- **Assumed:** createHypothesisStore({client, logger?}) returning {newId, readSessionIndex, readBoard, readHypothesis, appendState, transition}, mirroring W2's createOrangeClient factory style. Plus free functions: isTrusted, hasEmptyProvenance, forgedRowTamper, hostileRetractionTamper, slugifyOwner, parseTitleFromSnippet, sessionNameForHypothesis, hypothesisIdFromSessionName, newHypothesisId, build/parseHypothesisContent.
+- **Assumed:** createHypothesisStore({client, logger?}) returning {newId, readSessionIndex, readBoard, readHypothesis, appendState, transition}, mirroring W2's createBobClient factory style. Plus free functions: isTrusted, hasEmptyProvenance, forgedRowTamper, hostileRetractionTamper, slugifyOwner, parseTitleFromSnippet, sessionNameForHypothesis, hypothesisIdFromSessionName, newHypothesisId, build/parseHypothesisContent.
 - **Reversibility:** moderate
 
 ### W5.5 The HypothesisRecord field names returned to W8
@@ -287,7 +287,7 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 ### W5.15 The test-harness shape for store.test.ts
 
 - **Plan said:** Nothing beyond the pinned choice of undici MockAgent.
-- **Assumed:** A persistent catch-all MockAgent interceptor per method, driving the REAL createOrangeClient, recording every request (method/path/body) and routing by pathname+query to raw captured fixture text. This is what makes 'exactly one memory request', the URL assertions and the 'no hyp-hyp- anywhere' assertion possible against real client behaviour rather than a hand-written fake.
+- **Assumed:** A persistent catch-all MockAgent interceptor per method, driving the REAL createBobClient, recording every request (method/path/body) and routing by pathname+query to raw captured fixture text. This is what makes 'exactly one memory request', the URL assertions and the 'no hyp-hyp- anywhere' assertion possible against real client behaviour rather than a hand-written fake.
 - **Reversibility:** trivial
 
 ### W5.16 Fixture scenario design — which ids, which attacks, which owners
@@ -370,10 +370,10 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 
 ## W12 — 13 guesses
 
-### W12.1 Where the bootstrap script gets ORANGE_BASE_URL and WOLF_API_KEY (the client baseUrl/apiKey pair) since W2's client takes them as constructor args and my Files line forbids adding them to config.ts/.env.example (those belong to W8/W9's not-yet-landed additions)
+### W12.1 Where the bootstrap script gets BOB_BASE_URL and WOLF_API_KEY (the client baseUrl/apiKey pair) since W2's client takes them as constructor args and my Files line forbids adding them to config.ts/.env.example (those belong to W8/W9's not-yet-landed additions)
 
 - **Plan said:** nothing explicit; the ticket says the read-merge-write helper/worker-create/schedule-create must 'come from W2' but is silent on where the client's own credentials come from for a standalone bootstrap script run before W8 lands
-- **Assumed:** runBootstrapFromEnv() reads process.env.WOLF_API_KEY (required, misconfigured if absent) and process.env.ORANGE_BASE_URL (optional, default http://localhost:8099 matching the documented topology constant) directly, bypassing api/src/config.ts's WolfConfig entirely for these two — undocumented in .env.example since that file's W12 allowance is only the two named variables
+- **Assumed:** runBootstrapFromEnv() reads process.env.WOLF_API_KEY (required, misconfigured if absent) and process.env.BOB_BASE_URL (optional, default http://localhost:8099 matching the documented topology constant) directly, bypassing api/src/config.ts's WolfConfig entirely for these two — undocumented in .env.example since that file's W12 allowance is only the two named variables
 - **Reversibility:** trivial
 
 ### W12.2 How to check worker-already-correct state for idempotency, since W2's 22-route client list has putWorker/deleteWorker but no GET /agent/workers/{name} or list-workers route, and the ticket's idempotency criterion requires zero PUT calls on a second run
@@ -426,8 +426,8 @@ Wave 4 = O5, O6a, W5, W12 (phase A) and O8 (phase B, serialised behind O5 on `go
 
 ### W12.10 How to execute the loader script's DinD happy path (the ticket's Validation #2/#3) when the Orange compose stack is down and house rule 9 forbids `docker compose` up/down
 
-- **Plan said:** "with agent-orange's stack up: ./scripts/load-image-into-dind.sh" — the plan assumes the stack is running and says nothing about what to do when it is not
-- **Assumed:** That a throwaway DinD daemon started with a plain `docker run -d --rm --privileged --name w12-fix-dind docker:27-dind` (the exact image compose uses, same server version 27.5.1), seeded with the host's REAL agentkit-sandbox:dev via docker save|load, and driven through the script's own ORANGE_DIND_CONTAINER variable, is a faithful stand-in for agent-orange-dind-1. It exercises everything the criterion names except the literal default container NAME. Nothing was fabricated: the sandbox base is a real image built from this repo's sandbox/, core and wolf were really built inside the DinD daemon, and the import really ran.
+- **Plan said:** "with agent-bob's stack up: ./scripts/load-image-into-dind.sh" — the plan assumes the stack is running and says nothing about what to do when it is not
+- **Assumed:** That a throwaway DinD daemon started with a plain `docker run -d --rm --privileged --name w12-fix-dind docker:27-dind` (the exact image compose uses, same server version 27.5.1), seeded with the host's REAL agentkit-sandbox:dev via docker save|load, and driven through the script's own BOB_DIND_CONTAINER variable, is a faithful stand-in for agent-bob-dind-1. It exercises everything the criterion names except the literal default container NAME. Nothing was fabricated: the sandbox base is a real image built from this repo's sandbox/, core and wolf were really built inside the DinD daemon, and the import really ran.
 - **Reversibility:** trivial
 
 ### W12.11 Whether to add a test assertion beyond the seven literals the ticket enumerates

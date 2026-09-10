@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeProjectSettingsStore is a project-keyed in-memory stand-in for

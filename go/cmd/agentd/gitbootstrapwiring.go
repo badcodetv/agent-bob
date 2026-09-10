@@ -20,7 +20,7 @@ package main
 //
 // gitbootstrap.go deliberately ignores commit trailers (its file header, and
 // DI12). An exported folder is made *entirely* of the renderer's own commits,
-// so ImportRange's Orange-Seq skip — which is right for an incremental import,
+// so ImportRange's Bob-Seq skip — which is right for an incremental import,
 // because our own commits are already in the database by construction — would
 // import nothing here and report success. That is why this file calls
 // Bootstrap and not Import, and why "just reuse the import path" is a
@@ -44,8 +44,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // gitBootstrapStore is the slice of *agentdb.Store a bootstrap needs: every

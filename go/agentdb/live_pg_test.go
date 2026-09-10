@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/badcodetv/agent-bob/events"
 	"github.com/google/uuid"
 )
 
@@ -137,7 +137,7 @@ func TestLivePG_SessionMCPServers(t *testing.T) {
 
 // capturedQueryEventsRow is a REAL stored `agent_query_events.events` value,
 // read out of the running e2e stack's Postgres on 2026-07-28
-// (`agent-orange-stack-e2e-postgres-1`, one of 942 rows) and pasted here rather
+// (`agent-bob-stack-e2e-postgres-1`, one of 942 rows) and pasted here rather
 // than invented. Only the middle envelopes are elided for length (a
 // `session_info` carrying ~57 tool names, and the content deltas); the
 // `user_message` at index 0 and the `query_complete` at the end are verbatim

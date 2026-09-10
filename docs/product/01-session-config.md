@@ -53,7 +53,7 @@ images (atom 3) are for; the spec makes this pairing explicit rather than accide
 
 ### 4.4 Credentials: environment references, never database storage
 
-**Decision:** Agent Orange is delivered as an on-prem/self-operated open-source stack — a
+**Decision:** Agent Bob is delivered as an on-prem/self-operated open-source stack — a
 trusted environment. Credentials are therefore configured by the **operator as environment
 variables**, and MCP configuration stored in the database only ever *names* the variable
 (`"Env": {"GMAIL_API_KEY": "${GMAIL_API_KEY}"}`, `"Headers": {"Authorization": "${NOTION_AUTH}"}`).

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/modelproxy"
+	"github.com/badcodetv/agent-bob/modelproxy"
 )
 
 // dummyPassthroughKey satisfies Claude Code's startup check; it is NEVER sent

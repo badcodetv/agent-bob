@@ -162,23 +162,23 @@ function withBody(content: string, body: string): string {
   return `---\n${frontmatter}\n---\n\n${body.replace(/\n*$/, '')}\n`
 }
 
-/** Waits for a commit carrying this exact Orange-Seq trailer. */
+/** Waits for a commit carrying this exact Bob-Seq trailer. */
 function waitForCommitOfSeq(project: string, seq: number): Promise<RemoteCommit | undefined> {
   return poll(
     async () => {
       const commits = await withTrailers(project, await remoteCommits(project))
-      return commits.find((c) => c.trailers['Orange-Seq'] === String(seq))
+      return commits.find((c) => c.trailers['Bob-Seq'] === String(seq))
     },
     (c) => c !== undefined,
     RENDER_TIMEOUT,
-    `a commit carrying Orange-Seq: ${seq}`,
+    `a commit carrying Bob-Seq: ${seq}`,
   )
 }
 
-/** Every Orange-Seq trailer currently published on the branch. */
+/** Every Bob-Seq trailer currently published on the branch. */
 async function publishedSeqs(project: string): Promise<string[]> {
   const commits = await withTrailers(project, await remoteCommits(project))
-  return commits.map((c) => c.trailers['Orange-Seq']).filter(Boolean)
+  return commits.map((c) => c.trailers['Bob-Seq']).filter(Boolean)
 }
 
 /**
@@ -306,7 +306,7 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     const head = (await withTrailers(project!, await remoteCommits(project!)))[0]
     expect(head.authorName).toBe(BOT_AUTHOR_NAME)
     expect(head.authorEmail).toBe(BOT_AUTHOR_EMAIL)
-    expect(head.trailers['Orange-Project']).toBe(project)
+    expect(head.trailers['Bob-Project']).toBe(project)
   })
 
   test('OUT: a prompt change becomes a commit carrying the config event verbatim', async () => {
@@ -322,24 +322,24 @@ test.describe('git projection: out, in, quarantine, no-op', () => {
     expect(commit.sha).not.toBe(before)
     expect(commit.authorName).toBe(BOT_AUTHOR_NAME)
     expect(commit.authorEmail).toBe(BOT_AUTHOR_EMAIL)
-    expect(commit.trailers['Orange-Project']).toBe(project)
-    expect(commit.trailers['Orange-Seq']).toBe(String(ev.seq))
-    expect(commit.trailers['Orange-Event']).toBe(ev.id)
-    expect(commit.trailers['Orange-Action']).toBe(ev.action)
+    expect(commit.trailers['Bob-Project']).toBe(project)
+    expect(commit.trailers['Bob-Seq']).toBe(String(ev.seq))
+    expect(commit.trailers['Bob-Event']).toBe(ev.id)
+    expect(commit.trailers['Bob-Action']).toBe(ev.action)
 
     // Provenance is COPIED OUT OF THE LOG (rule 2 / DI4), never invented. A
     // console write has an empty actor, and an empty actor renders as NO actor
     // trailer — the same encoding the importer uses inbound. Asserting against
     // the event rather than a constant keeps this true for an MCP write too.
     if (ev.actor_worker === '') {
-      expect(commit.trailers['Orange-Actor-Worker']).toBeUndefined()
+      expect(commit.trailers['Bob-Actor-Worker']).toBeUndefined()
     } else {
-      expect(commit.trailers['Orange-Actor-Worker']).toBe(ev.actor_worker)
+      expect(commit.trailers['Bob-Actor-Worker']).toBe(ev.actor_worker)
     }
     if (ev.actor_session === '') {
-      expect(commit.trailers['Orange-Actor-Session']).toBeUndefined()
+      expect(commit.trailers['Bob-Actor-Session']).toBeUndefined()
     } else {
-      expect(commit.trailers['Orange-Actor-Session']).toBe(ev.actor_session)
+      expect(commit.trailers['Bob-Actor-Session']).toBe(ev.actor_session)
     }
 
     // And the file at that commit really says the new prompt.

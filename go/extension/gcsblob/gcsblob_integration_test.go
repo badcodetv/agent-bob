@@ -35,7 +35,7 @@ func newTestFactory(t *testing.T) *BlobStoreFactory {
 		// The emulator needs no credentials; ADC would fail without them.
 		opts = append(opts, option.WithoutAuthentication())
 	}
-	f, err := NewBlobStoreFactory(context.Background(), Config{Bucket: bucket, Prefix: "agent-orange-test"}, opts...)
+	f, err := NewBlobStoreFactory(context.Background(), Config{Bucket: bucket, Prefix: "agent-bob-test"}, opts...)
 	if err != nil {
 		t.Fatalf("NewBlobStoreFactory: %v", err)
 	}

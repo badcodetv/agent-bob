@@ -20,8 +20,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/topology"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/topology"
 )
 
 // TopologyStore is the store seam the topology routes need: the reads that

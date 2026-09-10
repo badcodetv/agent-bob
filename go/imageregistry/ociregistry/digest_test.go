@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // Digest is what turns a configured string into a content address: the string
@@ -87,8 +87,8 @@ func TestRepositoryOf(t *testing.T) {
 	for _, tc := range []struct{ ref, want string }{
 		{"agent-wolf:latest", "agent-wolf"},
 		{"reg.example.io/agentkit/agent-wolf:3", "reg.example.io/agentkit/agent-wolf"},
-		{"europe-west1-docker.pkg.dev/webkit-servers/agent-orange/agent-wolf:latest",
-			"europe-west1-docker.pkg.dev/webkit-servers/agent-orange/agent-wolf"},
+		{"europe-west1-docker.pkg.dev/webkit-servers/agent-bob/agent-wolf:latest",
+			"europe-west1-docker.pkg.dev/webkit-servers/agent-bob/agent-wolf"},
 		// A registry port is a colon that is NOT a tag separator.
 		{"localhost:5000/agent-wolf", "localhost:5000/agent-wolf"},
 		{"localhost:5000/agent-wolf:dev", "localhost:5000/agent-wolf"},

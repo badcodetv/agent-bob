@@ -48,7 +48,7 @@ they would have to beat.
 
 ## 2. What a topology is, concretely
 
-Agent Orange already has everything a topology needs to be expressed in. A topology is not a new
+Agent Bob already has everything a topology needs to be expressed in. A topology is not a new
 storage type — it is **a parameterised generator over the existing configuration surface**:
 
 | Primitive | Where | What a topology sets |
@@ -156,7 +156,7 @@ A topology library without measurement is a folder of opinions. A harness withou
 nothing to compare.
 
 Together they give the experiment its actual shape: **hold the task and the frozen scorer constant,
-vary the topology, rank the results.** That is the question Kai posed — *how should Agent Orange
+vary the topology, rank the results.** That is the question Kai posed — *how should Agent Bob
 entities be arranged so the self-learning loop is most effective?* — turned into something with an
 answer. And per §1 the answer will be per-task and per-model, so the deliverable is a ranking
 procedure that stays cheap to re-run, not a winning org chart to enshrine.

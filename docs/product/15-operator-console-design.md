@@ -15,7 +15,7 @@ Read after [`17-product-spec.md`](./17-product-spec.md) (atoms, P1–P8),
 
 ## 0. What this is
 
-A design direction for the Agent Orange front end, covering five questions: the first-run journey,
+A design direction for the Agent Bob front end, covering five questions: the first-run journey,
 the operator's daily loop, org-chart visualisation and editing, how learning is surfaced, and what
 prior art to take from. It ends with the backend seams the design needs and a proposed build order.
 
@@ -166,7 +166,7 @@ elapsed time (with a gap marker when >4h passes, so a quiet night reads as a qui
 than compressing away).
 
 It is one device because it is one table shape, and it is the thing the product should be
-recognised by: *Agent Orange is the tool where everything hangs off a rail, because everything is
+recognised by: *Agent Bob is the tool where everything hangs off a rail, because everything is
 an append.*
 
 ### 3.7 The deliberate risk: the chart is a schematic, not a flowchart
@@ -565,7 +565,7 @@ The acceptance loop's whole claim is "the composed prompt changed the model's be
 ```
 
 Every column is data we hold: the two neighbouring jobs for that worker, and the config event
-between them. It is the one screen to put in front of someone who asks what Agent Orange is.
+between them. It is the one screen to put in front of someone who asks what Agent Bob is.
 
 Caveat to render, not hide: **tool calls are absent from `worker.finished` transcripts**, so a
 before/after column shows what the worker *said*, never what it *did*.

@@ -74,12 +74,12 @@ import (
 	"github.com/google/uuid"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/filesblob"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/filesblob"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // ---------------------------------------------------------------------------

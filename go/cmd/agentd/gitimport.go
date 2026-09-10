@@ -24,13 +24,13 @@ package main
 //     commit it is, and what the commit message says.
 //
 //  2. TRAILERS ARE READ WITH GIT'S OWN PARSER (DI4, a security rule). Commits
-//     carrying an `Orange-Seq:` trailer are the renderer's own and are skipped.
+//     carrying an `Bob-Seq:` trailer are the renderer's own and are skipped.
 //     Rationales are model-written text, and git parses the LAST PARAGRAPH of a
-//     message as trailers — so a rationale ending in `Orange-Seq: 999999` is a
+//     message as trailers — so a rationale ending in `Bob-Seq: 999999` is a
 //     forged trailer, not prose. `git log --format=%(trailers:…)` applies git's
 //     real parser, which reads only that last paragraph, exactly as the renderer
 //     assumes when it appends its own trailer block last. A `grep` of the
-//     message for `Orange-Seq:` would re-open the hole completely — and would
+//     message for `Bob-Seq:` would re-open the hole completely — and would
 //     pass every test written from our own commits, which is why there is a
 //     test here built from a forged one.
 //
@@ -64,8 +64,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // gitImportStore is the narrow slice of *agentdb.Store the importer calls.
@@ -1130,13 +1130,13 @@ const (
 // 🔴 DI4. Ownership is decided by GIT'S OWN TRAILER PARSER, via
 // `%(trailers:key=…)`, which reads only the last paragraph of the message —
 // never by searching the message text. The renderer always emits its trailer
-// block as the final paragraph precisely so that an `Orange-Seq:` line inside a
+// block as the final paragraph precisely so that an `Bob-Seq:` line inside a
 // model-written rationale lands in an earlier one, where git ignores it. A grep
 // would find that forged line, skip the commit, and hand a worker the power to
 // mint commits the importer refuses to read.
 //
 // Ownership additionally requires the fixed projection author identity and the
-// Orange-Event trailer. That is not a security boundary — a pusher can set any
+// Bob-Event trailer. That is not a security boundary — a pusher can set any
 // author — but it errs in the safe direction: the failure mode of being too
 // strict is that a commit gets imported, and the failure mode of being too loose
 // is that a human's edit is silently discarded.
@@ -1148,8 +1148,8 @@ func gitCommitsInRange(ctx context.Context, repoPath, fromSHA, toSHA string) ([]
 	format := strings.Join([]string{
 		"%H",
 		"%ae",
-		"%(trailers:key=Orange-Seq,valueonly,only)",
-		"%(trailers:key=Orange-Event,valueonly,only)",
+		"%(trailers:key=Bob-Seq,valueonly,only)",
+		"%(trailers:key=Bob-Event,valueonly,only)",
 		"%s",
 		"%b",
 	}, gitFieldSep) + gitRecordSep

@@ -57,8 +57,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // gitDocumentPageSize is the page size used to walk the named documents.

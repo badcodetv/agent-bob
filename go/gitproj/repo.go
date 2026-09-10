@@ -40,8 +40,8 @@ type Repo struct {
 // a person. Who actually caused the change lives in the trailers, derived from
 // the config event.
 const (
-	AuthorName  = "Agent Orange"
-	AuthorEmail = "orange@agentorange.local"
+	AuthorName  = "Agent Bob"
+	AuthorEmail = "bob@agentbob.local"
 )
 
 var (
@@ -353,14 +353,14 @@ func (r *Repo) listFiles(ctx context.Context, sub string, others bool) ([]string
 
 var trailerKeyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
 
-// Commit commits the staged tree with the fixed Agent Orange identity, the given
+// Commit commits the staged tree with the fixed Agent Bob identity, the given
 // subject and body, and trailers appended as "Key: value" lines in their own
 // trailer paragraph (keys sorted, so the message is deterministic).
 //
 // Committing when nothing is staged is a no-op that returns the current HEAD.
 //
 // The trailer block is always its own final paragraph, which is what stops a
-// model-written body from forging trailers: a "Orange-Seq: 5" line inside the
+// model-written body from forging trailers: a "Bob-Seq: 5" line inside the
 // rationale ends up in an earlier paragraph and git will not read it as a
 // trailer. That guarantee holds only while trailers is non-empty.
 func (r *Repo) Commit(ctx context.Context, subject, body string, trailers map[string]string) (string, error) {

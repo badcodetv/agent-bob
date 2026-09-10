@@ -22,8 +22,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
 )
 

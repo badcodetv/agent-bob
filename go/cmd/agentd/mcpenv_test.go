@@ -18,7 +18,7 @@ func TestMCPEnvAllowlist(t *testing.T) {
 		"AGENTKIT_JWT_SECRET":     "super-secret-signing-key",
 		"ANTHROPIC_API_KEY":       "sk-ant-real-billing-key",
 		"CLAUDE_CODE_OAUTH_TOKEN": "sk-ant-oat01-subscription",
-		"DATABASE_URL":            "postgres://user:pw@postgres:5432/agentorange",
+		"DATABASE_URL":            "postgres://user:pw@postgres:5432/agentbob",
 		"GMAIL_API_KEY":           "gmail-token-value",
 		"NOTION_AUTH":             "notion-token-value",
 	}
@@ -151,7 +151,7 @@ func TestMCPEnvAllowlist_ContainerEnvNeverLeaksAgentdSecrets(t *testing.T) {
 		jwtSecret   = "super-secret-signing-key"
 		realAPIKey  = "sk-ant-real-billing-key"
 		oauthToken  = "sk-ant-oat01-subscription"
-		databaseURL = "postgres://user:pw@postgres:5432/agentorange"
+		databaseURL = "postgres://user:pw@postgres:5432/agentbob"
 	)
 	env := envMap(map[string]string{
 		mcpEnvVar:                 "GMAIL_API_KEY,NOTION_AUTH",

@@ -6,7 +6,7 @@
 #
 #   publish-base.sh    the SESSION base — what a session container runs, and
 #                      what a project's custom image is built FROM.
-#   publish-images.sh  the SERVICES — agentd and the web UI, i.e. Agent Orange
+#   publish-images.sh  the SERVICES — agentd and the web UI, i.e. Agent Bob
 #                      itself.
 #
 # docker-compose.yml BUILDS both services locally, which is why running the
@@ -22,7 +22,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-: "${REGISTRY:?set REGISTRY, e.g. REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-orange}"
+: "${REGISTRY:?set REGISTRY, e.g. REGISTRY=europe-west1-docker.pkg.dev/webkit-servers/agent-bob}"
 
 default_tag() {
   local sha dirty=''

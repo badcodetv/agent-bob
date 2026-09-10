@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Idempotent GCP provisioning for the Agent Orange stack. Safe to re-run: every
+# Idempotent GCP provisioning for the Agent Bob stack. Safe to re-run: every
 # step checks first and only creates what's missing. Run it once per project (or
 # any time you spin up a fresh project) with an account that has admin rights.
 #
@@ -27,9 +27,9 @@ set -euo pipefail
 
 PROJECT="${PROJECT:-webkit-servers}"
 REGION="${REGION:-europe-west1}"
-BUCKET="${GCS_BUCKET:-webkit-servers-agent-orange}"
-AR_REPO="${GCP_AR_REPO:-agent-orange}"
-SA_NAME="${SA_NAME:-agent-orange-runtime}"
+BUCKET="${GCS_BUCKET:-webkit-servers-agent-bob}"
+AR_REPO="${GCP_AR_REPO:-agent-bob}"
+SA_NAME="${SA_NAME:-agent-bob-runtime}"
 SA_EMAIL="${SA_NAME}@${PROJECT}.iam.gserviceaccount.com"
 
 EMIT_KEY=""
@@ -71,7 +71,7 @@ if gcloud artifacts repositories describe "$AR_REPO" \
 else
   gcloud artifacts repositories create "$AR_REPO" \
     --repository-format=docker --location="$REGION" \
-    --description="Agent Orange session/base images" --project="$PROJECT"
+    --description="Agent Bob session/base images" --project="$PROJECT"
 fi
 
 log "GCS bucket"
@@ -87,7 +87,7 @@ if gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" >/dev/n
   echo "    exists: $SA_EMAIL"
 else
   gcloud iam service-accounts create "$SA_NAME" \
-    --display-name="Agent Orange runtime" --project="$PROJECT"
+    --display-name="Agent Bob runtime" --project="$PROJECT"
   # A new SA is not immediately visible to IAM — wait for it to propagate.
   retry gcloud iam service-accounts describe "$SA_EMAIL" --project="$PROJECT" >/dev/null 2>&1
 fi

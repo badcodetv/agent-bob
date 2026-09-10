@@ -5,7 +5,7 @@ package main
 // The failure this exists for is not exotic; it is the default first-run
 // accident. docker-compose.yml renders DATABASE_URL from POSTGRES_USER /
 // POSTGRES_PASSWORD / POSTGRES_DB (all defaulting to the literal
-// `agentorange`), and the `pg-data` volume initialises its role and database
+// `agentbob`), and the `pg-data` volume initialises its role and database
 // exactly ONCE, on the first `docker compose up`. Setting a password in `.env`
 // afterwards re-renders the connection string but does not touch the database
 // that was already created — so agentd dies with raw gorm/pgx text
@@ -55,7 +55,7 @@ func dbConnectChecklist(err error) string {
 			"    re-renders DATABASE_URL but NOT the database. To adopt new credentials:\n" +
 			"    `docker compose down -v` (this DELETES the database), then `up` again.\n")
 		b.WriteString("  - POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB in .env match what the\n" +
-			"    `postgres` service was first created with (all three default to `agentorange`).\n")
+			"    `postgres` service was first created with (all three default to `agentbob`).\n")
 	} else {
 		b.WriteString("  - the `postgres` compose service is up and healthy: `docker compose ps postgres`,\n" +
 			"    `docker compose logs postgres`.\n")

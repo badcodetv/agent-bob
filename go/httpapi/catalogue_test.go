@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeCatalogue records the queries it was handed and returns canned pages, so

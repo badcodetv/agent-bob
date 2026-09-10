@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // fakeGitProjectionStore is a project-keyed stand-in for whatever the host

@@ -13,8 +13,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/blobartifacts"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/blobartifacts"
 )
 
 // ---- BlobStore ---------------------------------------------------------------

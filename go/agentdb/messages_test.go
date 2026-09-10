@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/badcodetv/agent-bob/events"
 )
 
 func TestCreateMessages(t *testing.T) {

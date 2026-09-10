@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // ── fakes ───────────────────────────────────────────────────────────────────

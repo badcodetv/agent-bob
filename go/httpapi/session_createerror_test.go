@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // recordingStore is a RunnerStore that actually keeps rows, so a test can watch

@@ -245,7 +245,7 @@ honoured socially, is the practical guardrail for prompts editing prompts given 
 protects nothing.
 
 **Pattern — curating an environment.** A workforce accumulates *tooling* as well as knowledge, and
-in Agent Orange that accumulation is deliberate: nothing survives a job unless a worker
+in Agent Bob that accumulation is deliberate: nothing survives a job unless a worker
 snapshotted it on purpose and said why (§13). The manager is the natural curator, because it
 already owns "what this project should look like". The workflow is a short chain — look, install,
 snapshot, adopt:

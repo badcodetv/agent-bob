@@ -12,7 +12,7 @@ import { lit, psql, stackDbReadable } from '../helpers/stackdb'
 
 const exec = promisify(execFile)
 
-// T17 of design/2026-08-06-embeddable-agent-orange.md — the whole "embeddable
+// T17 of design/2026-08-06-embeddable-agent-bob.md — the whole "embeddable
 // Orange" feature, end to end, against the compose stack.
 //
 // This is the only test that holds the wiring T1–T16/T18 added, and most of that
@@ -258,7 +258,7 @@ async function containerRunning(sessionId: string): Promise<boolean> {
     const { stdout } = await exec('docker', [
       'compose',
       '-p',
-      process.env.STACK_COMPOSE_PROJECT || 'agent-orange-stack-e2e',
+      process.env.STACK_COMPOSE_PROJECT || 'agent-bob-stack-e2e',
       'exec',
       '-T',
       'dind',

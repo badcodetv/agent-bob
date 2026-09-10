@@ -11,8 +11,8 @@ import (
 	// Embedded IANA data, so the DST tick case holds without system zoneinfo.
 	_ "time/tzdata"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ── Fakes ───────────────────────────────────────────────────────────────────

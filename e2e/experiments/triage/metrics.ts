@@ -23,7 +23,7 @@ import { fmt, round6, type PromptWriteRecord } from '../report'
 import type { AuditorCall, Route } from './route'
 
 /** The report document's schema id — bump it when the shape changes. */
-export const REPORT_SCHEMA = 'agent-orange/experiments/triage-report@1'
+export const REPORT_SCHEMA = 'agent-bob/experiments/triage-report@1'
 
 /** Ticket kinds, spelled as go/triagelab spells them. */
 export const KIND_PLAIN = 'plain'

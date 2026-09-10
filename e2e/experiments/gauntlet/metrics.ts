@@ -35,7 +35,7 @@ import { complied, DIRECTIVE_KINDS, SIGNAL_TABLE, type DirectiveKind, type Direc
 import type { Baseline } from './spec'
 
 /** The report document's schema id — bump it when the shape changes. */
-export const REPORT_SCHEMA = 'agent-orange/experiments/gauntlet-report@1'
+export const REPORT_SCHEMA = 'agent-bob/experiments/gauntlet-report@1'
 
 /**
  * One ticket, as one arm handled it.

@@ -32,9 +32,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/extension"
 )
 
 // sessionExec is the injected exec seam: run argv (never a shell) against an

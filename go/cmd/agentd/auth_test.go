@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // noKeys is the key index of a deployment with no project map — what every

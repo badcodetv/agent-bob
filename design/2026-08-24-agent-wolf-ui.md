@@ -379,7 +379,7 @@ asserts exactly one fetch"* is **unaffected**; all of this is computed server-si
 
 - Width `400px` (`clamp(340px, 28vw, 460px)`), `position: sticky; top: 0; height: 100vh`,
   collapsible to a thin edge with a restore control.
-- `OrangeChatFrame` fills it at `height: 100%`. **This is why D4 solves the sizing problem for the
+- `BobChatFrame` fills it at `height: 100%`. **This is why D4 solves the sizing problem for the
   chat**: a rail's height is the viewport's, known without measuring anything.
 - Below the `md` breakpoint the rail becomes a tab above the left column's content. It never becomes
   a fixed-height box in the middle of a scrolling document.
@@ -576,7 +576,7 @@ GET /api/hypotheses/:id
 | Router: React Router 7, one route table | ✅ survives |
 | `@testing-library/react` 16.x + jest-dom | ✅ survives |
 | Two `VITE_*` build args, read only in `env.ts` | ✅ survives |
-| `OrangeChatFrame` src composed from the variable | ✅ survives |
+| `BobChatFrame` src composed from the variable | ✅ survives |
 | `expires_at_sec` T-120s refresh, fake-timer test | ✅ survives |
 | Token in component state only, never storage | ✅ survives |
 | Board renders from a **single** fetch | ✅ survives — tiers are server-computed |
@@ -587,7 +587,7 @@ GET /api/hypotheses/:id
 | `NewHypothesis` posts `{title}`, surfaces errors verbatim | ✅ survives |
 | Each card renders title, chip, score, condition summary, headline | 🟡 **extended** — adds tier, owner byline, `attention`/`stale` counts |
 | **Files line** | 🔴 **contradicted** — gains `@agentkit/chat-ui`, `vendor/`, `web/src/theme.ts`, `web/src/components/trust/{Provenance,Severity}.tsx` |
-| **`OrangeChatFrame` as a page component** | 🔴 **contradicted** — it is now a layout rail with a `height:100%` contract and a collapse state |
+| **`BobChatFrame` as a page component** | 🔴 **contradicted** — it is now a layout rail with a `height:100%` contract and a collapse state |
 
 ### W14 — Detail, scoreboard, conditions and verdict
 
@@ -632,7 +632,7 @@ uses the same real frame component W24 already demands, for the same reason.
 
 | Id | Repo | Scope | Model | Depends on |
 | --- | --- | --- | --- | --- |
-| **O12** | agent-orange | Make `@agentkit/chat-ui` publishable, **to the shape the probe below proved**: drop `private`, `noEmit: false`, drop `allowImportingTsExtensions`, exclude tests and `test-setup` from the emit, move the five runtime deps (`@mui/icons-material`, `react-markdown`, `remark-gfm`, `prism-react-renderer`, `@untitledui/file-icons`) out of `devDependencies`, **add subpath exports (`.`, `./pure`, `./components`)**, version it, `prepack`, and a CI step that fails if `dist` stops emitting. Update `examples/web` to consume `dist` and shrink its dedupe list. **Does NOT change Orange's source imports** — proved unnecessary. | opus | — |
+| **O12** | agent-bob | Make `@agentkit/chat-ui` publishable, **to the shape the probe below proved**: drop `private`, `noEmit: false`, drop `allowImportingTsExtensions`, exclude tests and `test-setup` from the emit, move the five runtime deps (`@mui/icons-material`, `react-markdown`, `remark-gfm`, `prism-react-renderer`, `@untitledui/file-icons`) out of `devDependencies`, **add subpath exports (`.`, `./pure`, `./components`)**, version it, `prepack`, and a CI step that fails if `dist` stops emitting. Update `examples/web` to consume `dist` and shrink its dedupe list. **Does NOT change Orange's source imports** — proved unnecessary. | opus | — |
 | **W27** | agent-wolf | The attention model: `stale=<n>` on the evaluation summary line, `attention` surfaced by the parser, `attention_requests` on the board payload, tiers computed server-side. | opus | W22 |
 | **W28** | agent-wolf | The design system: `web/src/theme.ts` implementing § 2b (palette, glyphs, typography, density, `prefers-color-scheme`), plus `Provenance` and `Severity` in `web/src/components/trust/`. Criteria must include the two rules § 2b makes load-bearing — **provenance uses no semantic palette colour**, and **`error` red appears nowhere but severity `attacked`** — each asserted by test. 🔴 **And `web/vite.config.ts` MUST set `test.server.deps.inline: [/@mui/, /@agentkit/]`** — see the probe finding below; without it every test importing a shared component dies pointing at MUI. | sonnet | O12 |
 | **W29** | agent-wolf | Wolf's artifact surface: Orange client methods, `GET /api/hypotheses/:id/artifacts`, and the shared `ArtifactPanel` rendered under Wolf's theme. | sonnet | O12, W28 |

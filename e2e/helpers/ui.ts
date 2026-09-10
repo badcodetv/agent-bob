@@ -91,7 +91,7 @@ export async function openFreshProject(page: Page, prefix = 'e2e-ui'): Promise<s
   const project = uniqueProject(prefix)
   await loginUI(page)
   await page.evaluate(async (id) => {
-    const KEY = 'agent-orange-auth'
+    const KEY = 'agent-bob-auth'
     const state = JSON.parse(localStorage.getItem(KEY) ?? '{}') as {
       loginToken?: string
       projects?: { id: string; token: string }[]

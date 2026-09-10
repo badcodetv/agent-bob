@@ -1,5 +1,5 @@
 // Embed tokens: the short-lived, single-session credential an embedding
-// application hands to a browser (design/2026-08-06-embeddable-agent-orange.md,
+// application hands to a browser (design/2026-08-06-embeddable-agent-bob.md,
 // T10).
 //
 //	POST /agent/embed-token   {session: "<name>", ttl_seconds?: int}
@@ -12,7 +12,7 @@
 //
 // The shape of the whole feature is: the embedding app's BACKEND asks for a
 // token naming the session it wants shown, and drops the answer into an iframe
-// URL fragment. The browser never authenticates to Agent Orange and never holds
+// URL fragment. The browser never authenticates to Agent Bob and never holds
 // anything that outlives the page.
 package main
 
@@ -23,9 +23,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -53,7 +53,7 @@ const (
 
 // embedTokenRequest is the body. `session` is a NAME, never an id: an embedding
 // app persists the name it chose ("hypothesis-a") and never has to store a uuid
-// Agent Orange minted.
+// Agent Bob minted.
 type embedTokenRequest struct {
 	Session    string `json:"session"`
 	TTLSeconds int    `json:"ttl_seconds"`

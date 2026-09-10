@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/calibration-report@1",
+  "schema": "agent-bob/experiments/calibration-report@1",
   "run": {
     "id": "doctrine-smoke-4",
     "description": "Mock smoke for the doctrine axis: the four smoke hypotheses through arm A and through arm A with doctrine-v1 written into the project prompt. Proves the block reaches composed prompts; measures nothing.",

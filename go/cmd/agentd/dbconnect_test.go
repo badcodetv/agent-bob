@@ -10,7 +10,7 @@ import (
 // neither the compose service nor the once-initialised volume. These tests pin
 // that both are named, and that gorm's own text still comes through.
 func TestDatabaseConnectErrorNamesTheTrap(t *testing.T) {
-	const dsn = "postgres://agentorange:hunter2@postgres:5432/agentorange?sslmode=disable"
+	const dsn = "postgres://agentbob:hunter2@postgres:5432/agentbob?sslmode=disable"
 
 	cases := []struct {
 		name string
@@ -19,7 +19,7 @@ func TestDatabaseConnectErrorNamesTheTrap(t *testing.T) {
 	}{
 		{
 			name: "auth failure points at the stale volume first",
-			err:  errors.New(`failed to connect to \x60host=postgres user=agentorange\x60: password authentication failed for user "agentorange"`),
+			err:  errors.New(`failed to connect to \x60host=postgres user=agentbob\x60: password authentication failed for user "agentbob"`),
 			want: []string{
 				"docker compose down -v",
 				"POSTGRES_PASSWORD",
@@ -72,10 +72,10 @@ func TestRedactDBURL(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"postgres://agentorange:hunter2@postgres:5432/agentorange?sslmode=disable",
-			"postgres://agentorange:xxxxx@postgres:5432/agentorange?sslmode=disable"},
-		{"postgres://agentorange@postgres:5432/agentorange",
-			"postgres://agentorange@postgres:5432/agentorange"},
+		{"postgres://agentbob:hunter2@postgres:5432/agentbob?sslmode=disable",
+			"postgres://agentbob:xxxxx@postgres:5432/agentbob?sslmode=disable"},
+		{"postgres://agentbob@postgres:5432/agentbob",
+			"postgres://agentbob@postgres:5432/agentbob"},
 		{"not a url at all", "<unparseable>"},
 	}
 	for _, tc := range cases {

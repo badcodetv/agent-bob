@@ -1,5 +1,5 @@
 // Clickjacking control for the embed page (T13 of
-// design/2026-08-06-embeddable-agent-orange.md).
+// design/2026-08-06-embeddable-agent-bob.md).
 //
 //	GET /embed/csp  →  204, Content-Security-Policy: frame-ancestors <origins>
 //

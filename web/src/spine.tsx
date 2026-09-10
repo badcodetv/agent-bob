@@ -1,7 +1,7 @@
 // The spine — one vertical hairline with ticks, at the left edge of every
 // reading surface (operator-console design §3.6).
 //
-// "Agent Orange is the tool where everything hangs off a rail, because
+// "Agent Bob is the tool where everything hangs off a rail, because
 // everything is an append." The rail is 1px; the ticks are a CLOSED glyph set
 // (§3.6, and the token table in the work plan):
 //

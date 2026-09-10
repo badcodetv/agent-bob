@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/titlebot"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/titlebot"
 )
 
 type sendMessageBody struct {

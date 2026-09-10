@@ -33,18 +33,18 @@ import (
 	"strings"
 	"time"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	dockerdind "github.com/binocarlos/badcode-agent-orange/execenv/docker"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/blobartifacts"
-	"github.com/binocarlos/badcode-agent-orange/extension/dbartifacts"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
-	"github.com/binocarlos/badcode-agent-orange/extension/embedding"
-	"github.com/binocarlos/badcode-agent-orange/extension/sqlitestore"
-	"github.com/binocarlos/badcode-agent-orange/fleet"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
+	dockerdind "github.com/badcodetv/agent-bob/execenv/docker"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/blobartifacts"
+	"github.com/badcodetv/agent-bob/extension/dbartifacts"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
+	"github.com/badcodetv/agent-bob/extension/embedding"
+	"github.com/badcodetv/agent-bob/extension/sqlitestore"
+	"github.com/badcodetv/agent-bob/fleet"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 func main() {
@@ -544,7 +544,7 @@ func main() {
 	root.HandleFunc("GET /auth/config", authConfigHandler(googleClientID, testLogin != "", credentialMode(apiKey, oauthToken)))
 
 	// POST /auth/verify-google — Google ID token → {email}, for an application
-	// that embeds Agent Orange and runs its own allowlist. Registered whenever
+	// that embeds Agent Bob and runs its own allowlist. Registered whenever
 	// GOOGLE_CLIENT_ID is set, and on the AUTHENTICATED mux, not beside
 	// /auth/google on root: it verifies identities for a project's backend, which
 	// holds a project API key, and an unauthenticated verification oracle would

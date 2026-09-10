@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // captureStore records the session row persisted at create time (Status=="creating")

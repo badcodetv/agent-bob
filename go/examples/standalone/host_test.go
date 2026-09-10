@@ -25,14 +25,14 @@ import (
 	"strings"
 	"testing"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/agentkittest"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/fleet"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/agentkittest"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/fleet"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────

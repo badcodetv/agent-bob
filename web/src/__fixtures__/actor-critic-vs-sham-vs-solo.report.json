@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/compare-report@1",
+  "schema": "agent-bob/experiments/compare-report@1",
   "task": {
     "id": "actor-critic-vs-sham-vs-solo",
     "description": "One two-round filing task through three org charts: a diagnosing critic, a placebo critic with identical wiring, and a lone worker. Ranked by whether round 2 gained the headline rule.",

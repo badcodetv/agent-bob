@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/triage-report@1",
+  "schema": "agent-bob/experiments/triage-report@1",
   "run": {
     "id": "triage-smoke-6",
     "description": "Mock smoke for the triage runner: six tickets (two per trap kind) through arms A and B, scripted end to end. Proves the machinery, measures nothing.",

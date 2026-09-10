@@ -20,13 +20,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/filesblob"
-	"github.com/binocarlos/badcode-agent-orange/extension/gcsblob"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry/auth"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry/blobarchive"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry/ociregistry"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/filesblob"
+	"github.com/badcodetv/agent-bob/extension/gcsblob"
+	"github.com/badcodetv/agent-bob/imageregistry"
+	"github.com/badcodetv/agent-bob/imageregistry/auth"
+	"github.com/badcodetv/agent-bob/imageregistry/blobarchive"
+	"github.com/badcodetv/agent-bob/imageregistry/ociregistry"
 )
 
 // ---- blob backend ------------------------------------------------------------

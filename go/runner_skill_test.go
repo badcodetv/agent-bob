@@ -6,12 +6,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/agentkittest"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/agentkittest"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // buildSkillTar builds an in-memory tar of relPath->content for the skill bundle.

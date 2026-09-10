@@ -22,7 +22,7 @@ import { ESCALATE, QUEUES } from '../triage/route'
 import { DIRECTIVE_KINDS, type DirectiveKind, type DirectiveRecord } from './directives'
 
 /** The schema gauntletgen stamps; anything else is refused. */
-export const TRUTHS_SCHEMA = 'agent-orange/triagelab/gauntlet-truths@1'
+export const TRUTHS_SCHEMA = 'agent-bob/triagelab/gauntlet-truths@1'
 
 /** One ticket as the generator recorded it. */
 export interface Ticket {

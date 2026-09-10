@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
+	"github.com/badcodetv/agent-bob/execenv"
 )
 
 // testImage is the container image used for integration tests. It MUST have a

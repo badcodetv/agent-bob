@@ -1,4 +1,4 @@
-# Embeddable Agent Orange — Design & Implementation Plan
+# Embeddable Agent Bob — Design & Implementation Plan
 
 > **EXECUTION RULES (for agents):** Work ONE ticket at a time, in order unless
 > dependencies say otherwise. Only the orchestrator changes ticket Status;
@@ -15,17 +15,17 @@ Relates: `docs/product/17-product-spec.md` §8.5 (headless posters / project tok
 
 ## Context
 
-Agent Orange today is a **single-app system**: one console (`examples/web`) served
+Agent Bob today is a **single-app system**: one console (`examples/web`) served
 same-origin with `agentd` behind nginx, authenticated by per-project JWTs held in
 `localStorage`, with project membership coming from a static env map. Everything
 works because there is exactly one UI and it lives on the same origin as the API.
 
-This plan makes Agent Orange a **singleton service that other applications embed**.
+This plan makes Agent Bob a **singleton service that other applications embed**.
 The driving use case is **Agent Wolf**, a financial-hypothesis product: a user writes
 a hypothesis ("the AI bubble bursts, government prints liquidity, Bitcoin rises"), and
-Agent Orange researches it daily, maintaining state Wolf renders on its own hypothesis
+Agent Bob researches it daily, maintaining state Wolf renders on its own hypothesis
 page. Wolf owns the opinionated UI, the vocabulary ("hypotheses", not "sessions"), and
-its own user allowlist. Agent Orange owns all the state: prompts, sessions, schedules,
+its own user allowlist. Agent Bob owns all the state: prompts, sessions, schedules,
 memories, artifacts.
 
 ### The Wolf shape: two bots, state in memory
@@ -74,7 +74,7 @@ Wolf must not vendor Orange's code. It integrates over three seams:
 
 ### The two persistence strategies (important — do not collapse them)
 
-Agent Orange deliberately offers **two** ways to carry state between agent runs, and
+Agent Bob deliberately offers **two** ways to carry state between agent runs, and
 this plan adds infrastructure for the second without displacing the first:
 
 | Strategy | Mechanism | Suits |
@@ -133,7 +133,7 @@ no database table is added for keys, and no key-management UI exists.
            │ wolf's own session cookie     │ iframe loads from Orange origin
            ▼                               ▼
    ┌────────────────────┐          ┌──────────────────────────┐
-   │  Wolf backend      │          │  Agent Orange (singleton)│
+   │  Wolf backend      │          │  Agent Bob (singleton)│
    │  - user allowlist  │─────────▶│  agentd + console SPA    │
    │  - hypothesis rows │  X-API-  │                          │
    │    (name ↔ session)│  Key:    │  project "wolf"          │
@@ -482,7 +482,7 @@ type Schedule struct {
 
 ## Out of Scope
 
-- **Any Agent Wolf code.** This plan changes only Agent Orange. Wolf's backend, UI,
+- **Any Agent Wolf code.** This plan changes only Agent Bob. Wolf's backend, UI,
   hypothesis model and user allowlist are a separate project.
 - **A users table, sessions table, or refresh tokens in Orange.** `verify-google` returns
   an email; it does not create or track users.
@@ -1080,7 +1080,7 @@ type Schedule struct {
   `curl -sI http://localhost:8080/embed/session/hypothesis-a` →
   `Content-Security-Policy: frame-ancestors http://localhost:5173 https://wolf.example.test`
   (exactly the two configured origins, in the boot-computed order); the console page `/` carries
-  **no** CSP header; the embed URL serves the embed entry (`<title>Agent Orange — session</title>`,
+  **no** CSP header; the embed URL serves the embed entry (`<title>Agent Bob — session</title>`,
   `src="/assets/embed-*.js"`) rather than the SPA; and agentd's boot log corroborates with
   `[agentd] embed framing: frame-ancestors http://localhost:5173 https://wolf.example.test`, proving
   the value came from the parsed project map rather than from nginx.

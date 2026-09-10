@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/internal/recorder"
+	"github.com/badcodetv/agent-bob/internal/recorder"
 )
 
 // MockExecutionEnvironment is an in-memory ExecutionEnvironment for testing the

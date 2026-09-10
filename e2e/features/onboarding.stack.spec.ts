@@ -76,7 +76,7 @@ test.describe('onboarding', () => {
     await loginUI(page)
     await page.evaluate(
       async ({ id, goal }) => {
-        const AUTH = 'agent-orange-auth'
+        const AUTH = 'agent-bob-auth'
         const state = JSON.parse(localStorage.getItem(AUTH) ?? '{}') as {
           loginToken?: string
           projects?: { id: string; token: string }[]

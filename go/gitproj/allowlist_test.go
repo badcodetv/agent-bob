@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // TestIsEnvRef is the whole secret rule at its narrowest: the ONLY shape a

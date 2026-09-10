@@ -50,7 +50,7 @@ done when something would now **tell us** if it broke.
 ## CONFLICT WATCH (read before touching Go HTTP/auth code)
 
 **This plan executes on the `readiness` branch, in a worktree.** `product-layer` belongs to the
-parallel **embeddable-singleton** session (`design/2026-08-06-embeddable-agent-orange.md`, 5 of 19
+parallel **embeddable-singleton** session (`design/2026-08-06-embeddable-agent-bob.md`, 5 of 19
 tickets done as of `2c38be2`). The orchestrator merges `product-layer` → `readiness` before each
 wave, and merges each finished wave back to `product-layer`. Executors never touch `product-layer`.
 
@@ -209,7 +209,7 @@ stops." These four items are that point. All four are parallel — disjoint file
 - [x] **F3 — RD22 + RD23 + RD21(docs half): the documentation stops lying.** One commit, no code.
   (a) **RD22 — Postgres credentials are undocumented and the volume initialises once.**
       `docker-compose.yml:69` builds `DATABASE_URL` from `POSTGRES_USER`/`POSTGRES_PASSWORD`/
-      `POSTGRES_DB` (defaulting to the literal `agentorange`) and `.env.example` has **zero**
+      `POSTGRES_DB` (defaulting to the literal `agentbob`) and `.env.example` has **zero**
       `POSTGRES` hits. The trap: `pg-data` initialises on first `up`, so setting a password
       afterwards re-renders `DATABASE_URL` but not the database, and agentd dies with raw gorm text
       naming neither the `postgres` service nor the stale volume. **Fix:** document all three in
@@ -587,7 +587,7 @@ Nothing below is in any wave; no executor touches them.*
   **The decision:** deleting bytes is irreversible and runs against readiness bar #2 ("nothing a
   user made disappears without them being told"). Kai chooses the retention rule (delete the
   previous blob on successful `SetSnapshotHandle`? delete on session delete? a TTL? measure first
-  and decide later?) and whether it runs against the live `webkit-servers-agent-orange` bucket.
+  and decide later?) and whether it runs against the live `webkit-servers-agent-bob` bucket.
   *Recommended first step if Kai wants one: a read-only report of orphaned blob count and total
   bytes, which is safe and answers whether this is urgent.*
 - **G2 — RD21: does applying a topology seed operations doctrine v1 into the project prompt?**

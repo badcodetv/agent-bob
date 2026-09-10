@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // projectRoutes are the routes doc 22's RD30 names as the blast radius: the

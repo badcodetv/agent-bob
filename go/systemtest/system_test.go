@@ -45,12 +45,12 @@ import (
 	"testing"
 	"time"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/mockmodel"
-	"github.com/binocarlos/badcode-agent-orange/modelproxy"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/mockmodel"
+	"github.com/badcodetv/agent-bob/modelproxy"
 )
 
 func TestMain(m *testing.M) {
@@ -461,7 +461,7 @@ func TestSystemSnapshotRestore(t *testing.T) {
 // that is required — docker-compose.test.yml also provides one, along with a
 // DinD this test does not use. Verified 2026-07-26 with:
 //
-//	docker run -d --name agentorange-test-registry -p 5001:5000 registry:2
+//	docker run -d --name agentbob-test-registry -p 5001:5000 registry:2
 //	cd go && OCIREGISTRY_URL=localhost:5001/agentkit go test -tags integration ./systemtest/ \
 //	  -run TestSystemSnapshotRestoreTrust -v -timeout 600s
 //

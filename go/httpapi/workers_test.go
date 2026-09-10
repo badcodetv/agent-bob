@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeWorkerStore is an in-memory WorkersStore keyed by project+name. It mirrors

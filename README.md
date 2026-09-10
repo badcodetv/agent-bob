@@ -1,9 +1,9 @@
-<img src="docs/assets/agent-orange.svg" alt="Agent Orange" width="100%">
+<img src="docs/assets/agent-bob.svg" alt="Agent Bob" width="100%">
 
 **Give a project a goal. It works out what team it needs, asks you to confirm, builds that team, and
 remembers everything it learns.**
 
-Agent Orange runs small teams of long-lived AI agents. Each one is a container, a prompt and a set
+Agent Bob runs small teams of long-lived AI agents. Each one is a container, a prompt and a set
 of tools. They are woken by a clock or by something happening, they do a job, and they coordinate
 through **one shared, labelled memory** — not by messaging each other. Over time the team edits
 itself: new roles get created, prompts get rewritten, and every change is recorded with a reason.
@@ -20,7 +20,7 @@ The thing a single session cannot do is **persist**. It cannot wake up on Tuesda
 newsletter did not go out, remember what happened the last three times, decide the project needs a
 proofreader it does not yet have, and create one.
 
-That is the gap Agent Orange fills. It is not a framework for splitting a task across agents. It is
+That is the gap Agent Bob fills. It is not a framework for splitting a task across agents. It is
 a runtime for an **organisation that outlives any single conversation** — and, as far as we can
 tell from the literature, almost nobody is building for that case. Every published topology system
 compiles a fresh graph per task and throws it away.
@@ -200,7 +200,7 @@ This is the standalone demo, not how you embed the engine as a library — for t
 
 | Component | Path | What it is |
 |---|---|---|
-| **Orchestration core** | [`go/`](go/) | The engine — Go module `github.com/binocarlos/badcode-agent-orange`. Session lifecycle, container control, image registry, persistence, the event pipeline, and the whole product layer. The library a host app embeds. Entry type: `Runner` in `go/agentkit.go`. |
+| **Orchestration core** | [`go/`](go/) | The engine — Go module `github.com/badcodetv/agent-bob`. Session lifecycle, container control, image registry, persistence, the event pipeline, and the whole product layer. The library a host app embeds. Entry type: `Runner` in `go/agentkit.go`. |
 | **In-image agent** | [`sandbox/`](sandbox/) | TypeScript. The HTTP/SSE control server that runs *inside* each session container, wrapping `@anthropic-ai/claude-agent-sdk`. Because the harness is the Claude Agent SDK, a worker gets subagents and parallel tool use *inside one job* for free — which is exactly where multi-agent decomposition belongs. |
 | **UI library** | [`web/`](web/) | React components: chat (one reducer renders live and replayed sessions identically) plus the product-layer pages. No router; the shell is `examples/web/`. |
 

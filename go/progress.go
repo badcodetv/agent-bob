@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // LayerProg is the per-layer byte detail surfaced to clients (mirror of

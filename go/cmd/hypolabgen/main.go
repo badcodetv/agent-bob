@@ -38,12 +38,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/hypolab"
+	"github.com/badcodetv/agent-bob/hypolab"
 )
 
 // TruthsSchema versions the truths document. Bump it when the shape changes;
 // the runner refuses a schema it does not know.
-const TruthsSchema = "agent-orange/hypolab/truths@1"
+const TruthsSchema = "agent-bob/hypolab/truths@1"
 
 // ── The manifest ────────────────────────────────────────────────────────────
 

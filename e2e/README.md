@@ -70,7 +70,7 @@ thing on 2026-07-26, twice confidently, and each time it cost hours. Read the fa
 | --- | --- | --- |
 | `cannot start session …: execution environment is at capacity` | the **host port pool is full** — see below | `./e2e/run-stack-e2e.sh clean`, re-run |
 | `session has no running instance and no snapshot` | since the port-pool fix, **what it says**: that one session is unrecoverable | investigate that session; it is no longer the capacity message in disguise |
-| `502 Bad Gateway`, `socket hang up`, `ECONNREFUSED` | agentd restarted mid-run (someone rebuilt, or it crashed) | check `docker compose -p agent-orange-stack-e2e ps`, re-run |
+| `502 Bad Gateway`, `socket hang up`, `ECONNREFUSED` | agentd restarted mid-run (someone rebuilt, or it crashed) | check `docker compose -p agent-bob-stack-e2e ps`, re-run |
 | `no stack listening at …` | agentd is down, often after a `clean` that raced Docker | bring it back, then re-run |
 | `timed out after Nms waiting for …` | ambiguous — read the "last value" in the message | if it shows `status: "failed"` deliveries, suspect the stack; otherwise investigate |
 | an `expect(…)` assertion diff | **a real failure** | investigate; do not re-run and hope |
@@ -123,7 +123,7 @@ built before 2026-07-26 02:33 predates the fix, and this is not academic: the st
 after that fix merged had been built nine minutes too early.
 
 ```sh
-docker compose -p agent-orange-stack-e2e exec -T agentd \
+docker compose -p agent-bob-stack-e2e exec -T agentd \
   sh -c 'strings /usr/local/bin/agentd' | grep -c 'host port pool is exhausted'   # 1 = fix present
 ```
 
@@ -167,8 +167,8 @@ releases its schedule in a `finally`.
 Still the first thing to check when provisioning fails:
 
 ```sh
-docker compose -p agent-orange-stack-e2e exec -T postgres \
-  psql -U agentorange -d agentorange -At \
+docker compose -p agent-bob-stack-e2e exec -T postgres \
+  psql -U agentbob -d agentbob -At \
   -c "select id, worker, provision_failures, enabled from schedules where enabled;"
 ```
 
@@ -216,7 +216,7 @@ gate. It reuses `helpers/api.ts` verbatim and obeys the same rules about polling
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.stack-e2e.yml \
-  -p agent-orange-stack-e2e up -d --build web
+  -p agent-bob-stack-e2e up -d --build web
 ```
 
 Feature specs are plain HTTP against the running stack — the whole `features/` directory runs in

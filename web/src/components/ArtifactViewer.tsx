@@ -595,7 +595,7 @@ function WebappRenderer({
     // iframe running with `allow-scripts allow-same-origin` — i.e. reachable by
     // agent-authored JS — and into every access log and Referer along the way.
     // The route it pointed at does not exist in this repo either, so nothing is
-    // lost by dropping it (design/2026-08-06-embeddable-agent-orange.md, T13 and
+    // lost by dropping it (design/2026-08-06-embeddable-agent-bob.md, T13 and
     // its Out of Scope entry: building that route is a separate decision).
     return `${apiBaseUrl}/agent/session/${sessionId}/workspace/files/${filePath}`
   }, [artifact, sessionId, apiBaseUrl])

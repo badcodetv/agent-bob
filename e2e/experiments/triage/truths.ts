@@ -14,7 +14,7 @@ import * as path from 'node:path'
 import { ESCALATE, QUEUES } from './route'
 
 /** The schema triagelabgen stamps; anything else is refused. */
-export const TRUTHS_SCHEMA = 'agent-orange/triagelab/truths@1'
+export const TRUTHS_SCHEMA = 'agent-bob/triagelab/truths@1'
 
 /** One ticket as the generator recorded it. */
 export interface Ticket {

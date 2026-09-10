@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentkittest"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentkittest"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // pausingRegistry blocks EnsurePresent — the image pull — until released. It

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/execenv"
 )
 
 // runningSession provisions a real (mock-backed) instance so ExecInSession has

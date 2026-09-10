@@ -93,8 +93,8 @@ then, from the repo root:
 
 ```sh
 docker build -t agentkit-sandbox:dev sandbox                                   # the harness/base
-docker build -f installations/core/Dockerfile    --build-arg BASE_IMAGE=agentkit-sandbox:dev -t agent-orange-core:dev    installations/core
-docker build -f installations/example/Dockerfile --build-arg BASE_IMAGE=agent-orange-core:dev -t agent-orange-example:dev installations/example
+docker build -f installations/core/Dockerfile    --build-arg BASE_IMAGE=agentkit-sandbox:dev -t agent-bob-core:dev    installations/core
+docker build -f installations/example/Dockerfile --build-arg BASE_IMAGE=agent-bob-core:dev -t agent-bob-example:dev installations/example
 ```
 
 Build the ancestor chain before the target (sandbox → core → example, above). The `imagetree`
@@ -154,10 +154,10 @@ AO_IMAGE_TAG=dev ./stack start mock            # or set BASE_IMAGE=<full registr
 daemon, not on your host — sessions run there, and with the default
 `blobarchive` registry `EnsurePresent` is a no-op, so nothing pulls it. The
 stack only builds the *sandbox harness* into DinD (`init-sandbox`); it does not
-build `core`/`example`. So a host-built `agent-orange-example:dev` is invisible
+build `core`/`example`. So a host-built `agent-bob-example:dev` is invisible
 to sessions.
 
-> **This section used to say** `echo "BASE_IMAGE=agent-orange-example:dev" >> .env`
+> **This section used to say** `echo "BASE_IMAGE=agent-bob-example:dev" >> .env`
 > followed by `docker compose up --build`. That did not work: the host-built image
 > never reached DinD, *and* `init-sandbox` built the bare harness and tagged it
 > with your name, so sessions started successfully from an image with none of your

@@ -7,13 +7,13 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: agent-orange
+  name: agent-bob
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agent-orange-config
-  namespace: agent-orange
+  name: agent-bob-config
+  namespace: agent-bob
 data:
   # ── EDIT THESE ──────────────────────────────────────────────────────────
 
@@ -22,15 +22,15 @@ data:
   public-base-url: "https://orange.example.com"
 
   # The session base image published by deploy/publish-base.sh. Prefer the
-  # specific tag over :latest — Agent Orange records the digest each session
+  # specific tag over :latest — Agent Bob records the digest each session
   # actually launched from, and a moving tag makes that record the only way to
   # tell two different environments apart.
-  base-image: "europe-west1-docker.pkg.dev/webkit-servers/agent-orange/session-core:latest"
+  base-image: "europe-west1-docker.pkg.dev/webkit-servers/agent-bob/session-core:latest"
 
   gcp-project: "webkit-servers"
   gcp-region: "europe-west1"
-  gcp-ar-repo: "agent-orange"
-  gcs-bucket: "webkit-servers-agent-orange"
+  gcp-ar-repo: "agent-bob"
+  gcs-bucket: "webkit-servers-agent-bob"
 
   # ── OPTIONAL ────────────────────────────────────────────────────────────
 

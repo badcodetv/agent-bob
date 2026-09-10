@@ -14,8 +14,8 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: agent-orange
-  namespace: agent-orange
+  name: agent-bob
+  namespace: agent-bob
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod   # check yours: kubectl get clusterissuers
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
@@ -28,7 +28,7 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts: [orange.example.com]     # EDIT
-      secretName: agent-orange-tls
+      secretName: agent-bob-tls
   rules:
     - host: orange.example.com        # EDIT
       http:

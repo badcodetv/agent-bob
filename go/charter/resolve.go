@@ -12,9 +12,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
-	"github.com/binocarlos/badcode-agent-orange/topology"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/orgprompts"
+	"github.com/badcodetv/agent-bob/topology"
 )
 
 // RegistrySelector is the label selector that reads the project's label

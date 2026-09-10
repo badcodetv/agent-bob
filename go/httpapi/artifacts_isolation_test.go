@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // TestArtifactRoutesAreProjectScoped is the §12 negative test at the HTTP edge.

@@ -1,4 +1,4 @@
-# Run Agent Orange as a standalone stack
+# Run Agent Bob as a standalone stack
 
 One command brings up the whole thing — API, a chat UI, and the container runtime.
 
@@ -183,7 +183,7 @@ Different, and it is a short list:
 | | Local | Deployed |
 | --- | --- | --- |
 | origins | `localhost:8080` / `localhost:8081` | your domains |
-| `ORANGE_BASE_URL` | `http://localhost:8099` (same netns as DinD) | a service address |
+| `BOB_BASE_URL` | `http://localhost:8099` (same netns as DinD) | a service address |
 | `WOLF_MCP_URL` | DinD's inner `docker0` address | a service address |
 | snapshots | local disk, unless `--gcs` | GCS |
 
@@ -322,7 +322,7 @@ new session until restarted. The script does the restart for you.
 Set `BASE_IMAGE` in `.env` to your own image (built on `agentkit-sandbox`). See
 `docs/15-standalone-stack.md` for the app-image contract and per-app plugins.
 
-## This is NOT how you embed Agent Orange as a library
+## This is NOT how you embed Agent Bob as a library
 
-If you want to integrate Agent Orange *into your own Go server*, you do NOT run this
+If you want to integrate Agent Bob *into your own Go server*, you do NOT run this
 stack — see `docs/15-standalone-stack.md` → "Library vs standalone".

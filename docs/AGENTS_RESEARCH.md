@@ -5,7 +5,7 @@ research in §§1–7 stands as written; what changed is that it stopped being a
 previously said "nothing here is built yet", which was true when written and had been false for
 days — see [§8](#8-the-research-map) for what exists now and where it lives.*
 
-**This is the single entry point for Agent Orange's agent research.** Two workstreams ran in
+**This is the single entry point for Agent Bob's agent research.** Two workstreams ran in
 parallel across separate sessions — the self-improvement/measurement line (this file and its
 downstream docs) and the operator-console line (docs 15/16/21). They did not duplicate each other
 and they have not contradicted each other; §8 is the map, including where they met.
@@ -15,7 +15,7 @@ question — that answer is in [§1](#1-model-credentials-and-subscription-oauth
 the literature review behind the self-improvement test harness, so the design choices have their
 reasons attached rather than being folk wisdom six months from now.
 
-The motivating question: **Agent Orange's §8.7 acceptance loop demonstrably runs — a worker
+The motivating question: **Agent Bob's §8.7 acceptance loop demonstrably runs — a worker
 rewrites another worker's prompt with a rationale, and the next job uses it. Nothing measures
 whether it *improves* anything.** Proving the loop closes is not the same as proving it helps, and
 the gap between those two claims is where this document lives.
@@ -149,7 +149,7 @@ Three things must be frozen together; freezing one or two is the same as freezin
 
 ### Channels that unfreeze a scorer in *our* architecture
 
-Agent Orange makes several of these easy to create by accident, because the product layer is
+Agent Bob makes several of these easy to create by accident, because the product layer is
 deliberately built for workers to reconfigure each other:
 
 | Channel | Why it leaks | Containment |
@@ -169,7 +169,7 @@ whether or not anyone intended them as targets.
 
 ## 5. Proposed harness
 
-**Tier 1 — the loop under test.** A real Agent Orange project. A worker whose system prompt starts
+**Tier 1 — the loop under test.** A real Agent Bob project. A worker whose system prompt starts
 near-empty, a critic worker that reads outputs and calls `worker_prompt_write` with a rationale, a
 schedule driving rounds. P8 (append-only) means the config log *is* the experiment record —
 complete prompt lineage, free, with no extra instrumentation.

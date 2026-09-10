@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,9 +321,9 @@ func resolveSubfolder(explicit, fromSettings, def string) (string, error) {
 // not disturb determinism.
 func readme() string {
 	var b strings.Builder
-	b.WriteString("# Agent Orange\n")
+	b.WriteString("# Agent Bob\n")
 	b.WriteString("\n")
-	b.WriteString("This folder is written by Agent Orange. It is the published record of one\n")
+	b.WriteString("This folder is written by Agent Bob. It is the published record of one\n")
 	b.WriteString("project's configuration: its prompts, workers, skills, triggers, images and\n")
 	b.WriteString("named documents, as the running system holds them.\n")
 	b.WriteString("\n")
@@ -348,7 +348,7 @@ func readme() string {
 	b.WriteString("— and its token — at a repository they control, or decide which secret has to\n")
 	b.WriteString("sign an inbound delivery for it to be believed.\n")
 	b.WriteString("\n")
-	b.WriteString("Do not hand-write files here that Agent Orange did not write: anything outside\n")
+	b.WriteString("Do not hand-write files here that Agent Bob did not write: anything outside\n")
 	b.WriteString("the layout above is not read, and this file itself is regenerated.\n")
 	return b.String()
 }

@@ -1,13 +1,13 @@
 # 01 — Architecture
 
-Agent Orange is a reusable runtime for container-backed AI agent sessions. This document is the
+Agent Bob is a reusable runtime for container-backed AI agent sessions. This document is the
 map: the durable thesis behind the design, the layered picture, the package layout as it actually
 ships, and how a message turn and a session's lifecycle flow through it. Read it first, then the
 per-subsystem docs listed at the end.
 
 ## Two layers — read this before anything else
 
-Agent Orange is **two stacked systems**, and this document describes only the lower one.
+Agent Bob is **two stacked systems**, and this document describes only the lower one.
 
 | | **Engine** (this doc set, `docs/01`–`docs/15`) | **Product layer** (`docs/product/`, `docs/18`) |
 |---|---|---|
@@ -230,7 +230,7 @@ go/
   examples/                # standalone, mockproxy, exampleimage
 ```
 
-The module is self-contained: its path is `github.com/binocarlos/badcode-agent-orange` and it imports
+The module is self-contained: its path is `github.com/badcodetv/agent-bob` and it imports
 nothing from any host app (CI enforces this). The `httpapi` package *does* ship mountable HTTP
 handlers, but they are optional — the library is embedded, not run as a service of its own.
 

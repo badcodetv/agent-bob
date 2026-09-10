@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/agentkittest"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	dockerdind "github.com/binocarlos/badcode-agent-orange/execenv/docker"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/agentkittest"
+	"github.com/badcodetv/agent-bob/artifacts"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/execenv"
+	dockerdind "github.com/badcodetv/agent-bob/execenv/docker"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // Session garbage collection: the archive loop (idle container → snapshot →

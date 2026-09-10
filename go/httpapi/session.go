@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 type createSessionBody struct {

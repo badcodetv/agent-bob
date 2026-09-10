@@ -12,7 +12,7 @@ like §7.6 or §8.8 anywhere in the repo still resolve — the entry point has t
 
 ### 15.1 Why — P8, applied to the last mutable thing
 
-**P8 (§1.3): nothing in Agent Orange is ever destructively updated; current state is always a view
+**P8 (§1.3): nothing in Agent Bob is ever destructively updated; current state is always a view
 over an append-only history.** Most substrates already obeyed it before it was named: memories are
 append-only and immutable by construction (§7.1), session transcripts are immutable records of what
 happened, images are `name:version` records that are never overwritten

@@ -96,8 +96,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // gitBootstrapper creates a project's configuration from a folder. It holds no

@@ -31,7 +31,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/charter"
+	"github.com/badcodetv/agent-bob/charter"
 )
 
 // charterTools has no store: validation is pure. It is registered inside

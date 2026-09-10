@@ -37,8 +37,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/extension/embedding"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/extension/embedding"
 )
 
 // memoryStore is the narrow slice of *agentdb.Store the tools need. Note what

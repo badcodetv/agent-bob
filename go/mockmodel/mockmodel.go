@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/modelproxy"
+	"github.com/badcodetv/agent-bob/modelproxy"
 )
 
 // Block, Turn and Script are the scripted-mock wire shapes. They are aliases of

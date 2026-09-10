@@ -207,7 +207,7 @@ const writeKey = (w: BenchPromptWrite, promptAfter: string): string =>
 
 /**
  * Read a comparison-rig `report.json` (schema
- * `agent-orange/experiments/compare-report@1`).
+ * `agent-bob/experiments/compare-report@1`).
  *
  * Accepts either the parsed object or the raw JSON text. Throws an `Error`
  * whose message is meant to be shown to the operator when the input is not a
@@ -225,9 +225,9 @@ export function parseBenchReport(input: unknown): BenchReport {
   if (!isObj(raw)) throw new Error('That file is not a comparison report.')
 
   const schema = str(raw.schema)
-  if (!schema.startsWith('agent-orange/experiments/compare-report')) {
+  if (!schema.startsWith('agent-bob/experiments/compare-report')) {
     throw new Error(
-      `That file is not a comparison report — expected schema "agent-orange/experiments/compare-report@1", found ${
+      `That file is not a comparison report — expected schema "agent-bob/experiments/compare-report@1", found ${
         schema === '' ? 'none' : `"${schema}"`
       }.`,
     )

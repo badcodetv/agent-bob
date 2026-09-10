@@ -54,7 +54,7 @@ async function run(reduced) {
     recordVideo: { dir: `${OUT}/video-${tag}`, size: { width: 1440, height: 900 } },
   })
   const page = await ctx.newPage()
-  await page.addInitScript((a) => localStorage.setItem('agent-orange-auth', a), auth)
+  await page.addInitScript((a) => localStorage.setItem('agent-bob-auth', a), auth)
   await fetch(`${BASE}/__reset`).catch(() => {})
   await page.goto(BASE)
   await page.waitForTimeout(1500)

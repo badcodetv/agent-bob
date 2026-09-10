@@ -21,9 +21,9 @@ import (
 	dockertypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry/auth"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
+	"github.com/badcodetv/agent-bob/imageregistry/auth"
 )
 
 const (

@@ -27,7 +27,7 @@ import (
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	"github.com/badcodetv/agent-bob/extension"
 )
 
 // Config configures a GCS-backed BlobStoreFactory.
@@ -36,7 +36,7 @@ type Config struct {
 	// this package never creates buckets.
 	Bucket string
 	// Prefix is an optional key prefix applied to every object, letting several
-	// deployments share one bucket (e.g. "agent-orange/prod"). Leading/trailing
+	// deployments share one bucket (e.g. "agent-bob/prod"). Leading/trailing
 	// slashes are ignored.
 	Prefix string
 }

@@ -16,8 +16,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/extension/devclaims"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -440,7 +440,7 @@ func authGoogleHandler(v *googleVerifier, pm projectMap, issuer *devclaims.Issue
 }
 
 // verifyResponse is everything POST /auth/verify-google returns. Two fields, on
-// purpose: Agent Orange verifies an identity for an embedding application and
+// purpose: Agent Bob verifies an identity for an embedding application and
 // stops there. It mints no token, grants no project and creates no user row —
 // the embedding app owns its own allowlist and its own sessions (see the design
 // doc's rejected alternative "Wolf runs its own Google OAuth").
@@ -455,7 +455,7 @@ type verifyResponse struct {
 
 // authVerifyGoogleHandler serves POST /auth/verify-google {credential} →
 // {email, email_verified}. It is the identity seam for an application that
-// embeds Agent Orange: the app's backend hands over the Google ID token its
+// embeds Agent Bob: the app's backend hands over the Google ID token its
 // user signed in with, Orange says whose it is, and the app decides — from its
 // own allowlist — whether that person may do anything. Orange deliberately does
 // not become an identity provider.

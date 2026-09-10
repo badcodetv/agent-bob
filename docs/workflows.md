@@ -1,7 +1,7 @@
 # Workflows: what to build here, and what to build somewhere else
 
 You have a job you want a team of agents to do. This page says how to express it
-in Agent Orange — or, for a handful of jobs, that you should not.
+in Agent Bob — or, for a handful of jobs, that you should not.
 
 It is the readable half of [`product/25-cooperative-patterns.md`](product/25-cooperative-patterns.md),
 which judged 38 published cooperative workflow patterns against this codebase and
@@ -231,7 +231,7 @@ can route around a decision that is not in the model's control loop — which is
 the only property in this whole area that does not depend on the model behaving.
 
 This does not conflict with the product's "no approval queues" position. The
-queue is not in Agent Orange, and Agent Orange never learns that an approval
+queue is not in Agent Bob, and Agent Bob never learns that an approval
 happened: the worker calls a tool, the tool returns, the job ends. What you
 build is an ordinary MCP server that happens to be slow to say yes.
 

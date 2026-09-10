@@ -57,12 +57,12 @@ readable record. **The only thing given up is the slogan.**
 
    <the rationale, verbatim>
 
-   Orange-Project: wolf
-   Orange-Seq: 1247
-   Orange-Event: 7f3c…
-   Orange-Action: worker_prompt_write
-   Orange-Actor-Worker: architect
-   Orange-Actor-Session: sess-…
+   Bob-Project: wolf
+   Bob-Seq: 1247
+   Bob-Event: 7f3c…
+   Bob-Action: worker_prompt_write
+   Bob-Actor-Worker: architect
+   Bob-Actor-Session: sess-…
    ```
 
    The commit **author** is a fixed bot identity on purpose, so nothing ever looks attributed to a
@@ -277,7 +277,7 @@ because both are append-only. A skill's `revision` restarts at 1, which is corre
 | `go/httpapi/gitprojectionstatus.go` | What the console reads |
 
 **If you change the trailer format, read DI4 first.** Rationales are model-written, git parses the
-last paragraph of a message as trailers, and `Orange-Seq:` is the field that decides whose commit a
+last paragraph of a message as trailers, and `Bob-Seq:` is the field that decides whose commit a
 commit is. The defence is that our trailer block is always emitted last and is never empty. **Never
 read trailers by grepping the commit message** — a grep passes every test written from our own
 commits and re-opens the hole completely.

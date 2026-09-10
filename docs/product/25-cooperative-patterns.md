@@ -17,7 +17,7 @@ The executable follow-up — tests, gaps, and the order to do them in — is
 > **Superseded in one respect (2026-08-08).** The catalogue below stands, and §6's audit of its own
 > sourcing is the most useful page in it. But §5's conclusion — *"the one change that unlocks the
 > most patterns is `go/cmd/agentd/mcp_events.go`"* — has been **withdrawn**. That was the right
-> answer for this pattern space and the wrong one for this product: Agent Orange coordinates through
+> answer for this pattern space and the wrong one for this product: Agent Bob coordinates through
 > shared memory and a clock, not through a general event mesh, so the tools that unlock the most
 > patterns unlock patterns we have decided not to build. See
 > [`27-simplification-inventory.md`](27-simplification-inventory.md) §1.
@@ -328,7 +328,7 @@ text is the whole rendered transcript, uncapped (runner.go:2301-2317), so any do
 the auditor delivers its full reasoning verbatim between the data-not-instructions markers
 (compose.go:485+). Both mitigations are prompt-only, i.e. they hold exactly as long as the model
 behaves. Cost of the honest version: the instrument is not a worker at all — it is harness code plus
-HTTP, so the loop is only half expressed in Agent Orange and the audit cadence lives outside the
+HTTP, so the loop is only half expressed in Agent Bob and the audit cadence lives outside the
 config log.
 
 **Sharpest assertion.** With `copy-audit` frozen:true, a `copy-writer` job calling
@@ -380,7 +380,7 @@ locked anchor set: no POST /agent/memories in go/httpapi/, and no user-authorabl
 go/topology/registry.go.
 
 **How it fails here.** The pattern needs an instrument that ONE loop may evolve and no other may
-touch. Agent Orange has exactly one authority primitive and it is all-or-nothing: `frozen` refuses
+touch. Agent Bob has exactly one authority primitive and it is all-or-nothing: `frozen` refuses
 every worker's write (cmd/agentd/mcp_management.go:761-792), there is no writable_by / owner field
 on the worker row (agentdb/workers.go:78-110), and there is no per-caller check in
 worker_prompt_write. So either `scorer.frozen = true` and rubric-smith cannot evolve it (the
@@ -3071,7 +3071,7 @@ unexamined rather than inventing one.
 
 ## 5. The adversarial fit review
 
-Agent Orange is an unusually good substrate for the STRUCTURAL half of this pattern space and a weak
+Agent Bob is an unusually good substrate for the STRUCTURAL half of this pattern space and a weak
 one for the EVIDENTIAL half. Nodes, edges, a clock, one flat shared state, and — the genuinely rare
 part — a fully rewritable, config-logged, attributed, self-routable org chart mean that most
 cooperative topologies people actually run are expressible today, in configuration, with no engine

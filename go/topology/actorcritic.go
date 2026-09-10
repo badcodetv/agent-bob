@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Actor-critic's question IDs, named so tests and the e2e don't scatter string

@@ -31,7 +31,7 @@ the "three places the memory schema lives" problem).
 
 ### The idea
 
-Agent Orange's product thesis is a self-revising organisation: an **architect**
+Agent Bob's product thesis is a self-revising organisation: an **architect**
 that asks, on a clock, *"given the goal and what has actually happened, how
 should this organisation change?"* Everything else — onboarding, the org chart,
 the console — exists to give that loop something to work on.

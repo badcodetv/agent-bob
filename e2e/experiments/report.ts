@@ -239,7 +239,7 @@ export function renderTable(
 // ── The committed artifact ──────────────────────────────────────────────────
 
 /** The report document's schema id — bump it when the shape changes. */
-export const REPORT_SCHEMA = 'agent-orange/experiments/compare-report@1'
+export const REPORT_SCHEMA = 'agent-bob/experiments/compare-report@1'
 
 export interface ReportInput {
   task: {

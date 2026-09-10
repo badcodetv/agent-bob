@@ -1,7 +1,7 @@
 package main
 
 // mcp_sessions.go — the session-provenance MCP tool
-// (design/2026-08-06-embeddable-agent-orange.md, T16), registered onto the host
+// (design/2026-08-06-embeddable-agent-bob.md, T16), registered onto the host
 // MCP server in mcpserver.go.
 //
 // The whole surface is ONE tool:
@@ -54,7 +54,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // sessionListStore is the narrow read seam: one method, no writes and no way to

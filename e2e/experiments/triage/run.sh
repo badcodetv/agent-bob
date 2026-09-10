@@ -32,7 +32,7 @@ WEB_URL="${STACK_BASE_URL:-http://localhost:8080}"
 MODE_FILE="$E2E/.stack-e2e-mode"
 DIST="$EXPERIMENTS/dist/experiments/triage"
 COMPOSE=(docker compose -f "$ROOT/docker-compose.yml" -f "$ROOT/docker-compose.stack-e2e.yml"
-  --project-name "${STACK_COMPOSE_PROJECT:-agent-orange-stack-e2e}")
+  --project-name "${STACK_COMPOSE_PROJECT:-agent-bob-stack-e2e}")
 
 build() { "$EXPERIMENTS/run.sh" build; }
 

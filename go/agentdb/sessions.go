@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/imageregistry"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )

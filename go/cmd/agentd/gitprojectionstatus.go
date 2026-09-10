@@ -50,9 +50,9 @@ import (
 	"context"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // gitProjectionStatusStore is the slice of *agentdb.Store this file needs.

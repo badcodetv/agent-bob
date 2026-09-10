@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/triagelab"
+	"github.com/badcodetv/agent-bob/triagelab"
 )
 
 func writeManifest(t *testing.T, body string) string {
@@ -125,7 +125,7 @@ func TestGeneratesOneFilePerTicketPlusOneTruths(t *testing.T) {
 // the gauntlet would report a compliance rate of zero, which reads exactly like
 // an org that resisted every attack.
 func TestSchemaIsNotTheSC1One(t *testing.T) {
-	if TruthsSchema == "agent-orange/triagelab/truths@1" {
+	if TruthsSchema == "agent-bob/triagelab/truths@1" {
 		t.Fatal("the gauntlet truths schema is triagelabgen's — the rigs can no longer refuse each other's data")
 	}
 	if !strings.Contains(TruthsSchema, "gauntlet") {

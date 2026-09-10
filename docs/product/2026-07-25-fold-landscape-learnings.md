@@ -12,7 +12,7 @@ Relates: `docs/product/2026-07-22-landscape-learnings.md` (the L1–L33 catalogu
 
 ## Context
 
-A verified landscape survey (2026-07) concluded no existing project covers Agent Orange's shape,
+A verified landscape survey (2026-07) concluded no existing project covers Agent Bob's shape,
 then five mechanism-extraction dives produced 33 candidate learnings (L1–L33) catalogued in
 `docs/product/2026-07-22-landscape-learnings.md`. Kai interviewed through them (2026-07-25).
 This plan folds the **accepted** items into the spec docs. It is a **docs-only change** — no

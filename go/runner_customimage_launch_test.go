@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 type fakeCustomImages struct {

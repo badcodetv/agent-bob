@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ProjectSettingsStore is the store seam behind GET/PUT /agent/project-settings

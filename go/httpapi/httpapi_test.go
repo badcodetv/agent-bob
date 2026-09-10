@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange"
+	"github.com/badcodetv/agent-bob"
 )
 
 func TestNewRequiresRunnerAndIdentity(t *testing.T) {

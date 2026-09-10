@@ -20,7 +20,7 @@ import (
 	dockertypes "github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
+	"github.com/badcodetv/agent-bob/execenv"
 )
 
 // SocketConfig configures the socket adapter.

@@ -1,6 +1,6 @@
 package httpapi
 
-// Session names (T7 of design/2026-08-06-embeddable-agent-orange.md).
+// Session names (T7 of design/2026-08-06-embeddable-agent-bob.md).
 //
 //	GET /agent/sessions/by-name/{name}
 //	  auth : project API key or console JWT, and — deliberately — an embed token
@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // SessionNameStore is the slice of agentdb.Store the naming routes need.

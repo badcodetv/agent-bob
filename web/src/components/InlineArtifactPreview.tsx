@@ -187,7 +187,7 @@ export default function InlineArtifactPreview({
     // WebappRenderer, and for the same reason: `/webapp/{session}/{JWT}/{path}`
     // put a full-project bearer token in the address bar of an iframe that runs
     // agent-authored scripts with `allow-same-origin`, and the route it named
-    // does not exist here (design/2026-08-06-embeddable-agent-orange.md, T13).
+    // does not exist here (design/2026-08-06-embeddable-agent-bob.md, T13).
     const iframeSrc = `${apiBaseUrl}/agent/session/${sessionId}/workspace/files/${filePath}`
 
     return (

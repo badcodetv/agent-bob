@@ -52,8 +52,8 @@ import (
 	"strings"
 	"time"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // skillStore is the narrow slice of *agentdb.Store the tools need. Note what is

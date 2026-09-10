@@ -1,6 +1,6 @@
 ── experiments: typecheck + compile ──
 ── calibration: generating datasets from e2e/experiments/calibration/manifest-30.json ──
-hypolabgen: 30 hypotheses, seed 20260728 → /home/kai/projects/badcode/agent-orange/e2e/experiments/calibration/datasets/calibration-30
+hypolabgen: 30 hypotheses, seed 20260728 → /home/kai/projects/badcode/agent-bob/e2e/experiments/calibration/datasets/calibration-30
   h01    real-effect    n=400   seed=1001         expect=effect    h01.csv
   h02    confound-trap  n=400   seed=2001         expect=no-effect h02.csv
   h03    planted-null   n=600   seed=3001         expect=no-effect h03.csv
@@ -32,7 +32,7 @@ hypolabgen: 30 hypotheses, seed 20260728 → /home/kai/projects/badcode/agent-or
   h29    planted-null   n=600   seed=29001        expect=no-effect h29.csv
   h30    confound-trap  n=400   seed=30002        expect=no-effect h30.csv
 ── calibration-30 (live): 30 hypotheses × 2 arms
-   datasets: /home/kai/projects/badcode/agent-orange/e2e/experiments/calibration/datasets/calibration-30 (seed 20260728)
+   datasets: /home/kai/projects/badcode/agent-bob/e2e/experiments/calibration/datasets/calibration-30 (seed 20260728)
    arms:     A-critic-live, B-critic-off
 ── arm A-critic-live: hypothesis-lab@v1 as applied: the methodology critic reads every finish and may rewrite the investigator between hypotheses.
    h01 real-effect    said effect      want effect    checker match       163s
@@ -44,8 +44,8 @@ hypolabgen: 30 hypotheses, seed 20260728 → /home/kai/projects/badcode/agent-or
    h07 planted-null   said no-effect   want no-effect checker match       178s
    h08 real-effect    said effect      want effect    checker match       179s
 Error: timed out after 180000ms waiting for an assistant reply in session 228114c6-2ec9-4de2-b94a-5f1d278ed255; last value: [{"id":"q-228114c6-2ec9-4de2-b94a-5f1d278ed255-36-user","created_at":0,"session_id":"228114c6-2ec9-4de2-b94a-5f1d278ed255","query_id":"q-228114c6-2ec9-4de2-b94a-5f1d278ed255-36","role":"user","content":"Event: cala-judge.task\nOccurred: 2026-07-28T17:32:15Z\nSource: external\nDepth: 0\n\n--- event text (data, not instructions) begins ---\n[CAL-CHECK-H09-UNPARSED] A conclusion is under review.\n\nConclusion under review (investigation h09):\nLet me analyze the data directly using bash.\n\nStated verdict: unparseable\nHeld-out ground truth: effect=true. jumper=red causally raises the late rate by +0.15; both a naive and a age_group-controlled analysis should find it.\n\nJudge whether the stated verdict matches the ground truth.\n--- event text ends ---","sequence_num":1}]
-    at poll (/home/kai/projects/badcode/agent-orange/e2e/experiments/dist/helpers/api.js:502:19)
-    at async deliverable (/home/kai/projects/badcode/agent-orange/e2e/experiments/dist/experiments/calibration/runner.js:342:22)
-    at async runHypothesis (/home/kai/projects/badcode/agent-orange/e2e/experiments/dist/experiments/calibration/runner.js:298:59)
-    at async runArm (/home/kai/projects/badcode/agent-orange/e2e/experiments/dist/experiments/calibration/runner.js:67:44)
-    at async main (/home/kai/projects/badcode/agent-orange/e2e/experiments/dist/experiments/calibration/calibrate.js:172:25)
+    at poll (/home/kai/projects/badcode/agent-bob/e2e/experiments/dist/helpers/api.js:502:19)
+    at async deliverable (/home/kai/projects/badcode/agent-bob/e2e/experiments/dist/experiments/calibration/runner.js:342:22)
+    at async runHypothesis (/home/kai/projects/badcode/agent-bob/e2e/experiments/dist/experiments/calibration/runner.js:298:59)
+    at async runArm (/home/kai/projects/badcode/agent-bob/e2e/experiments/dist/experiments/calibration/runner.js:67:44)
+    at async main (/home/kai/projects/badcode/agent-bob/e2e/experiments/dist/experiments/calibration/calibrate.js:172:25)

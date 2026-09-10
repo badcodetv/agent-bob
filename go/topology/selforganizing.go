@@ -28,7 +28,7 @@ package topology
 import (
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Self-organizing's question IDs.

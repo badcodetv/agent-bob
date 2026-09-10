@@ -14,10 +14,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/events"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/events"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // MemStore is an in-memory RunnerStore and fleet.WorkerStore for tests.

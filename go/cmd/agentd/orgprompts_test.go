@@ -18,7 +18,7 @@ package main
 //
 // NAME MAPPING. In a prompt a tool is written bare — `memory_search`. In the
 // running harness the same tool is addressed as
-// `mcp__<server>__<tool>`, e.g. `mcp__agent-orange__memory_search`, where the
+// `mcp__<server>__<tool>`, e.g. `mcp__agent-bob__memory_search`, where the
 // server segment is coreMCPServerName. This test compares bare names, and
 // strips that prefix if a prompt ever writes one out in full.
 
@@ -29,8 +29,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/charter"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
+	"github.com/badcodetv/agent-bob/charter"
+	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
 // coreToolsForPromptAssertions rebuilds the list main.go registers inside its

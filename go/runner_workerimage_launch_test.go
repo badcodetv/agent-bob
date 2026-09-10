@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // This file reuses compose_test.go's stubImageResolver: composition and the

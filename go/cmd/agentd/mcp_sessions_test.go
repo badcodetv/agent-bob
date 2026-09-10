@@ -6,12 +6,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ---------------------------------------------------------------------------
 // T16 — `session_list`
-// (design/2026-08-06-embeddable-agent-orange.md).
+// (design/2026-08-06-embeddable-agent-bob.md).
 //
 // What is worth a test here is the same short list every core tool answers to:
 // the project scope comes from the token and cannot be argued about; the worker

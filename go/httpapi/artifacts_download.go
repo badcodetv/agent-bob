@@ -1,6 +1,6 @@
 package httpapi
 
-// Artifact bytes over HTTP (T8 of design/2026-08-06-embeddable-agent-orange.md).
+// Artifact bytes over HTTP (T8 of design/2026-08-06-embeddable-agent-bob.md).
 //
 //	GET /agent/artifacts/{id}/download
 //	GET /agent/sessions/by-name/{name}/artifacts
@@ -28,8 +28,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // ArtifactPathStore resolves the (session id, file path) dedup key to an

@@ -27,9 +27,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/charter"
-	"github.com/binocarlos/badcode-agent-orange/topology"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/charter"
+	"github.com/badcodetv/agent-bob/topology"
 )
 
 // charterMissing is the 404 body. It is a sentence rather than a code because

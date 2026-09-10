@@ -13,10 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/charter"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
-	"github.com/binocarlos/badcode-agent-orange/topology"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/charter"
+	"github.com/badcodetv/agent-bob/orgprompts"
+	"github.com/badcodetv/agent-bob/topology"
 )
 
 const charterDeposit = `Charter v1: a weekly newsletter, judged on it going out.

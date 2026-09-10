@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange"
+	"github.com/badcodetv/agent-bob"
 )
 
 func TestCreateSession_ForwardsCustomImageID(t *testing.T) {

@@ -31,9 +31,9 @@ import (
 
 	"github.com/docker/docker/client"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/extension"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/extension"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 const (

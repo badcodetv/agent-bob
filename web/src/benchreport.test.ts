@@ -20,7 +20,7 @@ describe('parseBenchReport', () => {
   const report = parseBenchReport(fixture)
 
   it('reads the task header', () => {
-    expect(report.schema).toBe('agent-orange/experiments/compare-report@1')
+    expect(report.schema).toBe('agent-bob/experiments/compare-report@1')
     expect(report.task).toMatchObject({
       id: 'actor-critic-vs-sham-vs-solo',
       rounds: 2,
@@ -110,7 +110,7 @@ describe('parseBenchReport', () => {
   })
 
   it('tolerates a report with no ranking or summaries', () => {
-    const bare = parseBenchReport({ schema: 'agent-orange/experiments/compare-report@1' })
+    const bare = parseBenchReport({ schema: 'agent-bob/experiments/compare-report@1' })
     expect(bare.rows).toEqual([])
     expect(bare.metricColumns).toEqual([])
     expect(bare.hasSpread).toBe(false)

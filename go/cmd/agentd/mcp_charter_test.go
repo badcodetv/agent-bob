@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/charter"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/charter"
+	"github.com/badcodetv/agent-bob/httpapi"
+	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
 // ---------------------------------------------------------------------------

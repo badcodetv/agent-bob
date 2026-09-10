@@ -17,7 +17,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // AttentionStore is the slice of agentdb.Store this route needs. It exists so a

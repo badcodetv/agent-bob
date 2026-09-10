@@ -408,7 +408,7 @@ rulings on 2026-08-21 added to the plan (R100 and R91). Five tickets, five passe
 - **Assumed:** Added four lines to the quickstart: it previously said WOLF_MCP_TOKEN was the only required variable, and after this ticket `docker compose up` fails at boot on three more. Leaving a documented quickstart that cannot boot seemed worse than the small out-of-list edit.
 - **Reversibility:** trivial
 
-### W8.42 ORANGE_BASE_URL validation
+### W8.42 BOB_BASE_URL validation
 
 - **Plan said:** only that it is documented and typed
 - **Assumed:** Must match ^https?://\S+$ or boot fails naming it; an empty value from compose is treated as unset (R80's present() helper) and takes the http://localhost:8099 default — the same default W12's bootstrap hardcodes.

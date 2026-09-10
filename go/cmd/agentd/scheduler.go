@@ -101,8 +101,8 @@ import (
 	"strings"
 	"time"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // schedulerStore is the narrow slice of *agentdb.Store the loop needs, so the
@@ -457,7 +457,7 @@ func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time
 }
 
 // fireSession is the other mode (T9 of
-// design/2026-08-06-embeddable-agent-orange.md): the firing does not start a
+// design/2026-08-06-embeddable-agent-bob.md): the firing does not start a
 // job, it sends the schedule's Input to an EXISTING named session as its next
 // message. Same conversation, woken on a cron.
 //

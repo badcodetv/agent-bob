@@ -26,7 +26,7 @@ package topology
 import (
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Sham-critic's question IDs. Actor name and seed deliberately reuse

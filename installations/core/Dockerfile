@@ -16,7 +16,7 @@
 #   docker build -t agentkit-sandbox:dev sandbox
 #   docker build -f installations/core/Dockerfile \
 #     --build-arg BASE_IMAGE=agentkit-sandbox:dev \
-#     -t agent-orange-core:dev installations/core
+#     -t agent-bob-core:dev installations/core
 ARG BASE_IMAGE=agentkit-sandbox:dev
 FROM ${BASE_IMAGE}
 

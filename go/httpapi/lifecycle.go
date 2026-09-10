@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange"
+	"github.com/badcodetv/agent-bob"
 )
 
 // statusResp is the JSON shape the frontend useAgentSession hook expects.

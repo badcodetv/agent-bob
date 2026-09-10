@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/internal/recorder"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/internal/recorder"
 )
 
 // MockImageRegistry is an in-memory ImageRegistry. It round-trips Snapshot refs

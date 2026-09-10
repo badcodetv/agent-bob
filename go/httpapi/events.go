@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ── The event routes (spec §8.1–§8.5) ───────────────────────────────────────

@@ -86,7 +86,7 @@ mentioning serialize/drop is updated to cover `max_instances` gating instead.
 
 ### Amendment 2 — The time machine: event-sourced configuration
 
-**Unifying principle (new P8, added to §1.3):** *Nothing in Agent Orange is ever destructively
+**Unifying principle (new P8, added to §1.3):** *Nothing in Agent Bob is ever destructively
 updated. Current state is always a view over an append-only history.* Memories (append-only by
 construction), sessions (immutable transcripts), images (`name:version`), skills (versioned by
 append), and — closing the loop — **configuration** itself.

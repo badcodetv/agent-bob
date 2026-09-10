@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // The snapshot TTL reaper — spec §5 (docs/product/01-session-config.md) and

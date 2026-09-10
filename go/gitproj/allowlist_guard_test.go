@@ -5,7 +5,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // guardedStructs binds each allowlist table to the real struct it describes.

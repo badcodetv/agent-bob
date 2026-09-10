@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 func TestDumpTree(t *testing.T) {
@@ -840,7 +840,7 @@ func TestRenderTreeNeverRendersNeverFields(t *testing.T) {
 
 func TestRenderTreeReadme(t *testing.T) {
 	got := fileOf(t, mustRender(t, goldenState(), "orange"), "orange/README.md")
-	for _, want := range []string{"written by Agent Orange", "applied back into the system", "ignored on import"} {
+	for _, want := range []string{"written by Agent Bob", "applied back into the system", "ignored on import"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("README does not say %q:\n%s", want, got)
 		}

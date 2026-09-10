@@ -24,7 +24,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Debate's question IDs.

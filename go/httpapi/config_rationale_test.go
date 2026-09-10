@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Every configuration mutation reachable over HTTP may carry the operator's

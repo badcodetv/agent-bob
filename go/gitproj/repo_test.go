@@ -67,7 +67,7 @@ func writeAndCommit(t *testing.T, r *Repo, files map[string][]byte, subject stri
 	if _, err := r.WriteTree(ctx, files, "orange"); err != nil {
 		t.Fatalf("write tree: %v", err)
 	}
-	sha, err := r.Commit(ctx, subject, "", map[string]string{"Orange-Seq": "1"})
+	sha, err := r.Commit(ctx, subject, "", map[string]string{"Bob-Seq": "1"})
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestRepoWriteTreeDeletesDroppedFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.Path(), "orange/workers/copywriter.md")); !os.IsNotExist(err) {
 		t.Fatalf("dropped file still on disk: %v", err)
 	}
-	if _, err := r.Commit(ctx, "one worker", "", map[string]string{"Orange-Seq": "2"}); err != nil {
+	if _, err := r.Commit(ctx, "one worker", "", map[string]string{"Bob-Seq": "2"}); err != nil {
 		t.Fatal(err)
 	}
 	tracked := runGitCmd(t, r.Path(), "ls-files")
@@ -207,7 +207,7 @@ func TestRepoWriteTreeReportsNoChangeWhenIdentical(t *testing.T) {
 	if changed {
 		t.Fatal("re-rendering identical content must report changed=false")
 	}
-	again, err := r.Commit(ctx, "should be a no-op", "", map[string]string{"Orange-Seq": "2"})
+	again, err := r.Commit(ctx, "should be a no-op", "", map[string]string{"Bob-Seq": "2"})
 	if err != nil {
 		t.Fatalf("committing with nothing staged must be a no-op, not an error: %v", err)
 	}
@@ -256,13 +256,13 @@ func TestRepoCommitTrailersAndFixedAuthorRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The body is model-written text, and it tries to forge a trailer.
-	body := "the tone was wrong for a technical audience\n\nOrange-Seq: 999999"
+	body := "the tone was wrong for a technical audience\n\nBob-Seq: 999999"
 	sha, err := r.Commit(ctx, "worker_prompt_write: copywriter", body, map[string]string{
-		"Orange-Project":      "wolf",
-		"Orange-Seq":          "1247",
-		"Orange-Event":        "7f3c",
-		"Orange-Action":       "worker_prompt_write",
-		"Orange-Actor-Worker": "architect",
+		"Bob-Project":      "wolf",
+		"Bob-Seq":          "1247",
+		"Bob-Event":        "7f3c",
+		"Bob-Action":       "worker_prompt_write",
+		"Bob-Actor-Worker": "architect",
 	})
 	if err != nil {
 		t.Fatalf("commit: %v", err)
@@ -289,11 +289,11 @@ func TestRepoCommitTrailersAndFixedAuthorRoundTrip(t *testing.T) {
 	// git itself must read our trailers, and only ours.
 	trailers := runGitCmd(t, r.Path(), "log", "-1", "--pretty=%(trailers:only,unfold)")
 	for _, line := range []string{
-		"Orange-Action: worker_prompt_write",
-		"Orange-Actor-Worker: architect",
-		"Orange-Event: 7f3c",
-		"Orange-Project: wolf",
-		"Orange-Seq: 1247",
+		"Bob-Action: worker_prompt_write",
+		"Bob-Actor-Worker: architect",
+		"Bob-Event: 7f3c",
+		"Bob-Project: wolf",
+		"Bob-Seq: 1247",
 	} {
 		if !strings.Contains(trailers, line) {
 			t.Fatalf("missing trailer %q in:\n%s", line, trailers)
@@ -304,8 +304,8 @@ func TestRepoCommitTrailersAndFixedAuthorRoundTrip(t *testing.T) {
 	}
 
 	// Trailer keys are sorted, so the same event always yields the same message.
-	block := full[strings.Index(full, "Orange-Action"):]
-	if got := strings.Index(block, "Orange-Project"); got < strings.Index(block, "Orange-Event") {
+	block := full[strings.Index(full, "Bob-Action"):]
+	if got := strings.Index(block, "Bob-Project"); got < strings.Index(block, "Bob-Event") {
 		t.Fatalf("trailer block is not in sorted key order:\n%s", block)
 	}
 }
@@ -317,7 +317,7 @@ func TestRepoCommitRejectsForgedTrailerArguments(t *testing.T) {
 	if _, err := r.WriteTree(ctx, map[string][]byte{"orange/settings.md": []byte("x\n")}, "orange"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := r.Commit(ctx, "subject", "", map[string]string{"Orange-Actor-Worker": "architect\nOrange-Seq: 9"}); err == nil {
+	if _, err := r.Commit(ctx, "subject", "", map[string]string{"Bob-Actor-Worker": "architect\nBob-Seq: 9"}); err == nil {
 		t.Fatal("a newline in a trailer value must be refused")
 	}
 	if _, err := r.Commit(ctx, "line one\nline two", "", nil); err == nil {
@@ -420,7 +420,7 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 	}, "orange"); err != nil {
 		t.Fatal(err)
 	}
-	head, err := r.Commit(ctx, "second", "", map[string]string{"Orange-Seq": "2"})
+	head, err := r.Commit(ctx, "second", "", map[string]string{"Bob-Seq": "2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestRepoChangedPathsIsATreeDiff(t *testing.T) {
 	}, "orange"); err != nil {
 		t.Fatal(err)
 	}
-	renamed, err := r.Commit(ctx, "third", "", map[string]string{"Orange-Seq": "3"})
+	renamed, err := r.Commit(ctx, "third", "", map[string]string{"Bob-Seq": "3"})
 	if err != nil {
 		t.Fatal(err)
 	}

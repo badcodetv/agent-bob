@@ -6,7 +6,7 @@ Status: **harness built and offline-proven. Execution against a real model is GA
 
 ## What this is
 
-Agent Orange has two tiers of test, and they have different failure semantics
+Agent Bob has two tiers of test, and they have different failure semantics
 (AGENTS_RESEARCH §7):
 
 - **Tier A — the deterministic gate.** `e2e/features/learning-stories.stack.spec.ts`

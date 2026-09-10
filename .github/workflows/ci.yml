@@ -1,4 +1,4 @@
-# CI for Agent Orange. Runs the gates for all three packages — the Go engine
+# CI for Agent Bob. Runs the gates for all three packages — the Go engine
 # (go/), the in-image agent (sandbox/) and the chat UI (web/) — which together
 # are the whole repo's definition of green. See CLAUDE.md, "Build & test the
 # engine".
@@ -6,7 +6,7 @@
 # Provenance note: this file was inherited from the in-house "agentkit" library
 # when it was staged inside another repo, and the job/workflow names still say
 # agentkit. They are kept because they are the check names branch protection
-# refers to; the module path is github.com/binocarlos/badcode-agent-orange and
+# refers to; the module path is github.com/badcodetv/agent-bob and
 # the Platinum-import guard below exists only to keep the old coupling from
 # coming back.
 name: agentkit-ci
@@ -332,7 +332,7 @@ jobs:
       # run. Cheap to keep, and only read when something is already wrong.
       - name: agentd log
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.stack-e2e.yml -p agent-orange-stack-e2e logs agentd --tail=300
+        run: docker compose -f docker-compose.yml -f docker-compose.stack-e2e.yml -p agent-bob-stack-e2e logs agentd --tail=300
 
       - name: Tear down
         if: always()

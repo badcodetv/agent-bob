@@ -218,7 +218,7 @@ var mcpConfigLeaves = []leafSelector{
 
 var projectSettingsRules = []Rule{
 	{Field: "Project", Decision: Never,
-		Reason: "a project's identity is the clone it lives in, not a field inside it; rendering it would invite an import that retargets a project at another namespace. The commit trailers carry Orange-Project for humans."},
+		Reason: "a project's identity is the clone it lives in, not a field inside it; rendering it would invite an import that retargets a project at another namespace. The commit trailers carry Bob-Project for humans."},
 	{Field: "BaseImage", Key: "base_image", Decision: Render,
 		Reason: "an image reference; names a registry path, carries no credential (registry auth is imageregistry/auth, resolved at pull time)."},
 	{Field: "SystemPrompt", Key: "system_prompt", Decision: Render,
@@ -304,9 +304,9 @@ var skillRules = []Rule{
 	{Field: "InstallSh", Key: "install_sh", Decision: Render,
 		Reason: "the install script. Free text authored by a human or a worker, in the same trust class as a prompt: publishable by intent, not scanned for pasted secrets."},
 	{Field: "CreatedByWorker", Key: "created_by_worker", Decision: Render,
-		Reason: "server-stamped provenance naming a worker, not a person. The design already publishes the equivalent in commit trailers (Orange-Actor-Worker)."},
+		Reason: "server-stamped provenance naming a worker, not a person. The design already publishes the equivalent in commit trailers (Bob-Actor-Worker)."},
 	{Field: "CreatedBySession", Key: "created_by_session", Decision: Render,
-		Reason: "server-stamped session id — an identifier, never a token (session tokens live elsewhere). The design already publishes it as the Orange-Actor-Session trailer."},
+		Reason: "server-stamped session id — an identifier, never a token (session tokens live elsewhere). The design already publishes it as the Bob-Actor-Session trailer."},
 }
 
 // subscriptionRules covers agentdb.Subscription (G19).

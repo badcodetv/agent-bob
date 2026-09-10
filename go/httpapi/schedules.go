@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // ── The schedule routes (spec §8.6) ─────────────────────────────────────────

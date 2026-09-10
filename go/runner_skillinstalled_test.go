@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/events"
 )
 
 func TestOnSkillInstalled_RecordsSessionMetadata(t *testing.T) {

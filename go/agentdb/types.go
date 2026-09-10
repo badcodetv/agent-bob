@@ -144,7 +144,7 @@ type Session struct {
 	// Name is the OPTIONAL stable handle a host addresses this session by
 	// instead of its uuid — `hypothesis-a` rather than 9f8c2a10-… — so an
 	// embedding application can keep the name in its own row and resolve it
-	// later (migration 035; design/2026-08-06-embeddable-agent-orange.md).
+	// later (migration 035; design/2026-08-06-embeddable-agent-bob.md).
 	//
 	// Unique per project, kebab-case, ≤64 chars, and IMMUTABLE: the permission
 	// tag is `<-:create`, so no UPDATE this store emits carries the column at

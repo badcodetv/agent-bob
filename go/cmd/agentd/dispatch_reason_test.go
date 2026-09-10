@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // RD20: the dispatcher has always KNOWN why a job failed and only ever logged

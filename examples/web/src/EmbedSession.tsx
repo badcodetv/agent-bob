@@ -1,4 +1,4 @@
-// The embed page (T12 of design/2026-08-06-embeddable-agent-orange.md).
+// The embed page (T12 of design/2026-08-06-embeddable-agent-bob.md).
 //
 //     GET /embed/session/<name>#token=<jwt>
 //

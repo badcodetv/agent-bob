@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // memBlobs is a tiny in-memory extension.BlobStore for tests.

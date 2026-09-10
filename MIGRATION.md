@@ -1,9 +1,9 @@
-# Agent Orange — Migration Plan
+# Agent Bob — Migration Plan
 
-**What this is.** Agent Orange is founded on **agentkit**, the in-house Go agent runtime previously
+**What this is.** Agent Bob is founded on **agentkit**, the in-house Go agent runtime previously
 living in the Platinum monorepo (`/home/kai/projects/bayesprice/Platinum/agent-library`,
-module `github.com/binocarlos/badcode-agent-orange`). This document tracks turning that import into a
-standalone Agent Orange that can **build installation images and push them to a variety of image
+module `github.com/badcodetv/agent-bob`). This document tracks turning that import into a
+standalone Agent Bob that can **build installation images and push them to a variety of image
 registries — Google Cloud Artifact Registry first.**
 
 **Scope note.** This document tracks the *migration* only — standalone-ification, registries, GCP.
@@ -13,7 +13,7 @@ skills, config log) is a separate line of work: spec in `docs/product/`, operati
 lines meet only at deployment, where Phase 4's GCP backends are what a hosted project would run on.
 
 **Provenance / IP note.** agentkit is bayesprice-owned. This repo is for **private** use right now,
-which is fine. A future *public* release (the original "Agent Orange as art-object" idea) would
+which is fine. A future *public* release (the original "Agent Bob as art-object" idea) would
 require resolving licensing/ownership first — parked until then.
 
 ---
@@ -65,7 +65,7 @@ Key code (in this repo):
 
 Goal: this repo builds and runs end-to-end with no Platinum coupling.
 
-1. ✅ **Re-module.** The Go module path is settled as `github.com/binocarlos/badcode-agent-orange`
+1. ✅ **Re-module.** The Go module path is settled as `github.com/badcodetv/agent-bob`
    (see Decisions below); `go/go.mod` and all import prefixes use it and `go build ./... && go vet ./...`
    pass. No old `bayes-price/agentkit` path remains.
 2. ✅ **Build the in-image agent + UI.** Both packages install, typecheck and pass their suites
@@ -89,7 +89,7 @@ Goal: this repo builds and runs end-to-end with no Platinum coupling.
 
 Goal: keep the ability to build custom base images per installation, without Platinum's product specifics.
 
-1. **Generic base.** Recast `installations/platinum-base` as `installations/agent-orange-base`:
+1. **Generic base.** Recast `installations/platinum-base` as `installations/agent-bob-base`:
    keep the language/runtime stack + skill-baking mechanism; make the Platinum-specific layers
    (`pt` CLI, `product-plugins`, `webviz`) **optional overlays**, not hardcoded.
 2. **Installation template.** Document the contract (`installation.json` + `Dockerfile` +
@@ -97,7 +97,7 @@ Goal: keep the ability to build custom base images per installation, without Pla
    a single `example` installation.
 3. **Port the build orchestrator.** Bring the dependency-ordered build (`imagetree` already in `go/`)
    + manifest generation (`migration-reference/build-installations-manifest.py`) into a first-class
-   Agent Orange command (see Phase 3) instead of the Platinum `stack` bash.
+   Agent Bob command (see Phase 3) instead of the Platinum `stack` bash.
 
 ---
 
@@ -167,7 +167,7 @@ Platinum host and was not copied). go.mod has no cloud deps yet.
    `extension/blobartifacts` (works over any `extension.BlobStore`; `filesblob.NewArtifactStore`
    delegates to it). Defaults preserve the local fs stack. Compose + `.env.example` + `docs/15`
    updated; agentd Dockerfile bumped to go1.25. ✅ Verified end-to-end (2026-06-25): the live stack
-   (`blobs=gcs`) uploaded an artifact → object present in `gs://webkit-servers-agent-orange` and read
+   (`blobs=gcs`) uploaded an artifact → object present in `gs://webkit-servers-agent-bob` and read
    back byte-identical.
 
 ### 4b. Images → Artifact Registry ✅ (done)
@@ -185,7 +185,7 @@ Platinum host and was not copied). go.mod has no cloud deps yet.
    `OCI_REGISTRY`) builds `ociregistry.Config{Registry, Auth: auth.GCP}`. URL shape
    `<region>-docker.pkg.dev/<project>/<repo>`.
 3. ✅ **End-to-end (2026-06-25):** the live stack (`registry=ociregistry`, `auth=gcp`) snapshotted a
-   session → image pushed to `europe-west1-docker.pkg.dev/webkit-servers/agent-orange/<sid>:latest`
+   session → image pushed to `europe-west1-docker.pkg.dev/webkit-servers/agent-bob/<sid>:latest`
    (confirmed via `gcloud artifacts docker images list`). **Pull also verified**: deleted the image
    from the local daemon, then `restore` → `Materialize` pulled it back from AR (identical digest) via
    `auth.GCP`. Push + pull both proven.
@@ -203,15 +203,15 @@ Platinum host and was not copied). go.mod has no cloud deps yet.
 
 ## Decisions
 
-- ✅ **Module path** = `github.com/binocarlos/badcode-agent-orange` (done).
+- ✅ **Module path** = `github.com/badcodetv/agent-bob` (done).
 - ✅ **Installations** = engine-owned examples (`installations/core`, `installations/example`);
   per-project images live in each project's own repo.
 - ✅ **GCP auth method** = Application Default Credentials (ADC / workload identity). gcsblob configures
   no credentials; the host's runtime environment supplies them.
 - ✅ **Go floor bumped to 1.25** (GCP SDK requires it via `google.golang.org/api`); CI updated.
 - ✅ **GCP deployment specifics:** project `webkit-servers`, region `europe-west1`, Artifact
-  Registry repo `agent-orange`, GCS bucket `webkit-servers-agent-orange`, runtime service account
-  `agent-orange-runtime`. These are the defaults in `deploy/gcp/setup.sh` (idempotent; re-runnable;
+  Registry repo `agent-bob`, GCS bucket `webkit-servers-agent-bob`, runtime service account
+  `agent-bob-runtime`. These are the defaults in `deploy/gcp/setup.sh` (idempotent; re-runnable;
   `--emit-key` for a local/CI key, otherwise workload identity).
 
 ## Status

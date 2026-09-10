@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // WorkersStore is the worker-catalogue seam the CRUD handlers need.

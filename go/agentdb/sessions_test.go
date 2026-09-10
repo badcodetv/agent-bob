@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/imageregistry"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/binocarlos/badcode-agent-orange/internal/recorder"
+	"github.com/badcodetv/agent-bob/internal/recorder"
 )
 
 // MockSink is an in-memory Sink that records persisted events and tracks the

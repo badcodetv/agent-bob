@@ -175,7 +175,7 @@ buffer, and coalesces `tool_input_delta`. Streams are keyed by `${sessionId}:${q
 ## 4. The harness seam: pluggable agentic frameworks, selected per session
 
 > A **harness** (a.k.a. agentic framework) is the thing that actually drives a model through an
-> agent turn: the Claude Agent SDK, the Claude CLI, the Gemini CLI, Codex, etc. Agent Orange treats
+> agent turn: the Claude Agent SDK, the Claude CLI, the Gemini CLI, Codex, etc. Agent Bob treats
 > the harness as a **first-class, per-session choice**, not a hard-wired implementation.
 
 The naïve alternative — a different sandbox image per framework, times each execution environment —
@@ -376,7 +376,7 @@ At startup `index.ts` calls `loadProductPlugins(config.PRODUCT_PLUGINS_DIR, tool
 
 > **Example.** The original TypeScript host (now `migration-reference/`) supplied a `render_table` /
 > `render_chart` / `create_dashboard` / `generate_pptx` bundle plus a `pt` CLI baked into its image —
-> precisely such a plugin bundle. In Agent Orange those live *with the product*, not in the core; the
+> precisely such a plugin bundle. In Agent Bob those live *with the product*, not in the core; the
 > library names no product tools.
 
 ---

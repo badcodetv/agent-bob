@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // seedFrozenWorker puts a frozen worker in the fake store, alongside the caller

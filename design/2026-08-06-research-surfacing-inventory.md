@@ -1,6 +1,6 @@
 # Research-surfacing inventory — what the research produced, where the code stands, what applying it means
 
-> **What this file is.** An inventory of everything Agent Orange's research corpus produced,
+> **What this file is.** An inventory of everything Agent Bob's research corpus produced,
 > surfaced for an item-by-item conversation between Kai and Claude. For each distinct research
 > product — a finding, a principle, a lesson class, a doctrine entry, a measured result, or a
 > discovered issue that generalises beyond where it was found — it records three things and

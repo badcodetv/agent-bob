@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Solo's question IDs, named so tests and T4 don't scatter string literals.

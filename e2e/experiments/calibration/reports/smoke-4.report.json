@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/calibration-report@1",
+  "schema": "agent-bob/experiments/calibration-report@1",
   "run": {
     "id": "smoke-4",
     "description": "Mock smoke for the calibration runner: four hypotheses (one per trap kind) through arms A and B, scripted end to end. Proves the machinery, measures nothing.",

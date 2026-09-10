@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 func TestWriteWorkspaceFile_ExecsCatIntoInstance(t *testing.T) {

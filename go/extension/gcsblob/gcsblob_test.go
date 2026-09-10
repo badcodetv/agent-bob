@@ -28,7 +28,7 @@ func TestCleanPrefix(t *testing.T) {
 		"/":            "",
 		"a":            "a",
 		"/a/b/":        "a/b",
-		"agent-orange": "agent-orange",
+		"agent-bob": "agent-bob",
 	} {
 		if got := cleanPrefix(in); got != want {
 			t.Errorf("cleanPrefix(%q) = %q, want %q", in, got, want)

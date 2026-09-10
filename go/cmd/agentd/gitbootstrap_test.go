@@ -20,8 +20,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 const gitBootstrapSubfolder = gitproj.DefaultSubfolder
@@ -333,7 +333,7 @@ func foldStore(s *fakeGitImportStore) gitBootstrapFold {
 // RENDERER would have: the fixed projection author and a real trailer block.
 //
 // Committing as ours rather than as a human is the point of doing it this way.
-// An ordinary import skips commits carrying Orange-Seq, because their content
+// An ordinary import skips commits carrying Bob-Seq, because their content
 // is already in the database; a folder exported by a render is made ENTIRELY of
 // such commits, so a bootstrap that reused that rule would import nothing and
 // report success. This harness makes that mistake fail.

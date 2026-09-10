@@ -1,6 +1,6 @@
-# 19 — Embedding Agent Orange in another application
+# 19 — Embedding Agent Bob in another application
 
-This is the document you read if you are building an application that uses Agent Orange as its
+This is the document you read if you are building an application that uses Agent Bob as its
 agent runtime and does **not** want to read any Go. It covers the three credentials, the config
 ops has to set, the routes your backend calls, the iframe you drop into your page, and the three
 patterns for keeping state between runs.
@@ -512,7 +512,7 @@ explicit request for that row, and reading what was withdrawn is the point of no
 
 ## 8. The two-bot pattern
 
-Agent Orange offers **three** ways to carry state between runs, and an application-layer builder
+Agent Bob offers **three** ways to carry state between runs, and an application-layer builder
 picks. Do not collapse them.
 
 | Strategy | Mechanism | Suits |
@@ -916,5 +916,5 @@ bytes from your own backend the way § 6 does for artifacts.
   reaper) and the provenance trust rule behind `POST /agent/memories` in § 7.
 - `docs/06-artifacts.md` — the artifact contract and the status state machine behind § 6.
 - `docs/14-host-adapters.md` — the tenancy contract and the store seams.
-- `design/2026-08-06-embeddable-agent-orange.md` — the plan this was built from, including the
+- `design/2026-08-06-embeddable-agent-bob.md` — the plan this was built from, including the
   Discovered Issues Log every hazard above is drawn from.

@@ -84,8 +84,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 // ── the hook fan-out ────────────────────────────────────────────────────────
@@ -354,7 +354,7 @@ type gitProjectorConfig struct {
 	Store gitProjectionStore
 	State gitProjectionState
 	// Root is the directory holding one clone per project. On the cluster it
-	// is on the agentd-data PVC (deploy/k8s/20-agent-orange.yaml).
+	// is on the agentd-data PVC (deploy/k8s/20-agent-bob.yaml).
 	Root string
 	// Owner identifies this process for the lease. Two agentd processes must
 	// never share one.
@@ -999,7 +999,7 @@ func gitCommitSubject(ev *agentdb.ConfigEvent) string {
 // 🔴 It is MODEL TEXT (a worker's reason for rewriting another worker's
 // prompt), which is exactly why it goes here and not into the trailers. See
 // DI4 and gitproj.Commit: our trailer block is always the final paragraph, so a
-// rationale ending in `Orange-Seq: 999999` lands in an earlier one, where git's
+// rationale ending in `Bob-Seq: 999999` lands in an earlier one, where git's
 // trailer parser does not look.
 func gitCommitBody(ev *agentdb.ConfigEvent, coalesced int) string {
 	body := strings.TrimSpace(ev.Rationale)
@@ -1021,20 +1021,20 @@ func gitCommitBody(ev *agentdb.ConfigEvent, coalesced int) string {
 // our own trailer paragraph last — holds only while there is a trailer
 // paragraph to emit. Project, Seq, Event and Action are therefore
 // unconditional. The two actor trailers are omitted when empty, which is the
-// log's own encoding for a human/UI/API edit; an empty `Orange-Actor-Worker:`
+// log's own encoding for a human/UI/API edit; an empty `Bob-Actor-Worker:`
 // would read as an assertion about a person rather than the absence of one.
 func commitTrailers(ev *agentdb.ConfigEvent) map[string]string {
 	t := map[string]string{
-		"Orange-Project": oneLine(ev.Project),
-		"Orange-Seq":     strconv.FormatInt(ev.Seq, 10),
-		"Orange-Event":   oneLine(ev.ID),
-		"Orange-Action":  oneLine(ev.Action),
+		"Bob-Project": oneLine(ev.Project),
+		"Bob-Seq":     strconv.FormatInt(ev.Seq, 10),
+		"Bob-Event":   oneLine(ev.ID),
+		"Bob-Action":  oneLine(ev.Action),
 	}
 	if w := strings.TrimSpace(ev.ActorWorker); w != "" {
-		t["Orange-Actor-Worker"] = oneLine(w)
+		t["Bob-Actor-Worker"] = oneLine(w)
 	}
 	if s := strings.TrimSpace(ev.ActorSession); s != "" {
-		t["Orange-Actor-Session"] = oneLine(s)
+		t["Bob-Actor-Session"] = oneLine(s)
 	}
 	return t
 }

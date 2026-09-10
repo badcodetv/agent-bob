@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // artifactsConfigured reports whether an ArtifactStore is wired. When it is nil

@@ -18,8 +18,8 @@ package topology
 // row exists to hold the prompt that the chat resolves.
 
 import (
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
 // OnboardingWorker is the worker name onboarding creates. The session that

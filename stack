@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ./stack — the local development stack for Agent Orange.
+# ./stack — the local development stack for Agent Bob.
 #
 # Deliberately small. Everything here exists because running the stack by hand
 # has two traps that bite before you see anything (README-stack.md), and because
@@ -28,7 +28,7 @@
 #   ./stack test-go [args]    go test with live Postgres wired up correctly
 #
 # Both `start` and `wolf up` finish by opening a tmux session (default name
-# "agent-orange", override with TMUX_SESSION) holding one `docker compose logs
+# "agent-bob", override with TMUX_SESSION) holding one `docker compose logs
 # -f` pane per group of services plus two empty panes to type in. Detaching
 # (C-b d) leaves the stack running; `stop` / `wolf down` kill the session too.
 # Re-running either command while the session exists just re-attaches to it.
@@ -61,7 +61,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
-TMUX_SESSION="${TMUX_SESSION:-agent-orange}"
+TMUX_SESSION="${TMUX_SESSION:-agent-bob}"
 WEB_PORT="${WEB_PORT:-8080}"
 
 # ── The compose invocation ───────────────────────────────────────────────────
@@ -374,12 +374,12 @@ logs() {
 }
 
 psql() {
-  local user="${POSTGRES_USER:-agentorange}" db="${POSTGRES_DB:-agentorange}"
+  local user="${POSTGRES_USER:-agentbob}" db="${POSTGRES_DB:-agentbob}"
   compose exec postgres psql --user "$user" --dbname "$db" "$@"
 }
 
 sql() {
-  local user="${POSTGRES_USER:-agentorange}" db="${POSTGRES_DB:-agentorange}"
+  local user="${POSTGRES_USER:-agentbob}" db="${POSTGRES_DB:-agentbob}"
   compose exec -T postgres psql --user "$user" --dbname "$db" -c "$*"
 }
 
@@ -484,7 +484,7 @@ test_go() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# THE DEVELOPMENT WORKFLOW — Agent Orange + Agent Wolf, wired together
+# THE DEVELOPMENT WORKFLOW — Agent Bob + Agent Wolf, wired together
 # ═════════════════════════════════════════════════════════════════════════════
 #
 # `./stack wolf up` is the one command for developing Agent Wolf locally. It
@@ -507,7 +507,7 @@ test_go() {
 #                          nested session containers can reach it (see the
 #                          design doc's "Local topology and networking"). In a
 #                          deployment it is an ordinary service address, and
-#                          ORANGE_BASE_URL + WOLF_MCP_URL are the two variables
+#                          BOB_BASE_URL + WOLF_MCP_URL are the two variables
 #                          that carry the difference.
 #   * blob storage         snapshots stay on local disk unless you pass --gcs,
 #                          because the bucket is the shared production one
@@ -597,13 +597,13 @@ PY
 }
 
 # The dind container's real name, read from compose rather than assumed.
-# agent-wolf's compose defaults to "agent-orange-dind-1" — correct for a
-# checkout named agent-orange, wrong for anything else, and wrong silently:
+# agent-wolf's compose defaults to "agent-bob-dind-1" — correct for a
+# checkout named agent-bob, wrong for anything else, and wrong silently:
 # wolf-api's network_mode would fail to resolve and the container never starts.
 wolf_dind_container() {
   local id
   id="$(compose ps -q dind 2>/dev/null | head -1 || true)"
-  [[ -n "$id" ]] || { echo "agent-orange's dind container is not running" >&2; return 1; }
+  [[ -n "$id" ]] || { echo "agent-bob's dind container is not running" >&2; return 1; }
   docker inspect --format '{{.Name}}' "$id" | sed 's|^/||'
 }
 
@@ -649,7 +649,7 @@ print(",".join(sorted(k for k in users if "@" in k)))')"
     echo "No sign-in allowlist. Set one of:" >&2
     echo "  WOLF_ALLOWED_EMAILS=you@example.com ./stack wolf up" >&2
     echo "  WOLF_ALLOWED_EMAILS=... in agent-wolf/.env" >&2
-    echo "  a real email in AGENTKIT_PROJECT_MAP in agent-orange/.env" >&2
+    echo "  a real email in AGENTKIT_PROJECT_MAP in agent-bob/.env" >&2
     return 1
   fi
   printf '%s' "$allowed"
@@ -676,17 +676,17 @@ wolf_compose() {
   base_image="${WOLF_BASE_IMAGE:-$(ar_registry)/session-wolf:${AO_IMAGE_TAG:-dev}}"
 
   ( cd "$WOLF_REPO" && env \
-      ORANGE_DIND_CONTAINER="$dind" \
+      BOB_DIND_CONTAINER="$dind" \
       WOLF_WEB_PORT="$WOLF_WEB_PORT" \
       WOLF_API_PORT="$WOLF_API_PORT" \
       `# agentd, from inside DinD's netns — NOT a compose service name.` \
-      ORANGE_BASE_URL="http://localhost:8099" \
+      BOB_BASE_URL="http://localhost:8099" \
       `# The BROWSER-reachable Orange origin. Must equal the VITE_ one below` \
       `# and must be in the wolf project's allowed_origins, or the embed` \
       `# iframe is blocked. Three places, one value; nothing checks that they` \
       `# agree, which is why they are set together here.` \
-      ORANGE_PUBLIC_URL="http://localhost:${WEB_PORT}" \
-      VITE_ORANGE_PUBLIC_URL="http://localhost:${WEB_PORT}" \
+      BOB_PUBLIC_URL="http://localhost:${WEB_PORT}" \
+      VITE_BOB_PUBLIC_URL="http://localhost:${WEB_PORT}" \
       VITE_GOOGLE_CLIENT_ID="$gclient" \
       WOLF_MCP_URL="http://${gateway}:${WOLF_API_PORT}/mcp" \
       WOLF_API_KEY="$WOLF_API_KEY" \
@@ -754,7 +754,7 @@ wolf_check_port() {
   fi
   project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$owner" 2>/dev/null || true)"
   case "$project" in
-    agent-orange|agent-wolf) return 0 ;;
+    agent-bob|agent-wolf) return 0 ;;
   esac
   echo "Port $port is published by container '$owner'${project:+ (compose project '$project')}." >&2
   echo "That is not one of ours. Set WEB_PORT / WOLF_WEB_PORT and retry:" >&2
@@ -789,7 +789,7 @@ wolf_bootstrap() {
   # critic cron — those live in the wolf project's SETTINGS row, not in the
   # container's environment, so restarting wolf-api does not update them.
   ( cd "$WOLF_REPO" && env \
-      ORANGE_BASE_URL="http://localhost:${WEB_PORT}" \
+      BOB_BASE_URL="http://localhost:${WEB_PORT}" \
       WOLF_API_KEY="$WOLF_API_KEY" \
       WOLF_MCP_TOKEN="$WOLF_MCP_TOKEN" \
       WOLF_MCP_URL="http://${gateway}:${WOLF_API_PORT}/mcp" \
@@ -830,7 +830,7 @@ wolf_up() {
   done
 
   echo
-  echo "═══ the development workflow: Agent Orange + Agent Wolf ═══════════════"
+  echo "═══ the development workflow: Agent Bob + Agent Wolf ═══════════════"
   if [[ "$mode" == "real" ]]; then
     echo " model:   REAL — THIS WILL BILL. Every researcher tick is an agent session."
   else
@@ -852,7 +852,7 @@ wolf_up() {
 
   # ── 2/6 Orange, in registry mode, with the wolf project in its map ────────
   echo
-  echo "── step 2/6: agent-orange (registry mode, wolf project wired in) ──"
+  echo "── step 2/6: agent-bob (registry mode, wolf project wired in) ──"
   registry_backends
   echo registry > "$MODE_FILE"
   [[ "$mode" == "mock" ]] && mock_model
@@ -948,7 +948,7 @@ wolf_up() {
 wolf_down() {
   echo "── stopping agent-wolf ──"
   wolf_compose down --remove-orphans 2>/dev/null || true
-  echo "── stopping agent-orange ──"
+  echo "── stopping agent-bob ──"
   apply_saved_mode
   compose down --remove-orphans
   tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
@@ -977,7 +977,7 @@ wolf_env() {
   wolf_orange_env
   registry_backends >/dev/null
   local redact='s/(WOLF_API_KEY|WOLF_MCP_TOKEN|WOLF_SESSION_SECRET|WOLF_SERIES_TOKEN_SECRET|FRED_API_KEY|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|AGENTKIT_JWT_SECRET|WOLF_TEST_LOGIN)([^A-Za-z0-9_].*)$/\1: <redacted>/'
-  echo "--- agent-orange/agentd ---"
+  echo "--- agent-bob/agentd ---"
   compose config 2>/dev/null | sed -E "$redact" \
     | grep -E '^ +(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|AGENTKIT_MCP_ENV|AGENTKIT_BLOB_BACKEND|AGENTKIT_REGISTRY_BACKEND|AGENTKIT_REGISTRY_AUTH|BASE_IMAGE|WOLF_API_KEY|WOLF_MCP_TOKEN):' || true
   echo "--- the wolf project in the map ---"
@@ -988,16 +988,16 @@ wolf_env() {
   # network_mode names it. Say so, rather than printing nothing and letting it
   # read as "configured with no variables".
   if ! wolf_dind_container >/dev/null 2>&1; then
-    echo "  (agent-orange's dind is not running — Wolf's config depends on it;"
+    echo "  (agent-bob's dind is not running — Wolf's config depends on it;"
     echo "   run ./stack wolf up first)"
     return 0
   fi
   wolf_compose config 2>/dev/null | sed -E "$redact" \
-    | grep -E '^ +(WOLF_API_KEY|WOLF_MCP_URL|WOLF_MCP_TOKEN|WOLF_BASE_IMAGE|WOLF_ALLOWED_EMAILS|WOLF_SCHEDULE_CRON|WOLF_POLL_INTERVAL_SECONDS|ORANGE_BASE_URL|ORANGE_PUBLIC_URL|VITE_ORANGE_PUBLIC_URL|VITE_GOOGLE_CLIENT_ID|FRED_API_KEY|NODE_ENV):' || true
+    | grep -E '^ +(WOLF_API_KEY|WOLF_MCP_URL|WOLF_MCP_TOKEN|WOLF_BASE_IMAGE|WOLF_ALLOWED_EMAILS|WOLF_SCHEDULE_CRON|WOLF_POLL_INTERVAL_SECONDS|BOB_BASE_URL|BOB_PUBLIC_URL|VITE_BOB_PUBLIC_URL|VITE_GOOGLE_CLIENT_ID|FRED_API_KEY|NODE_ENV):' || true
 }
 
 wolf_status() {
-  echo "── agent-orange ───────────────────────────────────────────"
+  echo "── agent-bob ───────────────────────────────────────────"
   compose ps --format 'table {{.Service}}\t{{.Status}}' 2>/dev/null || echo "(not running)"
   echo
   echo "── agent-wolf ─────────────────────────────────────────────"

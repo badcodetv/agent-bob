@@ -32,7 +32,7 @@ package httpapi
 // would be a second contract to keep true.
 //
 // Beside it, the two FULL-CONTENT reads (T18 of
-// design/2026-08-06-embeddable-agent-orange.md):
+// design/2026-08-06-embeddable-agent-bob.md):
 //
 //	GET /agent/memories/{id}
 //	GET /agent/memories/current?name=<n>
@@ -102,7 +102,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // MemoryStore is the slice of agentdb.Store these routes need. It is now the

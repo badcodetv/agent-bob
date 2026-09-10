@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"testing"
 
-	agentkit "github.com/binocarlos/badcode-agent-orange"
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/extension"
+	agentkit "github.com/badcodetv/agent-bob"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/extension"
 )
 
 // The agentd half of "a §13 pointer in project_settings.base_image".
@@ -93,7 +93,7 @@ func TestLiteralRegistryReferencesAreNotCatalogueRefs(t *testing.T) {
 		"agentkit-sandbox:dev",    // the standalone stack's own image
 		"agentkit-sandbox:latest", // any non-numeric tag
 		"ghcr.io/acme/base:v1",    // a fully qualified reference
-		"europe-west1-docker.pkg.dev/webkit-servers/agent-orange/core:2026-07", // the live GCP one
+		"europe-west1-docker.pkg.dev/webkit-servers/agent-bob/core:2026-07", // the live GCP one
 		"acme/base",                      // a repository with an owner
 		"ubuntu@sha256:0123456789abcdef", // a digest reference
 		"REGISTRY.example.com/Base:1",    // uppercase is not a §13 name

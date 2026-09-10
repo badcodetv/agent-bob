@@ -11,7 +11,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/binocarlos/badcode-agent-orange/imagetree"
+	"github.com/badcodetv/agent-bob/imagetree"
 )
 
 // Run is the testable entry point.

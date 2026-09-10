@@ -3,8 +3,8 @@ package topology
 import (
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/orgprompts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
 func onboardingV1(t *testing.T) *Topology {

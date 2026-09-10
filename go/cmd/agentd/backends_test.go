@@ -59,12 +59,12 @@ func TestResolveRegistryConfig_OCIFromGCPParts(t *testing.T) {
 		"AGENTKIT_REGISTRY_BACKEND": "ociregistry",
 		"GCP_REGION":                "europe-west1",
 		"GCP_PROJECT":               "webkit-servers",
-		"GCP_AR_REPO":               "agent-orange",
+		"GCP_AR_REPO":               "agent-bob",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "europe-west1-docker.pkg.dev/webkit-servers/agent-orange"
+	want := "europe-west1-docker.pkg.dev/webkit-servers/agent-bob"
 	if cfg.registry != want {
 		t.Fatalf("registry = %q, want %q", cfg.registry, want)
 	}

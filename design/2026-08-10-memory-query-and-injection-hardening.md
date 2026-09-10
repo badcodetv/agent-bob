@@ -12,7 +12,7 @@ Relates: `docs/product/25-cooperative-patterns.md` (gaps G6, G11), `docs/product
 
 ## Context
 
-Agent Orange coordinates workers through one shared, labelled, append-only memory
+Agent Bob coordinates workers through one shared, labelled, append-only memory
 rather than through messages between agents. Three things currently make that
 substrate weaker than the design intends, and one documentation gap makes the
 research behind it invisible to users.
@@ -739,7 +739,7 @@ HTTP (`go/httpapi/memories.go`): `GET /agent/memories` gains `?since=`, `?until=
 ### T11: `docs/workflows.md` — the recommendations catalogue   [Status: pending | Model: opus]
 - **Scope:** Write the user-facing catalogue. For each workflow family in
   `docs/product/25-cooperative-patterns.md` §2 (six families, 38 patterns), give:
-  what the user is trying to do, the recommended expression in Agent Orange's
+  what the user is trying to do, the recommended expression in Agent Bob's
   primitives, and the honest verdict. Include a clearly-marked section for
   workflows where the recommendation is **to use something else** — drawn from
   §3's 22 rejections and §5's structural limits (for example: decomposing a single

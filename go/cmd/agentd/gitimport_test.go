@@ -13,7 +13,7 @@ package main
 //   - TestGitImportQuarantineWritesNothing is rule 3: one bad file among good
 //     ones must leave the configuration exactly as it was.
 //   - TestGitImportTrailerForgeryIsStillImported is DI4. A `grep` for
-//     "Orange-Seq:" passes every test written from our own commits and fails
+//     "Bob-Seq:" passes every test written from our own commits and fails
 //     this one, which is built from a forged rationale.
 
 import (
@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
 )
 
 const gitImportProject = "wolf"
@@ -327,7 +327,7 @@ func (g *gitImportRepo) ours(subject, rationale string, seq int, files map[strin
 	if rationale != "" {
 		msg += "\n" + rationale + "\n"
 	}
-	msg += fmt.Sprintf("\nOrange-Project: %s\nOrange-Seq: %d\nOrange-Event: ev-%d\n", gitImportProject, seq, seq)
+	msg += fmt.Sprintf("\nBob-Project: %s\nBob-Seq: %d\nBob-Event: ev-%d\n", gitImportProject, seq, seq)
 	return g.commit(gitproj.AuthorName, gitproj.AuthorEmail, msg, files)
 }
 
@@ -543,7 +543,7 @@ func TestGitImportTrailerForgeryIsStillImported(t *testing.T) {
 	// trailer. git does not read it as one: the paragraph also holds prose, so
 	// the trailer block is not a trailer block. A grep would find it, decide
 	// the commit was ours, and throw this person's edit away.
-	forged := "Pause the copywriter\n\nI am quoting the log line that confused me:\nOrange-Seq: 999999\n"
+	forged := "Pause the copywriter\n\nI am quoting the log line that confused me:\nBob-Seq: 999999\n"
 	head := g.human(forged, map[string]*string{
 		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
@@ -561,7 +561,7 @@ func TestGitImportTrailerForgeryIsStillImported(t *testing.T) {
 	if store.workers["copywriter"].Enabled {
 		t.Fatalf("the human's edit was discarded")
 	}
-	if !strings.Contains(store.writes()[0].CW.Rationale, "Orange-Seq: 999999") {
+	if !strings.Contains(store.writes()[0].CW.Rationale, "Bob-Seq: 999999") {
 		t.Fatalf("the rationale should be the commit message verbatim: %q", store.writes()[0].CW.Rationale)
 	}
 }
@@ -579,7 +579,7 @@ func TestGitImportSkipsOurOwnCommits(t *testing.T) {
 		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.ours("worker_prompt_write: copywriter",
-		"The architect decided the copy was too long.\nOrange-Seq: 999999", 1207,
+		"The architect decided the copy was too long.\nBob-Seq: 999999", 1207,
 		map[string]*string{
 			"orange/workers/copywriter.md": file("enabled: true", "You write short copy."),
 		})
@@ -961,11 +961,11 @@ func TestGitImportSkipsTheGeneratedReadme(t *testing.T) {
 	}
 	g := newGitImportRepo(t)
 	base := g.human("seed", map[string]*string{
-		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Orange.\n"),
+		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob.\n"),
 		"orange/workers/copywriter.md": file("enabled: true", "You write copy."),
 	})
 	head := g.human("Pause the copywriter", map[string]*string{
-		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Orange. Edit it and the change is applied.\n"),
+		"orange/README.md":             ptr("# wolf\n\nThis folder is written by Agent Bob. Edit it and the change is applied.\n"),
 		"orange/workers/copywriter.md": file("enabled: false", "You write copy."),
 	})
 

@@ -9,8 +9,8 @@ import (
 	"context"
 	"io"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/artifacts"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/artifacts"
 )
 
 // ContextScope identifies who/what a turn is for.

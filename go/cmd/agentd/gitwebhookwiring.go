@@ -40,8 +40,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // gitWebhookPollIntervalVar names the poll fallback's cadence. Webhook delivery
@@ -330,7 +330,7 @@ func (w *gitWebhookWiring) importProject(ctx context.Context, project string) er
 	if from == "" {
 		// Never imported. Start from our own last published commit rather than
 		// from the beginning of history: everything up to it is the renderer's
-		// own output, which ImportRange would skip anyway (its Orange-Seq
+		// own output, which ImportRange would skip anyway (its Bob-Seq
 		// check), and starting there keeps the first import proportional to
 		// what a human actually pushed. With no published commit either, "" is
 		// correct — it means "the whole tree at the tip", which is the

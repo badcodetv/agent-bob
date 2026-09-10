@@ -31,7 +31,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // CatalogueStore is the slice of agentdb.Store these two routes need — the

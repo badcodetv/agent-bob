@@ -13,7 +13,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 /** The schema hypolabgen stamps; anything else is refused. */
-export const TRUTHS_SCHEMA = 'agent-orange/hypolab/truths@1'
+export const TRUTHS_SCHEMA = 'agent-bob/hypolab/truths@1'
 
 /** One hypothesis as the generator recorded it. */
 export interface Hypothesis {

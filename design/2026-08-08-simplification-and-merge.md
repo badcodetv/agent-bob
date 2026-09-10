@@ -36,7 +36,7 @@ Verified before commit: `go build`, `go vet`, `go test ./...` (31 packages); mem
 
 ### The product decision, in one paragraph
 
-Agent Orange is not a framework for splitting one task across agents — a single good session with
+Agent Bob is not a framework for splitting one task across agents — a single good session with
 subagents beats that, and the harness is already the Claude Agent SDK, so we get it free. It is a
 runtime for an **organisation that outlives any conversation**. Coordination therefore happens
 through **labelled shared memory and a clock**, not through a general event mesh. The recommended

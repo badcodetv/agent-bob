@@ -398,7 +398,7 @@ describe('URL selection', () => {
 
 describe('token totals', () => {
   // CAPTURED, not invented. The envelope below was read out of the running e2e
-  // stack's Postgres on 2026-07-28 (`agent-orange-stack-e2e-postgres-1`) and the
+  // stack's Postgres on 2026-07-28 (`agent-bob-stack-e2e-postgres-1`) and the
   // wrapping row is the real `GET /agent/session/{id}/query-events` shape
   // (httpapi/history.go writes `{"events": [<agent_query_events rows>]}`); the
   // ids and created_at are a real row's. Only the elided middle envelopes and

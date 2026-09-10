@@ -1,5 +1,5 @@
 {
-  "schema": "agent-orange/experiments/calibration-report@1",
+  "schema": "agent-bob/experiments/calibration-report@1",
   "run": {
     "id": "calibration-30",
     "description": "Runbook §2: 30 hypolab hypotheses (10 real-effect, 8 planted-null, 8 confound-trap, 4 underpowered, shuffled) through hypothesis-lab@v1 with the critic live (A), with the critic unsubscribed (B), and optionally with a sham critic (C). Ground truth lives in the harness and reaches the project only inside the frozen fact-checker's own check events.",

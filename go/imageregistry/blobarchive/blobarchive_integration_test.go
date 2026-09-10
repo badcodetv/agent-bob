@@ -16,8 +16,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/execenv"
-	"github.com/binocarlos/badcode-agent-orange/imageregistry"
+	"github.com/badcodetv/agent-bob/execenv"
+	"github.com/badcodetv/agent-bob/imageregistry"
 )
 
 // dockerHostForTest returns the Docker host from the environment, or the

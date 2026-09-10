@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeDatasetReapStore is a scriptable stand-in for *agentdb.Store's two

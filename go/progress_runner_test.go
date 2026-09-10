@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 func TestSnapshot_RecordsProgress(t *testing.T) {

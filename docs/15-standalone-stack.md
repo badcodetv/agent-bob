@@ -405,13 +405,13 @@ GCP example (matches `.env.example`):
 
 ```sh
 AGENTKIT_BLOB_BACKEND=gcs
-GCS_BUCKET=webkit-servers-agent-orange
+GCS_BUCKET=webkit-servers-agent-bob
 
 AGENTKIT_REGISTRY_BACKEND=ociregistry
 AGENTKIT_REGISTRY_AUTH=gcp            # ADC OAuth2 token (default); or 'basic'
 GCP_REGION=europe-west1
 GCP_PROJECT=webkit-servers
-GCP_AR_REPO=agent-orange             # → europe-west1-docker.pkg.dev/webkit-servers/agent-orange
+GCP_AR_REPO=agent-bob             # → europe-west1-docker.pkg.dev/webkit-servers/agent-bob
 ```
 
 The two choices are independent: you can put blobs in GCS while keeping

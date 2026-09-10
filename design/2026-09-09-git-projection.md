@@ -100,7 +100,7 @@ the **published record**.
 | Post-commit hook, already carrying `config.changed` | `go/agentdb/config_events.go:327-338` | The renderer's trigger. Documented as: synchronous, must not error into the mutation, context already detached. |
 | `WithConfigEvent` — one transaction for projection + log, with a write guard and `TestMutationsAreLogged` | `go/agentdb/config_events.go:356-420, 862-921` | The importer's front door. Nothing may bypass it. |
 | Server-stamped provenance | `mcp_memory.go:336-337`, `httpapi/memories.go:75-84` | Rendered into commit trailers as *derived* fact, never asserted. |
-| `agentd-data` PVC, `replicas: 1`, "scaling is a bigger node, not more replicas" | `deploy/k8s/20-agent-orange.yaml:28, 43-66, 73, 203` | The clone's home already exists. Single-writer posture is already the deployment's stated shape. |
+| `agentd-data` PVC, `replicas: 1`, "scaling is a bigger node, not more replicas" | `deploy/k8s/20-agent-bob.yaml:28, 43-66, 73, 203` | The clone's home already exists. Single-writer posture is already the deployment's stated shape. |
 | Project map **object form** naming per-project secrets by env var (`api_key_env`) | `go/cmd/agentd/googleauth.go:36-50` | `github_token_env` sits beside it. The map stays safe to commit; only variable names are written. |
 | `dataset_put`'s `if_version` compare-and-swap | `go/agentdb/datasets.go` | The precedent for `memory_create`'s `if_current`. |
 | Whole-value `${VAR}` env references, with partial interpolation refused | `go/cmd/agentd/attention.go:113-140` | The secret-safety rule the renderer enforces. |
@@ -169,15 +169,15 @@ worker_prompt_write: copywriter
 
 <rationale, verbatim>
 
-Orange-Project: wolf
-Orange-Seq: 1247
-Orange-Event: 7f3c…
-Orange-Action: worker_prompt_write
-Orange-Actor-Worker: architect
-Orange-Actor-Session: sess-…
+Bob-Project: wolf
+Bob-Seq: 1247
+Bob-Event: 7f3c…
+Bob-Action: worker_prompt_write
+Bob-Actor-Worker: architect
+Bob-Actor-Session: sess-…
 ```
 
-Commit author is a fixed identity (`Agent Orange <orange@…>`), because the
+Commit author is a fixed identity (`Agent Bob <orange@…>`), because the
 author field is the part humans trust by habit and it must not appear to
 attribute the change to a person. **Who** is in the trailers, derived.
 
@@ -206,7 +206,7 @@ It diffs `watermark → remote HEAD` as a **tree**, giving a set of changed path
 It never walks individual commits and never reads git history semantically —
 that would reintroduce kill #1.
 
-**Skip our own output.** Commits carrying an `Orange-Seq:` trailer are ours.
+**Skip our own output.** Commits carrying an `Bob-Seq:` trailer are ours.
 They are skipped for rationale purposes, and the watermark advances past them.
 
 **Apply through the front door.** Each changed path maps to exactly one
@@ -389,7 +389,7 @@ won" every time.
 | `go/cmd/agentd/attention.go` | `${VAR}` support for `url`, matching `resolveHeaders`. |
 | `go/cmd/agentd/googleauth.go` | `github_token_env` in `projectConfig`, validated at boot like `api_key_env`. |
 | `go/cmd/agentd/main.go` | Install the projection worker; fan the config hook out to two consumers. |
-| `deploy/k8s/20-agent-orange.yaml` | Mount the clone root on the existing `agentd-data` PVC. |
+| `deploy/k8s/20-agent-bob.yaml` | Mount the clone root on the existing `agentd-data` PVC. |
 | `web/src/…` | Repo link, last-push status, quarantine list on the project settings page. |
 | `CLAUDE.md`, `docs/18-workers-memory-events.md` | Point at `docs/21`. |
 
@@ -511,7 +511,7 @@ commits". That is wrong: an event that changes nothing *renderable* — a moved
 commit. The count is ≤ N and the test asserts the weaker, correct property.
 
 ### G11: the importer   [Status: done | Model: opus]
-Tree diff from the watermark, skip `Orange-Seq:` commits, parse-all-then-apply,
+Tree diff from the watermark, skip `Bob-Seq:` commits, parse-all-then-apply,
 apply through the existing store methods with empty actor and the commit message
 as rationale, quarantine on any failure. Depends on G5, G6.
 **Validation:** `go test ./cmd/agentd/ -run GitImport` — including the
@@ -766,7 +766,7 @@ copies carry a keep-in-sync comment.
 
 ---
 
-### DI4 (G6) — TRAILER FORGERY: a model-written rationale can forge `Orange-Seq:`
+### DI4 (G6) — TRAILER FORGERY: a model-written rationale can forge `Bob-Seq:`
 
 **This is a hole in the design as written (§B/§C), not in the implementation.**
 
@@ -776,11 +776,11 @@ trailer parser reads the **last paragraph** of a commit message. So a rationale
 ending in a line like:
 
 ```
-Orange-Seq: 999999
+Bob-Seq: 999999
 ```
 
 is not text. It is a **trailer**, indistinguishable from one we wrote — and
-`Orange-Seq:` is the exact field the importer uses to decide "this commit is
+`Bob-Seq:` is the exact field the importer uses to decide "this commit is
 ours, skip it" (§C). A worker could mint commits the importer refuses to read,
 or make its own write look like an engine write.
 
@@ -792,7 +792,7 @@ guarantee holds only while `trailers` is non-empty — documented on the method.
 **Binding rule for G11 (the importer), which does not exist yet:** read trailers
 with git's own parser over the **last paragraph only** (`git interpret-trailers
 --parse`, or `%(trailers)` in a `--format`). **Never `grep` the commit message
-for `Orange-Seq:`.** A grep re-opens this hole completely and would look correct
+for `Bob-Seq:`.** A grep re-opens this hole completely and would look correct
 in every test written from our own commits.
 
 ### DI5 (G6) — three smaller things the design did not say
@@ -952,11 +952,11 @@ validation, omitting false bools, and dropping body-newline normalisation.
 
 ### DI10 (G11) — five things the importer had to decide, and one store weakness
 
-**Trailers, hardened beyond DI4.** Read with `git log --format=%(trailers:key=Orange-Seq,valueonly,only)` — git's own parser, last paragraph only, no grep anywhere. A commit counts as ours only with **both** `Orange-Seq` and `Orange-Event` trailers **and** the fixed author email. It errs toward *importing* an ambiguous commit, which is the safe direction: importing our own render is a no-op, skipping a human's edit loses their work.
+**Trailers, hardened beyond DI4.** Read with `git log --format=%(trailers:key=Bob-Seq,valueonly,only)` — git's own parser, last paragraph only, no grep anywhere. A commit counts as ours only with **both** `Bob-Seq` and `Bob-Event` trailers **and** the fixed author email. It errs toward *importing* an ambiguous commit, which is the safe direction: importing our own render is a no-op, skipping a human's edit loses their work.
 
 🔴 **`GetSubscription` and `GetSchedule` have no not-found sentinel** — they return a bare `fmt.Errorf("subscription not found")`, indistinguishable from a database outage. Guessing wrong there turns an outage into a **create**. G11 routed around it via `ListSubscriptions`/`ListSchedules` and id matching. The stores should grow real sentinels (`ErrSubscriptionNotFound`, `ErrScheduleNotFound`) like `ErrMemoryNotFound` already has. Not fixed here — logged for a follow-up.
 
-**A mixed push re-imports our own values.** One of our commits plus one human's in the same push means the tree diff spans both, and the `Orange-Seq` skip cannot help — the diff is of trees, not commits. Closed with a **same-value suppression pass**: the parsed result is compared against the stored row and nothing is written when they already agree. This also strengthens loop termination from the inbound side.
+**A mixed push re-imports our own values.** One of our commits plus one human's in the same push means the tree diff spans both, and the `Bob-Seq` skip cannot help — the diff is of trees, not commits. Closed with a **same-value suppression pass**: the parsed result is compared against the stored row and nothing is written when they already agree. This also strengthens loop termination from the inbound side.
 
 **A partial apply is not a quarantine, and is not pretended to be.** If a store call fails mid-plan, the earlier writes are real config events and cannot be unwritten. G11 returns the error with the watermark unmoved and lets same-value suppression make the retry a no-op. Claiming atomicity across a sequence of independent config events would be a lie in the log.
 
@@ -996,7 +996,7 @@ middleware — mounting is `main.go`'s job (G20).
 ### DI12 (G15) — bootstrap CANNOT reuse the import range, and the reason is inverted
 
 🔴 **An exported folder is made entirely of the renderer's own commits.** So
-`ImportRange`'s `Orange-Seq` skip — the rule that stops us re-importing our own
+`ImportRange`'s `Bob-Seq` skip — the rule that stops us re-importing our own
 output — would skip **every commit in the folder**, import nothing, and **report
 success**. A silent no-op that looks like a working bootstrap.
 

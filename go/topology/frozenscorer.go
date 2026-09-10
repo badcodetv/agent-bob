@@ -19,7 +19,7 @@ package topology
 // a topology cannot ship them, and honestly does not try.)
 
 import (
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // Frozen-scorer's question IDs. The actor/critic half deliberately reuses

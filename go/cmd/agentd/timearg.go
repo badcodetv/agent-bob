@@ -34,7 +34,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // msTimeArg is an optional time bound in unix milliseconds. Set distinguishes

@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // fakeAttention records the query it was handed and returns a canned page, so

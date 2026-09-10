@@ -242,6 +242,6 @@ chicken-and-egg question — how do you go from no workers to a workforce?
    non-interactively), plus MCP servers for the social platforms with `${VAR}` credentials
    (§4.4) — the atoms (custom images + MCP config) doing exactly what they were built for.
 5. **Everything the manager does is data.** Workers, prompts, schedules, subscriptions — all
-   rows it edits through core tools. There is no manager feature in Agent Orange, and no
+   rows it edits through core tools. There is no manager feature in Agent Bob, and no
    role/authorization model inside a project (any worker may adjust anything; the project is
    the only boundary — single-operator posture, §10).

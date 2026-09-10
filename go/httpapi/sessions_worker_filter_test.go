@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // GET /agent/sessions?worker= narrows the list to one worker's jobs in the

@@ -3,7 +3,7 @@ package agentkit
 import (
 	"testing"
 
-	"github.com/binocarlos/badcode-agent-orange/events"
+	"github.com/badcodetv/agent-bob/events"
 )
 
 // TestReconstructConversation verifies that the rehydration helper rebuilds the

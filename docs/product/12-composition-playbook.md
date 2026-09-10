@@ -17,14 +17,14 @@ ordered plan. Those three carry the evidence; this one carries the decisions.*
 ## 1. The realisation this document exists to hold
 
 Most of what this research produced is not engine code. It is **knowledge about how to compose an
-Agent Orange system so that it can learn** — which workers exist, what tools each holds, what is
+Agent Bob system so that it can learn** — which workers exist, what tools each holds, what is
 frozen, what subscribes to what, what gets measured and by whom. The engine already supports all of
 it; the value is in the arrangement.
 
 That makes the arrangement itself the product surface to iterate on. Composition knowledge is
 stored as **topologies** (seedable, versioned org charts — doc 10), proven by **learning stories**
 (deterministic e2e tests — doc 11), and compared by the **measurement harness** (AGENTS_RESEARCH).
-The loop for improving Agent Orange compositions is itself: propose a topology → run it against a
+The loop for improving Agent Bob compositions is itself: propose a topology → run it against a
 task → measure → keep what wins. We are applying the product's own thesis to the product.
 
 ## 2. The composition principles

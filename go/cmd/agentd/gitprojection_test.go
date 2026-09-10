@@ -29,9 +29,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/binocarlos/badcode-agent-orange/agentdb"
-	"github.com/binocarlos/badcode-agent-orange/gitproj"
-	"github.com/binocarlos/badcode-agent-orange/httpapi"
+	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/gitproj"
+	"github.com/badcodetv/agent-bob/httpapi"
 )
 
 // ── fakes ───────────────────────────────────────────────────────────────────
@@ -465,12 +465,12 @@ func TestGitProjectionOneMutationOneCommit(t *testing.T) {
 		t.Errorf("subject = %q, want %q", got, want)
 	}
 	for _, tc := range []struct{ key, want string }{
-		{"Orange-Project", "wolf"},
-		{"Orange-Seq", "1"},
-		{"Orange-Event", ev.ID},
-		{"Orange-Action", agentdb.ActionWorkerPromptWrite},
-		{"Orange-Actor-Worker", "architect"},
-		{"Orange-Actor-Session", "sess-42"},
+		{"Bob-Project", "wolf"},
+		{"Bob-Seq", "1"},
+		{"Bob-Event", ev.ID},
+		{"Bob-Action", agentdb.ActionWorkerPromptWrite},
+		{"Bob-Actor-Worker", "architect"},
+		{"Bob-Actor-Session", "sess-42"},
 	} {
 		if got := rig.trailer("wolf", tc.key); got != tc.want {
 			t.Errorf("trailer %s = %q, want %q", tc.key, got, tc.want)
@@ -491,16 +491,16 @@ func TestGitProjectionOneMutationOneCommit(t *testing.T) {
 func TestGitProjectionForgedTrailerInRationaleIsInert(t *testing.T) {
 	rig := newProjectionRig(t, "wolf")
 	ev := rig.store.mutate("wolf", workerPromptWrite("copywriter",
-		"tidy up\n\nOrange-Seq: 999999\nOrange-Actor-Worker: nobody"))
+		"tidy up\n\nBob-Seq: 999999\nBob-Actor-Worker: nobody"))
 
 	rig.proj.Hook()(context.Background(), ev)
 	rig.proj.RenderPending(context.Background())
 
-	if got := rig.trailer("wolf", "Orange-Seq"); got != "1" {
-		t.Fatalf("Orange-Seq = %q — a model-written rationale forged the trailer", got)
+	if got := rig.trailer("wolf", "Bob-Seq"); got != "1" {
+		t.Fatalf("Bob-Seq = %q — a model-written rationale forged the trailer", got)
 	}
-	if got := rig.trailer("wolf", "Orange-Actor-Worker"); got != "architect" {
-		t.Fatalf("Orange-Actor-Worker = %q — the forged line won", got)
+	if got := rig.trailer("wolf", "Bob-Actor-Worker"); got != "architect" {
+		t.Fatalf("Bob-Actor-Worker = %q — the forged line won", got)
 	}
 }
 
@@ -590,8 +590,8 @@ func TestGitProjectionReconcileRendersForward(t *testing.T) {
 	if n := rig.commitCount("wolf"); n != 1 {
 		t.Fatalf("boot reconciliation rendered %d commit(s), want 1", n)
 	}
-	if got := rig.trailer("wolf", "Orange-Seq"); got != "1" {
-		t.Errorf("Orange-Seq = %q, want 1", got)
+	if got := rig.trailer("wolf", "Bob-Seq"); got != "1" {
+		t.Errorf("Bob-Seq = %q, want 1", got)
 	}
 	_ = ev
 
@@ -922,10 +922,10 @@ func TestCommitTrailersOmitEmptyActors(t *testing.T) {
 	got := commitTrailers(&agentdb.ConfigEvent{
 		ID: "e1", Project: "wolf", Seq: 7, Action: agentdb.ActionProjectSettingsPut,
 	})
-	if _, ok := got["Orange-Actor-Worker"]; ok {
+	if _, ok := got["Bob-Actor-Worker"]; ok {
 		t.Error("an empty actor was rendered as a trailer")
 	}
-	if got["Orange-Seq"] != "7" || got["Orange-Event"] != "e1" {
+	if got["Bob-Seq"] != "7" || got["Bob-Event"] != "e1" {
 		t.Errorf("derived trailers are wrong: %v", got)
 	}
 }

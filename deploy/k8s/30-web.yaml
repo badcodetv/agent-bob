@@ -2,7 +2,7 @@
 #
 # Its nginx config (deploy/web.nginx.conf) proxies to `http://dind:8099`,
 # hardcoded into the image — which is exactly why the agentd Service in
-# 20-agent-orange.yaml is named `dind`. The image then runs here unmodified.
+# 20-agent-bob.yaml is named `dind`. The image then runs here unmodified.
 #
 # A UI change is invisible until deploy/publish-images.sh runs again: this is a
 # built bundle, not a dev server.
@@ -10,7 +10,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: web
-  namespace: agent-orange
+  namespace: agent-bob
 spec:
   selector:
     app: web
@@ -22,7 +22,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
-  namespace: agent-orange
+  namespace: agent-bob
 spec:
   replicas: 1
   selector:
