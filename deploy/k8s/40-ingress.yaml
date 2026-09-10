@@ -27,10 +27,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [orange.example.com]     # EDIT
+    - hosts: [bob.example.com]     # EDIT
       secretName: agent-bob-tls
   rules:
-    - host: orange.example.com        # EDIT
+    - host: bob.example.com        # EDIT
       http:
         paths:
           - path: /

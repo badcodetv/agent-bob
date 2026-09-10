@@ -1,6 +1,7 @@
 # Standalone agentd stack. One command:
 #   cp .env.example .env && docker compose up --build
 # Then open http://localhost:8080
+name: agent-bob
 services:
   dind:
     image: docker:27-dind

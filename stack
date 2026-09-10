@@ -38,7 +38,7 @@
 # Registry, real Google sign-in), because that is the only way local resembles
 # deployed. BILLABLE. Needs a sibling ../agent-wolf checkout (or WOLF_REPO).
 #
-#   ./stack wolf up        publish the wolf session image, start Orange with the
+#   ./stack wolf up        publish the wolf session image, start Bob with the
 #                          wolf project in its map, start Wolf, bootstrap it
 #     [mock]                 ... with the free mock model instead
 #     [--cron EXPR]          researcher cron (default: Wolf's daily 06:00 UTC)
@@ -560,7 +560,7 @@ wolf_secrets() {
 # project, and exported — shell environment beats .env in compose, the same
 # trick local_backends/registry_backends use.
 #
-# Both halves matter: `api_key_env` is what lets Wolf authenticate to Orange
+# Both halves matter: `api_key_env` is what lets Wolf authenticate to Bob
 # with X-API-Key, and `allowed_origins` is what the embed page's
 # Content-Security-Policy frame-ancestors is built from. Get the origin wrong
 # and the chat iframe is blocked by the browser, which looks like a broken UI
@@ -586,7 +586,7 @@ others = [o for o in wolf.get("allowed_origins", []) if o != origin]
 wolf["allowed_origins"] = [origin] + others
 projects["wolf"] = wolf
 if not users:
-    # agentd refuses a map with neither half. Nobody could sign in to Orange's
+    # agentd refuses a map with neither half. Nobody could sign in to Bob's
     # OWN console either, which is a confusing way to fail.
     print("stack: AGENTKIT_PROJECT_MAP in .env names no users — "
           "add {\"you@example.com\": [\"*\"]} before running the dev workflow",
@@ -625,7 +625,7 @@ wolf_gateway() {
 
 # ── Who may sign in ─────────────────────────────────────────────────────────
 # EMPTY NEVER MEANS EVERYONE: wolf-api refuses to boot on an empty allowlist,
-# and defaulting it to "the emails Orange's own map already trusts" is the
+# and defaulting it to "the emails Bob's own map already trusts" is the
 # least surprising thing for a dev stack.
 #
 # 🔴 ONE FUNCTION, because two callers needed this and the second one guessed.
@@ -666,7 +666,7 @@ wolf_compose() {
 
   allowed="$(wolf_allowed_emails)" || exit 1
 
-  # The FRED key and the Google client id are the same credentials Orange's .env
+  # The FRED key and the Google client id are the same credentials Bob's .env
   # already carries; read from wolf's .env first so it can override.
   fred="${FRED_API_KEY:-$(cd "$WOLF_REPO" && dotenv FRED_API_KEY)}"
   [[ -n "$fred" ]] || fred="$(dotenv FRED_API_KEY)"
@@ -681,7 +681,7 @@ wolf_compose() {
       WOLF_API_PORT="$WOLF_API_PORT" \
       `# agentd, from inside DinD's netns — NOT a compose service name.` \
       BOB_BASE_URL="http://localhost:8099" \
-      `# The BROWSER-reachable Orange origin. Must equal the VITE_ one below` \
+      `# The BROWSER-reachable Bob origin. Must equal the VITE_ one below` \
       `# and must be in the wolf project's allowed_origins, or the embed` \
       `# iframe is blocked. Three places, one value; nothing checks that they` \
       `# agree, which is why they are set together here.` \
@@ -707,9 +707,9 @@ wolf_compose() {
       docker compose "$@" )
 }
 
-# What Orange needs in its environment to serve the wolf project. Exported
+# What Bob needs in its environment to serve the wolf project. Exported
 # before `compose up`, so agentd resolves the API key at boot with it present.
-wolf_orange_env() {
+wolf_bob_env() {
   wolf_secrets
   local map; map="$(wolf_project_map)" || exit 1
   export AGENTKIT_PROJECT_MAP="$map"
@@ -837,7 +837,7 @@ wolf_up() {
     echo " model:   mock — deterministic and free (no script table: canned replies)"
   fi
   echo " images:  PULLED from $(ar_registry) (production's path)"
-  echo " orange:  http://localhost:${WEB_PORT}"
+  echo " bob:     http://localhost:${WEB_PORT}"
   echo " wolf:    http://localhost:${WOLF_WEB_PORT}"
   echo " blobs:   ${AGENTKIT_BLOB_BACKEND:-fs}${GCS_PREFIX:+ (prefix $GCS_PREFIX)}"
   echo "═══════════════════════════════════════════════════════════════════════"
@@ -850,22 +850,22 @@ wolf_up() {
     echo "── step 1/6: skipping the session image (--skip-image) ──"
   fi
 
-  # ── 2/6 Orange, in registry mode, with the wolf project in its map ────────
+  # ── 2/6 Bob, in registry mode, with the wolf project in its map ────────
   echo
   echo "── step 2/6: agent-bob (registry mode, wolf project wired in) ──"
   registry_backends
   echo registry > "$MODE_FILE"
   [[ "$mode" == "mock" ]] && mock_model
-  wolf_orange_env
+  wolf_bob_env
   compose up -d --build
 
-  wolf_wait "orange /agent/sessions" 180 \
+  wolf_wait "bob /agent/sessions" 180 \
     curl -fsS -o /dev/null -H "X-API-Key: ${WOLF_API_KEY}" "http://localhost:${WEB_PORT}/agent/sessions"
 
   # The API key answering at all is the proof that the merged project map
   # parsed AND that agentd resolved api_key_env at boot. A 401 here means the
   # map did not take, and everything after would fail more confusingly.
-  echo "orange: the wolf project's API key is accepted"
+  echo "bob: the wolf project's API key is accepted"
 
   # ── 3/6 Wolf ──────────────────────────────────────────────────────────────
   echo
@@ -912,7 +912,7 @@ wolf_up() {
   echo "── step 6/6: ready ──"
   echo
   echo "  Wolf     http://localhost:${WOLF_WEB_PORT}      <- sign in here"
-  echo "  Orange   http://localhost:${WEB_PORT}      <- the operator console"
+  echo "  Bob      http://localhost:${WEB_PORT}      <- the operator console"
   echo
   echo "  Sign-in is real Google Identity Services. It needs, ONCE, in the Google"
   echo "  Cloud console for this OAuth client:"
@@ -970,11 +970,11 @@ wolf_logs() {
 # because grep prints the whole matching line, value included.
 wolf_env() {
   wolf_need_repo
-  # Configure Orange's half exactly as `up` does before reading it back, or the
+  # Configure Bob's half exactly as `up` does before reading it back, or the
   # dump reports AGENTKIT_MCP_ENV as empty and the map as absent — describing a
   # stack nobody runs. A config dump that differs from what the command
   # configures is worse than no dump.
-  wolf_orange_env
+  wolf_bob_env
   registry_backends >/dev/null
   local redact='s/(WOLF_API_KEY|WOLF_MCP_TOKEN|WOLF_SESSION_SECRET|WOLF_SERIES_TOKEN_SECRET|FRED_API_KEY|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|AGENTKIT_JWT_SECRET|WOLF_TEST_LOGIN)([^A-Za-z0-9_].*)$/\1: <redacted>/'
   echo "--- agent-bob/agentd ---"
@@ -983,7 +983,7 @@ wolf_env() {
   echo "--- the wolf project in the map ---"
   wolf_project_map | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)["projects"], indent=2))' || true
   echo "--- agent-wolf ---"
-  # Wolf's config cannot even be RESOLVED until Orange's dind container exists:
+  # Wolf's config cannot even be RESOLVED until Bob's dind container exists:
   # WOLF_MCP_URL is read out of that container's routing table, and wolf-api's
   # network_mode names it. Say so, rather than printing nothing and letting it
   # read as "configured with no variables".
@@ -1015,12 +1015,12 @@ wolf_status() {
   echo "live sessions: ${n:-?}   ( ./stack sessions | ./stack clean )"
   echo
   echo "Wolf   http://localhost:${WOLF_WEB_PORT}"
-  echo "Orange http://localhost:${WEB_PORT}"
+  echo "Bob    http://localhost:${WEB_PORT}"
 }
 
 wolf_rotate() {
   # Deliberate, because it is not free: agentd resolved the old API key at boot,
-  # so Orange must be recreated for a new one to be accepted at all.
+  # so Bob must be recreated for a new one to be accepted at all.
   rm -f "$WOLF_SECRET_FILE"
   wolf_secrets
   echo "New dev secrets generated. Both stacks must be recreated to pick them up:"

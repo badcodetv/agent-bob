@@ -17,7 +17,7 @@ so you do not have to remember the workaround:
     ./stack psql           # a psql shell
     ./stack testdb up      # throwaway Postgres for the live-PG Go suite
     ./stack test-go        # go test with that database wired up correctly
-    ./stack wolf up        # BOTH stacks — Orange + Agent Wolf — against the real
+    ./stack wolf up        # BOTH stacks — Bob + Agent Wolf — against the real
                            #   providers; see "the joint development workflow" below
 
 It bypasses `docker-compose.override.yml` and forces the local `fs`/`blobarchive`
@@ -143,9 +143,9 @@ written to it.)*
 ## Agent Wolf: the joint development workflow
 
 Agent Wolf is a separate product built on this engine (its own repo, a sibling
-checkout at `../agent-wolf`). It is not a library that links against Orange — it
+checkout at `../agent-wolf`). It is not a library that links against Bob — it
 talks to `agentd` over HTTP with a project API key, and its sessions run in
-containers Orange provisions. Developing it means running **both** stacks, wired
+containers Bob provisions. Developing it means running **both** stacks, wired
 together, and one command does that:
 
     ./stack wolf up                    # REAL model, real registry, real Google sign-in
@@ -158,7 +158,7 @@ It runs six steps in order, and each is separately re-runnable:
 1. **`./stack wolf image`** — builds `installations/wolf` from the **published**
    `session-core:<tag>` and pushes it as `session-wolf:<tag>`. Needs
    `./stack publish-base` to have run at least once.
-2. Starts Orange in **registry mode** with a `wolf` project merged into
+2. Starts Bob in **registry mode** with a `wolf` project merged into
    `AGENTKIT_PROJECT_MAP`, and waits until that project's API key is accepted —
    which is the proof the map parsed *and* that `agentd` resolved `api_key_env`
    at boot.
@@ -213,6 +213,11 @@ and it is roughly **96 billable sessions a day per live hypothesis**. Sessions
 also each hold a container and one of the 100 host ports until they are deleted
 or reclaimed for idleness: `./stack wolf status` counts them and `./stack clean`
 releases them.
+
+**If you have a `pg-data` volume from before the Orange→Bob rename**, it was
+created with the old `agentorange` role/db and won't match the new `agentbob`
+defaults above — recreate it (`./stack down` with volume removal, or
+`docker volume rm` it by name) rather than debugging a login failure.
 
 ## The product layer needs Postgres
 

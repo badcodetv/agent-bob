@@ -18,7 +18,7 @@ services:
   agentd:
     environment:
       AGENTKIT_JWT_SECRET: stack-e2e-secret
-      AGENTKIT_TEST_LOGIN: "test@example.com:orange-e2e"
+      AGENTKIT_TEST_LOGIN: "test@example.com:bob-e2e"
       # The project map in its OBJECT form (design 2026-08-06, T1), so the
       # embedding suite can exercise an API key and the embed page's
       # frame-ancestors header. The flat form is still what a plain `docker
