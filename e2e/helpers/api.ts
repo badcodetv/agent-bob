@@ -16,7 +16,7 @@ import type { APIRequestContext, APIResponse } from '@playwright/test'
 // web.nginx.conf), so the tests exercise the same path a browser does.
 
 export const TEST_EMAIL = 'test@example.com'
-export const TEST_PASSWORD = 'orange-e2e'
+export const TEST_PASSWORD = 'bob-e2e'
 
 /** Projects the stack-e2e overlay maps to the test account (AGENTKIT_PROJECT_MAP). */
 export const MAPPED_PROJECTS = ['apples-oranges', 'pears-plums'] as const

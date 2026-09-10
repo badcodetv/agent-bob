@@ -13,7 +13,7 @@ import { lit, psql, stackDbReadable } from '../helpers/stackdb'
 const exec = promisify(execFile)
 
 // T17 of design/2026-08-06-embeddable-agent-bob.md — the whole "embeddable
-// Orange" feature, end to end, against the compose stack.
+// Bob" feature, end to end, against the compose stack.
 //
 // This is the only test that holds the wiring T1–T16/T18 added, and most of that
 // wiring is the kind unit tests cannot reach: an argument passed to a

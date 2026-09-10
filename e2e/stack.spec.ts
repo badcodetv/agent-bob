@@ -2,7 +2,7 @@ import { test, expect, Page } from '@playwright/test'
 
 // Full-stack e2e: runs against the docker-compose stack (web on :8080) stood up
 // by run-stack-e2e.sh with the docker-compose.stack-e2e.yml overlay:
-//   - password login enabled (AGENTKIT_TEST_LOGIN=test@example.com:orange-e2e)
+//   - password login enabled (AGENTKIT_TEST_LOGIN=test@example.com:bob-e2e)
 //   - project map {"test@example.com": ["apples-oranges", "pears-plums"]}
 //   - mock model unless CLAUDE_CODE_OAUTH_TOKEN was exported in the host env
 //
@@ -11,7 +11,7 @@ import { test, expect, Page } from '@playwright/test'
 // replay after reload → project namespacing.
 
 const TEST_EMAIL = 'test@example.com'
-const TEST_PASSWORD = 'orange-e2e'
+const TEST_PASSWORD = 'bob-e2e'
 const PROJECT_A = 'apples-oranges'
 const PROJECT_B = 'pears-plums'
 // Minted at runtime via the wildcard grant. Run-scoped so repeated runs
