@@ -155,7 +155,7 @@ both.
 ### House rules that will fail your ticket if broken (agent-bob)
 
 1. **The `go/` module imports nothing from any host app.** CI enforces it.
-2. **Module path is `github.com/badcodetv/agent-bob`.** Never `bayes-price/agentkit`.
+2. **Module path is `github.com/badcodetv/agent-bob`.** Never an old module path.
 3. **`migration-reference/` is reference, not code.** Do not build, import or wire it.
 4. **Installation Dockerfiles never set `CMD`, `ENTRYPOINT`, `EXPOSE`, `HEALTHCHECK` or
    `WORKDIR`.** The sandbox base owns all five. `WORKDIR` joined the list on 2026-08-13 after

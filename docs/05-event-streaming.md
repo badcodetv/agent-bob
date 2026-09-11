@@ -294,5 +294,4 @@ contexts — those entanglements are replaced by props/provider.
 ---
 
 > **Provenance.** The host-side pipeline (`go/events/`) and the `web/` reducer/components were ported
-> from an in-house TypeScript runtime; that original host now lives under `migration-reference/` for
-> reference only.
+> from an in-house TypeScript runtime; that original host is not part of this repository.

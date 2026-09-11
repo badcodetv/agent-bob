@@ -246,11 +246,11 @@ gate is green and no reviewer finding is unresolved, **continue**; if anything i
 
 1. Merge `rename/orange-to-bob` into `main` in both repos (the rename lands **before** any project
    gets a real `git_remote` — playbook ordering rule).
-2. **T-LIC** (D6) — **HELD until Kai confirms the rights position (§8); skip this step otherwise.** Add `LICENSE` (MIT, `Copyright (c) 2026 BadCode`), `"license": "MIT"` in the
-   three `package.json` files, and replace the three "bayesprice-owned / private use" statements
+2. **T-LIC** (D6) — **done 2026-09-11, after the rename landed; see §8.** Add `LICENSE` (MIT, `Copyright (c) 2026 BadCode`), `"license": "MIT"` in the
+   three `package.json` files, and replace the three "private use" statements
    (`README.md:251`, `MIGRATION.md:15`, `CLAUDE.md:39`). **Remove `migration-reference/`** from
-   the tree: it is Platinum code (139 files, bayesprice URLs, a theme using Channel 4's proprietary
-   fonts) that cannot carry a BadCode MIT license. Precondition, see §8.
+   the tree: it is Platinum code (139 files, including a theme using Channel 4's proprietary
+   fonts) that should not ship under the MIT license.
 3. Push both `main`s.
 4. GitHub: rename `badcodetv/agent-orange` → `badcodetv/agent-bob`; transfer
    `binocarlos/agent-wolf` → `badcodetv`; `git remote set-url` in both checkouts; `git fetch`.
@@ -303,10 +303,8 @@ either safely. It prepares everything, then hands Kai three commands.
 
 ## 8. Open items
 
-- **T-LIC precondition (flagged to Kai 2026-09-10).** The repo states in three places that the
-  source is *bayesprice-owned*; MIT can only be granted by the copyright holder. Kai chose MIT; the
-  ticket runs as planned **once Kai confirms the rights position** (e.g. bayesprice's sign-off, or
-  that he holds them). Removing `migration-reference/` is recommended regardless of the answer.
+- **T-LIC done 2026-09-11.** Kai confirmed BadCode holds full copyright over the source, and asked
+  that every reference to the previous owner be removed from this repo.
   Note: the repo is already public, so git **history** still contains those files; rewriting
   history is a separate, larger decision not taken here.
 - **Follow-ups, not this migration:** `badcodetv/core` docs (D5); the deploy playbook's refresh for

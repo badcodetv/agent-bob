@@ -1,7 +1,7 @@
 # Agent Bob — Migration Plan
 
 **What this is.** Agent Bob is founded on **agentkit**, the in-house Go agent runtime previously
-living in the Platinum monorepo (`/home/kai/projects/bayesprice/Platinum/agent-library`,
+living in the Platinum monorepo (`agent-library/`, now
 module `github.com/badcodetv/agent-bob`). This document tracks turning that import into a
 standalone Agent Bob that can **build installation images and push them to a variety of image
 registries — Google Cloud Artifact Registry first.**
@@ -12,9 +12,7 @@ skills, config log) is a separate line of work: spec in `docs/product/`, operati
 `docs/18-workers-memory-events.md`. It is now built, and it does not block anything here; the two
 lines meet only at deployment, where Phase 4's GCP backends are what a hosted project would run on.
 
-**Provenance / IP note.** agentkit is bayesprice-owned. This repo is for **private** use right now,
-which is fine. A future *public* release (the original "Agent Bob as art-object" idea) would
-require resolving licensing/ownership first — parked until then.
+**Licence.** MIT (`LICENSE`, copyright BadCode), since 2026-09-11.
 
 ---
 
@@ -24,7 +22,7 @@ require resolving licensing/ownership first — parked until then.
   at the time; the module floor is **1.25** since Phase 4 added the GCP SDK).
 - Installation definitions copied to `installations/`, since genericized to the engine-owned
   examples `installations/core` + `installations/example`.
-- Platinum host-side image pipeline copied to `migration-reference/` (to port, not to keep):
+- Platinum host-side image pipeline copied to `migration-reference/` (to port, not to keep; the folder was removed 2026-09-11):
   `goapi-installations/` (resolution logic), `build-installations-manifest.py`,
   `build-sandbox-agentkit.sh`, `stack`, `agent_v2.go` (ImageResolver), `agent_save_session_image.go`,
   `agentdeps.go`, and the ACR auth design doc.
@@ -57,7 +55,7 @@ Key code (in this repo):
 - Custom-image catalog: `go/agentdb/customimages.go`.
 - Image tree / dependency order: `go/imagetree/`, `go/cmd/imagetree/`.
 - Installation definitions: `installations/`.
-- Resolver + manifest (reference to port): `migration-reference/goapi-installations/`, `migration-reference/build-installations-manifest.py`.
+- Resolver + manifest (reference to port): `goapi-installations/` and `build-installations-manifest.py` from the original pipeline (no longer in this repo).
 
 ---
 
@@ -67,7 +65,7 @@ Goal: this repo builds and runs end-to-end with no Platinum coupling.
 
 1. ✅ **Re-module.** The Go module path is settled as `github.com/badcodetv/agent-bob`
    (see Decisions below); `go/go.mod` and all import prefixes use it and `go build ./... && go vet ./...`
-   pass. No old `bayes-price/agentkit` path remains.
+   pass. No old module path remains.
 2. ✅ **Build the in-image agent + UI.** Both packages install, typecheck and pass their suites
    untouched — `cd sandbox && npm ci && npm test` (157 tests) and `cd web && npm ci && npm test`
    (543 tests), verified 2026-07-25. No code fixes were needed in either. `sandbox/Dockerfile`
@@ -96,7 +94,7 @@ Goal: keep the ability to build custom base images per installation, without Pla
    `overlay/`) as the reusable shape; keep `core-v1`/`core-v2` as worked examples or replace with
    a single `example` installation.
 3. **Port the build orchestrator.** Bring the dependency-ordered build (`imagetree` already in `go/`)
-   + manifest generation (`migration-reference/build-installations-manifest.py`) into a first-class
+   + manifest generation (`build-installations-manifest.py` in the original pipeline) into a first-class
    Agent Bob command (see Phase 3) instead of the Platinum `stack` bash.
 
 ---
@@ -119,7 +117,7 @@ Goal: build an installation image and push it to **any** OCI registry, selected 
    `ao installations build <name> --registry <url> [--push]` → resolves ancestry → docker build →
    tag `<registry>/<name>:<tag>` → push via the chosen `RegistryAuth` → record digest in the manifest.
 4. **Registry selection by config.** Generalize the `V2ImageRegistry`/`V2RegistryURL` switch
-   (`migration-reference/agentdeps.go`, `goapi-installations/installations.go`) so a registry +
+   (`agentdeps.go` and `goapi-installations/installations.go` in the original pipeline) so a registry +
    auth method is chosen from config/env, not hardcoded to ACR. Support the local `registry:5000`
    dev path unchanged.
 5. **Verify** push→resolve→pull→launch against a generic OCI registry (local `registry:5000` first).

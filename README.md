@@ -248,8 +248,7 @@ to see here" when there is nothing to see is the thing you want to find out abou
 
 ## Status
 
-Private use for now — the source is bayesprice-owned (forked from an in-house Go runtime,
-"agentkit"); a public release needs licensing resolved first.
+MIT licensed — see [`LICENSE`](LICENSE). Forked from an in-house Go runtime ("agentkit").
 
 The product layer is built and the acceptance loop closes: one worker rewrites another worker's
 prompt with a rationale, and the next job runs under it —

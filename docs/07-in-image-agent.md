@@ -374,7 +374,7 @@ At startup `index.ts` calls `loadProductPlugins(config.PRODUCT_PLUGINS_DIR, tool
 4. Optionally, **host hooks** for marker side-effects (e.g. an artifact-registration marker →
    `ArtifactStore`).
 
-> **Example.** The original TypeScript host (now `migration-reference/`) supplied a `render_table` /
+> **Example.** The original TypeScript host supplied a `render_table` /
 > `render_chart` / `create_dashboard` / `generate_pptx` bundle plus a `pt` CLI baked into its image —
 > precisely such a plugin bundle. In Agent Bob those live *with the product*, not in the core; the
 > library names no product tools.

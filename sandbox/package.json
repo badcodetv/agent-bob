@@ -1,6 +1,7 @@
 {
   "name": "@agentkit/sandbox",
   "version": "0.0.0-staged",
+  "license": "MIT",
   "private": true,
   "description": "The in-image agent: a thin Fastify server that drives the Claude Agent SDK and emits an SSE event stream. The only agentkit code that runs INSIDE the container. See ../docs/07-in-image-agent.md.",
   "type": "module",

@@ -365,4 +365,4 @@ table.
 **Provenance.** This design was ported from an in-house TypeScript orchestrator ("Platinum"), which
 bundled generic orchestration logic together with Docker and blob-storage plumbing. The port pulled
 the generic logic up into Go and left a small contract to the engine. The original TypeScript source
-is kept for reference in `migration-reference/` — do not build or import it.
+is not part of this repository.

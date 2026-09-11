@@ -38,8 +38,7 @@ Agent Bob. Three pieces:
   replayed sessions from the canonical event stream, plus the product-layer pages. The shell that
   composes it is `examples/web/`, which is what the stack serves.
 
-> **Status / provenance.** Private use for now (the source is bayesprice-owned — a public release
-> would need licensing resolved first). All three packages build and test; the gates are
+> **Status / provenance.** MIT-licensed (`LICENSE`, copyright BadCode). All three packages build and test; the gates are
 > `go build ./... && go vet ./... && go test ./...` from `go/` (Go floor is now **1.25**, raised by
 > the GCP SDK) and each JS package's own `typecheck` + `test` scripts. Don't quote test counts
 > here — `.github/workflows/ci.yml` runs all three and is the live number.
@@ -184,7 +183,6 @@ If you need to understand the system rather than patch one file, read in this or
 | `web/` | React component library: chat (one event reducer drives live + replay identically) plus the product-layer pages — project settings, workers, events/jobs, subscriptions + schedules editors, changelog. No router; the app shell is `examples/web/`. |
 | `installations/` | **Example** base images (`core`, `example`) — see `installations/README.md`. Real per-project images live in their own project repos. |
 | `docs/` | Numbered architecture docs, consolidated 2026-07-22 (numbering has deliberate gaps): `01-architecture`, `02-execution-environment`, `03-image-registry`, `05-event-streaming`, `06-artifacts`, `07-in-image-agent`, `13-fleet-placement`, `14-host-adapters`, `15-standalone-stack`, `18-workers-memory-events` (the product layer, from an operator's seat — read it before touching workers/memory/events code; **§9a** is onboarding, the charter, the architect's loop, and the unhedged statement that the loop has no mechanical brake), `19-embedding` (integration guide + hazard log for an application embedding Bob: the three credentials, the project map's object form, named sessions, session schedules, embed tokens/iframe, artifact + memory reads), `20-datasets` (the dataset atom — CAS writes, the two byte paths, the canonical CSV, retention and the shared-blob-prefix warning — plus `POST /agent/memories` and the provenance trust rule an embedder holding authoritative state depends on). Order: see **Reading path** above. The authoritative product spec is `docs/product/17-product-spec.md` (entry point: goal, atoms, principles, § map) + `docs/product/00`–`09` (`00-overview` = quick map; component designs; original § numbers preserved). The research trail and executed plan records live beside the spec as dated files in the same folder. |
-| `migration-reference/` | **Reference only — do NOT build or import.** Platinum host-side image pipeline + the original Platinum installations, kept to port from. May contain host-app coupling. |
 | `deploy/`, `docker-compose*.yml`, `README-stack.md` | The standalone stack (run it with one command — below). `deploy/gcp/setup.sh` provisions the GCP side (idempotent, safe to re-run). |
 | `e2e/`, `examples/` | End-to-end tests — **`e2e/features/` + `playwright.stack.config.ts` is the only rig**, run against the compose stack (the legacy Vite rig under `e2e/tests/` was deleted 2026-08-08). `e2e/experiments/` is the offline comparison rig, run with `./e2e/experiments/run.sh test`. Example host + `examples/web/` (the app shell the stack actually serves — `web/` is a component library with no router). |
 | ~~`mock-server/`~~ | **Deleted 2026-08-08** along with its `docker-compose.test.yml` service block (that file stays — `go/systemtest/` needs its `dind` + `registry`). The stack's mock mode is `go/mockmodel` + `go/modelproxy`. |
@@ -300,9 +298,9 @@ Product layer (all Postgres-only, all in `go/agentdb/` + `go/cmd/agentd/`):
 1. **Liftability invariant.** The `go/` module must import **nothing** from any host app — CI
    (`.github/workflows/ci.yml`) enforces this. Keep the engine self-contained.
 2. **Module path** is `github.com/badcodetv/agent-bob`. Don't reintroduce the old
-   `bayes-price/agentkit` path or any Platinum coupling.
-3. **`migration-reference/` is reference, not code.** Don't build it, import it, or wire it into the
-   module. Port *from* it deliberately (see `MIGRATION.md`).
+   module path or any Platinum coupling.
+3. **`migration-reference/` is gone** (removed 2026-09-11). The original host pipeline it held is
+   no longer in this repo; don't recreate it.
 4. **Installation Dockerfiles never set** `CMD`/`ENTRYPOINT`/`EXPOSE`/`HEALTHCHECK`/`WORKDIR` — the
    sandbox base owns those. Installations only add environment, tools, and `/workspace` content.
    (`WORKDIR` was added to that list on 2026-08-13: `core` and `example` both set it, which broke
