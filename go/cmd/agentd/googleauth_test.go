@@ -184,6 +184,15 @@ func TestParseProjectMapConnections(t *testing.T) {
 	if connectionSpecsOf(nil) != nil {
 		t.Fatal("connectionSpecsOf(nil) must be nil-tolerant")
 	}
+
+	// The flat legacy form yields no connections: it has nowhere to put them.
+	flat, err := parseProjectSettings([]byte(`{"a@b.c": ["p1"]}`))
+	if err != nil {
+		t.Fatalf("parse flat form: %v", err)
+	}
+	if got := connectionSpecsOf(flat); len(got) != 0 {
+		t.Fatalf("connectionSpecsOf(flat form) = %v, want none", got)
+	}
 }
 
 // parseProjectMap keeps its old signature and old behaviour — it is what the
@@ -221,14 +230,18 @@ func TestParseProjectMapObjectFormErrors(t *testing.T) {
 		{"bad project id", `{"projects": {"Wolf_Prod": {}}}`, "Wolf_Prod"},
 		{"nothing at all", `{"users": {}, "projects": {}}`, "empty"},
 		{"user with no projects", `{"users": {"a@b.c": []}}`, "a@b.c"},
-		{"connection reserved name", `{"projects": {"wolf": {"connections": {"core": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "core"},
-		{"connection bad name", `{"projects": {"wolf": {"connections": {"Bad Name": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "Bad Name"},
-		{"connection bad url", `{"projects": {"wolf": {"connections": {"github": {"url": "not-a-url", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "github"},
-		{"connection plain http non-localhost", `{"projects": {"wolf": {"connections": {"github": {"url": "http://example.com", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "github"},
-		{"connection missing token_env", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer"}}}}}}`, "github"},
-		{"connection bearer with google fields", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X", "client_id_env": "Y"}}}}}}`, "github"},
-		{"connection bad env var name", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "bad-name"}}}}}}`, "github"},
-		{"connection unknown auth type", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "oauth1"}}}}}}`, "github"},
+		{"connection reserved name", `{"projects": {"wolf": {"connections": {"core": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, `project "wolf": connections: "core"`},
+		{"connection bad name", `{"projects": {"wolf": {"connections": {"Bad Name": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, `project "wolf": connections: "Bad Name"`},
+		{"connection bad url", `{"projects": {"wolf": {"connections": {"github": {"url": "not-a-url", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection plain http non-localhost", `{"projects": {"wolf": {"connections": {"github": {"url": "http://example.com", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection missing token_env", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection bearer with google fields", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X", "client_id_env": "Y"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection bad env var name", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "bad-name"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection unknown auth type", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "oauth1"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection missing url", `{"projects": {"wolf": {"connections": {"github": {"auth": {"type": "bearer", "token_env": "X"}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection missing auth type", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {}}}}}}`, `project "wolf": connections: "github"`},
+		{"connection google_oauth missing fields", `{"projects": {"wolf": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_oauth"}}}}}}`, `project "wolf": connections: "gmail"`},
+		{"connection google_oauth with token_env", `{"projects": {"wolf": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_oauth", "token_env": "X", "client_id_env": "A", "client_secret_env": "B", "refresh_token_env": "C"}}}}}}`, `project "wolf": connections: "gmail"`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
