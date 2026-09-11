@@ -721,6 +721,7 @@ services:
   agentd:
     volumes:
       - /srv/apps/bob/secrets/gcp-key.json:/gcp/key.json:ro
+      - /srv/apps/bob/secrets/projects.json:/secrets/projects.json:ro
 volumes:
   pg-data:
     driver: local
@@ -743,16 +744,27 @@ chmod +x /srv/apps/bob/up.sh
 
 ### 11d. Production settings (`/srv/apps/bob/src/.env`)
 
+The project map (who may log in) lives in its own file, not inline in `.env`, so that adding
+someone is "edit the file", not "edit `.env` and restart the stack" — agentd re-reads
+`AGENTKIT_PROJECT_MAP_FILE` on SIGHUP and every `AGENTKIT_PROJECT_MAP_RELOAD` (default 60s; see
+`.env.example`). A malformed rewrite is logged and changes nothing; the previous map keeps
+serving.
+
 ```bash
+cat > /srv/apps/bob/secrets/projects.json <<'EOF'
+{"kaiyadavenport@gmail.com":["*"]}
+EOF
+chmod 600 /srv/apps/bob/secrets/projects.json
+
 cat > /srv/apps/bob/src/.env <<EOF
 # ── Network: only reachable from Caddy, never from the internet directly ──
 WEB_PORT=127.0.0.1:8100
 AGENTKIT_PUBLIC_BASE_URL=https://bob.badcode.tv
 
-# ── Login: Google, and who may log in ──
+# ── Login: Google, and who may log in (see compose.ovh.yml's projects.json mount) ──
 AGENTKIT_JWT_SECRET=$(openssl rand -hex 32)
 GOOGLE_CLIENT_ID=PASTE-FROM-YOUR-LAPTOP-.env
-AGENTKIT_PROJECT_MAP={"kaiyadavenport@gmail.com":["*"]}
+AGENTKIT_PROJECT_MAP_FILE=/secrets/projects.json
 
 # ── Database password (Postgres only listens inside the stack) ──
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
@@ -781,6 +793,11 @@ nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
   has an unauthenticated route that spends the Anthropic key (`docs/19-embedding.md`, hazard
   H6). It is safe only while `agentd` is unreachable from outside, which this setup guarantees.
   Never publish another port.
+
+**Adding someone later** is editing `/srv/apps/bob/secrets/projects.json` and either waiting for
+the next reload (`AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) or sending SIGHUP for an immediate
+one: `docker compose --project-directory /srv/apps/bob/src -f /srv/apps/bob/src/docker-compose.yml
+-f /srv/apps/bob/compose.ovh.yml kill -s SIGHUP agentd`. No restart, no downtime.
 
 ### 11e. Start it
 
