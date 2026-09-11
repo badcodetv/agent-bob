@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ConfigApiOptions } from './configApi.js'
 import { buildActivity, type ActivityLens, type ActivityRecord } from './activity.js'
+import { revertBlocks as computeRevertBlocks, type RevertBlock } from './configLog.js'
 import useAttentionRequests from './useAttentionRequests.js'
 import useConfigLog from './useConfigLog.js'
 import useEventsOverview from './useEvents.js'
@@ -89,6 +90,16 @@ export interface ActivityApi {
   reload: () => Promise<void>
   /** The shared clock, unix MILLISECONDS. */
   nowMs: number
+  /**
+   * Which `change` records cannot be reverted, and why (§15.10's rule: only the
+   * newest change to a thing can be put back). Computed from `log.entries` —
+   * the FULL changelog, not the lens/window-filtered `records` — because the
+   * "is this the newest?" question has to be answered against the whole
+   * history the server holds, not just what the rail happens to be showing.
+   * Keyed by `ChangelogEntry.id` (== the config event id), the same key
+   * `ActivityRecord.entry` carries.
+   */
+  revertBlocks: Map<string, RevertBlock>
 }
 
 export default function useActivity(options: UseActivityOptions = {}): ActivityApi {
@@ -180,6 +191,8 @@ export default function useActivity(options: UseActivityOptions = {}): ActivityA
     ],
   )
 
+  const revertBlocksMap = useMemo(() => computeRevertBlocks(log.entries), [log.entries])
+
   return {
     records,
     loading: overview.loading || attention.loading || log.loading || schedules.loading,
@@ -194,5 +207,6 @@ export default function useActivity(options: UseActivityOptions = {}): ActivityA
     markSeen: watermark.mark,
     reload,
     nowMs: tickNowSeconds * 1000,
+    revertBlocks: revertBlocksMap,
   }
 }
