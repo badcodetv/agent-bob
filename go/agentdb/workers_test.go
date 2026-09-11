@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -527,5 +528,36 @@ func TestWorkersLivePG_SchemaDefaults(t *testing.T) {
 	}
 	if thawed.Frozen {
 		t.Fatalf("frozen: false did not persist on live Postgres — the gorm-default trap")
+	}
+}
+
+func TestValidateConnectionName(t *testing.T) {
+	tests := []struct {
+		name    string
+		conn    string
+		wantErr bool
+	}{
+		{"simple", "github", false},
+		{"digits and dash", "gmail-drafts2", false},
+		{"underscore", "gmail_drafts", false},
+		{"leading digit", "2fa", false},
+		{"empty", "", true},
+		{"leading hyphen", "-github", true},
+		{"leading underscore", "_github", true},
+		{"space", "git hub", true},
+		{"uppercase allowed", "GitHub", false},
+		{"too long", strings.Repeat("a", 65), true},
+		{"max length ok", strings.Repeat("a", 64), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateConnectionName(tc.conn)
+			if tc.wantErr && !errors.Is(err, ErrWorkerInvalid) {
+				t.Fatalf("ValidateConnectionName(%q): want ErrWorkerInvalid, got %v", tc.conn, err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateConnectionName(%q): want nil, got %v", tc.conn, err)
+			}
+		})
 	}
 }

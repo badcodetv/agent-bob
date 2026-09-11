@@ -134,6 +134,33 @@ func NewWorker(project, name string) *Worker {
 // (e.g. email-answerer, email-review-consultant).
 var workerNameRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
+// connectionNameRe is the MCP server-name rule (mcpServerNamePattern,
+// go/agentdb/sessions.go:64) reused for connection names: the sandbox derives
+// tool names (mcp__<name>__*) from the connection name a grant resolves to, so
+// anything exotic would produce untypeable tools.
+var connectionNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
+// maxConnectionNameLen bounds a connection name at 64 bytes, matching the MCP
+// server-name rule it borrows.
+const maxConnectionNameLen = 64
+
+// ValidateConnectionName is the identity rule for a connection name — used by
+// both the project map (go/connections) and worker grants (workers.Connections)
+// so the two agree on what a name looks like without either importing the
+// other's package.
+func ValidateConnectionName(name string) error {
+	if name == "" {
+		return fmt.Errorf("%w: connection name is required", ErrWorkerInvalid)
+	}
+	if len(name) > maxConnectionNameLen {
+		return fmt.Errorf("%w: connection name %q is longer than %d bytes", ErrWorkerInvalid, name, maxConnectionNameLen)
+	}
+	if !connectionNameRe.MatchString(name) {
+		return fmt.Errorf("%w: connection name %q must match %s", ErrWorkerInvalid, name, connectionNameRe)
+	}
+	return nil
+}
+
 // ValidateWorkerName is the identity rule, exported so a caller can refuse a bad
 // name BEFORE it starts writing (§9: validate first, never half-write). It is
 // the same rule validateWorker applies — one regexp, not two.
