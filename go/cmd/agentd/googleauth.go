@@ -371,15 +371,19 @@ type loginResponse struct {
 	LoginToken string         `json:"login_token,omitempty"`
 }
 
-// mintProjectTokens issues one project-scoped JWT per project ID.
-func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string) ([]projectToken, error) {
+// mintProjectTokens issues one project-scoped JWT per project ID. operator
+// stamps the onboarding-plan §1.1 `operator:true` claim on every token minted:
+// true only for a wildcard login's tokens (writeLoginResponse) and the
+// wildcard project-token exchange (authProjectTokenHandler) — never for a
+// non-wildcard Google account.
+func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string, operator bool) ([]projectToken, error) {
 	out := make([]projectToken, 0, len(projects))
 	for _, p := range projects {
-		tok, err := issuer.Issue(r.Context(), extension.ContextScope{
+		tok, err := issuer.IssueOperator(r.Context(), extension.ContextScope{
 			UserEmail: email,
 			Customer:  p,
 			Job:       "web",
-		}, "")
+		}, "", operator)
 		if err != nil {
 			return nil, err
 		}
@@ -389,7 +393,10 @@ func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, 
 }
 
 func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaims.Issuer, email string, projects []string, wildcard bool) {
-	tokens, err := mintProjectTokens(r, issuer, email, projects)
+	// The operator claim tracks wildcard-ness exactly (§1.1): a wildcard grant
+	// (including the test login, which is always a wildcard) is the operator;
+	// a plain per-project Google account is not.
+	tokens, err := mintProjectTokens(r, issuer, email, projects, wildcard)
 	if err != nil {
 		http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -576,7 +583,9 @@ func authProjectTokenHandler(secret []byte, issuer *devclaims.Issuer) http.Handl
 			http.Error(w, "not a wildcard login token", http.StatusForbidden)
 			return
 		}
-		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project})
+		// Reaching here already proved customer == projectWildcard (checked
+		// above), so this mint is always on behalf of an operator (§1.1).
+		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project}, true)
 		if err != nil {
 			http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 			return

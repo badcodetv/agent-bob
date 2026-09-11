@@ -79,6 +79,17 @@ func main() {
 		log.Printf("[agentd] store=sqlite %s", dbPath)
 	}
 
+	// ── Default project budgets (onboarding-work-plan §1.3) ──────────────────────
+	// A brand-new project (no project_settings row yet) starts braked at these
+	// daily token budgets; an existing project is untouched. agentd is the only
+	// caller of agentdb.SetDefaultBudgets — see defaultbudgets.go for why the
+	// env read lives here and not in agentdb.
+	defaultTokensSoft, defaultTokensHard, err := resolveDefaultBudgets(os.Getenv)
+	must(err)
+	must(agentdb.SetDefaultBudgets(defaultTokensSoft, defaultTokensHard))
+	log.Printf("[agentd] default project budgets: daily_tokens_soft=%d daily_tokens_hard=%d (0=off)",
+		defaultTokensSoft, defaultTokensHard)
+
 	// ── Blob backend (shared by registry + artifact store) ───────────────────────
 	// fs (default) or gcs — see backends.go. One BlobStore serves the artifact
 	// bytes and (for the blob-archive registry) snapshot tarballs.

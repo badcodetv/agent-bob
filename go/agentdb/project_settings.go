@@ -49,6 +49,36 @@ const (
 	DefaultGitSubfolder = "bob"
 )
 
+// defaultDailyTokensSoft and defaultDailyTokensHard are the budgets
+// DefaultProjectSettings hands to a project that has never had a settings row
+// written (onboarding-work-plan §1.3). They start at zero — today's
+// behaviour, budgets off — and are changed only by SetDefaultBudgets.
+//
+// agentdb must not read environment variables itself (CLAUDE.md's
+// liftability invariant: the engine imports nothing host-specific); main.go
+// reads AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT/_HARD once at boot and calls
+// SetDefaultBudgets, so this package only ever sees plumbed values.
+var (
+	defaultDailyTokensSoft int64
+	defaultDailyTokensHard int64
+)
+
+// SetDefaultBudgets configures the daily token budgets DefaultProjectSettings
+// applies to a project with no stored settings row. Call once at boot, before
+// serving traffic — it is package state, not per-Store state, so calling it
+// again anywhere but a single-threaded boot path (or a test that restores the
+// previous values) is a race. Negative values are refused; zero (the zero
+// value already) means off, exactly as it does once stored in the column.
+func SetDefaultBudgets(soft, hard int64) error {
+	if soft < 0 || hard < 0 {
+		return fmt.Errorf("%w: default daily token budgets must not be negative (soft=%d hard=%d)",
+			ErrInvalidProjectSettings, soft, hard)
+	}
+	defaultDailyTokensSoft = soft
+	defaultDailyTokensHard = hard
+	return nil
+}
+
 // ProjectSettings is the per-project configuration row (§5): one row per
 // project (the customer string), created lazily on first write. Projects
 // themselves stay "a name that exists once something carries it", so reads of
@@ -135,6 +165,8 @@ func DefaultProjectSettings(project string) *ProjectSettings {
 		MCPConfig:         JSONMap{},
 		AttentionChannel:  JSONMap{},
 		MaxConcurrentJobs: DefaultMaxConcurrentJobs,
+		DailyTokensSoft:   defaultDailyTokensSoft,
+		DailyTokensHard:   defaultDailyTokensHard,
 		BriefingMaxBytes:  DefaultBriefingMaxBytes,
 		SnapshotTTLDays:   DefaultSnapshotTTLDays,
 	}

@@ -362,6 +362,51 @@ func verifyRequest(body string) *http.Request {
 	return req
 }
 
+// decodeOperatorClaim reads the operator claim off one project token (ok=false
+// when it is absent, matching how the bearer path treats a missing claim).
+func decodeOperatorClaim(t *testing.T, tokenStr string, secret []byte) (value, present bool) {
+	t.Helper()
+	claims := jwt.MapClaims{}
+	tok, err := jwt.ParseWithClaims(tokenStr, claims, func(*jwt.Token) (any, error) { return secret, nil },
+		jwt.WithValidMethods([]string{"HS256"}))
+	if err != nil || !tok.Valid {
+		t.Fatalf("parse token: %v", err)
+	}
+	v, present := claims[devclaims.OperatorClaim]
+	b, _ := v.(bool)
+	return b, present
+}
+
+// TestAuthGoogleHandler_OperatorClaim pins onboarding-work-plan §1.1: a
+// non-wildcard Google account's project tokens never carry `operator:true`.
+func TestAuthGoogleHandler_OperatorClaim(t *testing.T) {
+	secret := []byte("test-secret")
+	issuer := devclaims.NewWithTTL(secret, time.Hour)
+	pm := projectMap{"kai@example.com": {"apples-oranges"}}
+
+	srv := fakeTokeninfo(t, 200, map[string]string{
+		"aud": "client-1", "email": "kai@example.com", "email_verified": "true",
+	})
+	defer srv.Close()
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, issuer)
+
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var resp loginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Projects) != 1 {
+		t.Fatalf("projects = %v, want 1", resp.Projects)
+	}
+	if value, present := decodeOperatorClaim(t, resp.Projects[0].Token, secret); present && value {
+		t.Fatalf("a non-wildcard Google account's token must not carry operator:true (present=%v value=%v)", present, value)
+	}
+}
+
 func TestAuthVerifyGoogleHandler(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -587,6 +632,24 @@ func TestAuthPasswordHandler(t *testing.T) {
 			t.Fatalf("wildcard=%v login_token=%q, want wildcard grant", resp.Wildcard, resp.LoginToken)
 		}
 	})
+
+	// §1.1: the test login is an implicit wildcard, so its project tokens must
+	// carry operator:true.
+	t.Run("test login's project tokens carry the operator claim", func(t *testing.T) {
+		rec := post(`{"email":"test@example.com","password":"bob-e2e"}`)
+		var resp loginResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Projects) == 0 {
+			t.Fatalf("no projects minted")
+		}
+		for _, p := range resp.Projects {
+			if value, present := decodeOperatorClaim(t, p.Token, secret); !present || !value {
+				t.Fatalf("project %s: operator claim present=%v value=%v, want true", p.ID, present, value)
+			}
+		}
+	})
 }
 
 func TestAuthProjectTokenHandler(t *testing.T) {
@@ -624,6 +687,10 @@ func TestAuthProjectTokenHandler(t *testing.T) {
 			jwt.WithValidMethods([]string{"HS256"}))
 		if err != nil || !tok.Valid || claims["customer"] != "grapes-kiwis" || claims["email"] != "dev@example.com" {
 			t.Fatalf("minted claims = %v err=%v", claims, err)
+		}
+		// §1.1: the wildcard exchange always mints operator:true.
+		if v, _ := claims[devclaims.OperatorClaim].(bool); !v {
+			t.Fatalf("minted claims = %v, want operator:true", claims)
 		}
 	})
 

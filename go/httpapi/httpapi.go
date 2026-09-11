@@ -35,6 +35,12 @@ type Identity struct {
 	// v3 must still resolve to that name's requested version after a tick moved
 	// it to v4. Empty means unrestricted within Customer.
 	DatasetScope string
+	// Operator marks the identity allowed to change a project's token budgets
+	// and job-concurrency cap (onboarding-work-plan §1.1, PutProjectSettings).
+	// True for a wildcard login's project tokens, the wildcard project-token
+	// exchange, an API key, and the dev-open principal; false for a
+	// non-wildcard Google account, an embed token and a dataset token.
+	Operator bool
 }
 
 // IdentityFunc resolves the principal from a request. The host reads its own
@@ -464,6 +470,11 @@ type Endpoints struct {
 	// one place; Mux() does NOT register it — NewGitWebhookHandler
 	// (gitwebhook.go) builds the http.Handler the host mounts by hand.
 	GitWebhook string // "POST /agent/git/webhook"
+
+	// Whoami answers who the caller's credential is and whether it is the
+	// operator (onboarding-work-plan §1.1) — the console's one read for
+	// deciding whether to render the budget-editing form.
+	Whoami string // "GET /agent/whoami"
 }
 
 // DefaultEndpoints is the canonical route layout.
@@ -535,6 +546,8 @@ var DefaultEndpoints = Endpoints{
 	GitBootstrap:        GitBootstrapEndpoint,
 	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
 	GitWebhook: "POST /agent/git/webhook",
+
+	Whoami: "GET /agent/whoami",
 }
 
 // Mux registers every handler on a fresh *http.ServeMux. Mount it under your
@@ -628,6 +641,8 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.DownloadArtifact:          h.DownloadArtifact,
 		e.SessionArtifactsByName:    h.SessionArtifactsByName,
 		e.SessionArtifactFileByName: h.SessionArtifactFileByName,
+
+		e.Whoami: h.Whoami,
 	} {
 		if pattern != "" {
 			m.HandleFunc(pattern, handler)

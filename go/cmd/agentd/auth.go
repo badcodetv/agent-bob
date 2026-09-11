@@ -26,6 +26,12 @@ type principal struct {
 	// and confines the credential to that one dataset. Enforcement lives in
 	// httpapi/datasets.go, on the download route alone.
 	datasetScope string
+	// operator marks the holder of a wildcard-login project token (or the
+	// wildcard project-token exchange, or an API key, or the dev-open
+	// principal) as the operator (onboarding-work-plan §1.1): the only
+	// identity PutProjectSettings lets change budgets/caps. False for a
+	// non-wildcard Google account, an embed token and a dataset token.
+	operator bool
 }
 
 type ctxKey struct{}
@@ -127,8 +133,11 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			// obviously-synthetic label so anything that records "who did this"
 			// records the project's key rather than an empty string, which is
 			// how a human edit is spelled elsewhere.
+			// An API key is the project's own backend speaking for itself —
+			// the same footing as the human who holds the wildcard login
+			// (§1.1) — so it carries the operator claim too.
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
-				r.Context(), principal{email: apiKeyEmail(project), customer: project})))
+				r.Context(), principal{email: apiKeyEmail(project), customer: project, operator: true})))
 			return
 		}
 		// The ?token= leg (O5 of design/2026-08-20-agent-wolf.md): the ONE place
@@ -166,8 +175,11 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			}
 		}
 		if devOpen {
+			// The zero-config demo has exactly one identity and no operator
+			// to distinguish it from — treat it as the operator (§1.1), the
+			// same call as the API-key path above.
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
-				r.Context(), principal{email: "demo@example.com", customer: "demo"})))
+				r.Context(), principal{email: "demo@example.com", customer: "demo", operator: true})))
 			return
 		}
 		if len(secret) == 0 {
@@ -238,6 +250,13 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 				p.embedSession = sid
 			}
 		}
+		// Only a token minted by mintProjectTokens with operator=true carries
+		// this claim (a wildcard login's tokens and the wildcard-exchange
+		// token, §1.1) — an embed token never does, because embedtoken.go
+		// mints through IssueScoped, not IssueOperator.
+		if v, ok := claims[devclaims.OperatorClaim].(bool); ok {
+			p.operator = v
+		}
 		next.ServeHTTP(w, r.WithContext(contextWithPrincipal(r.Context(), p)))
 	})
 }
@@ -253,5 +272,6 @@ func identityFromRequest(r *http.Request) (httpapi.Identity, error) {
 		Customer:     p.customer,
 		SessionScope: p.embedSession,
 		DatasetScope: p.datasetScope,
+		Operator:     p.operator,
 	}, nil
 }

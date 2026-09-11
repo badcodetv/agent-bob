@@ -142,6 +142,12 @@ services:
       # setting it in .env is not a silent no-op; unset → agentd's 64MiB
       # default).
       AGENTKIT_DATASET_MAX_BYTES: ${AGENTKIT_DATASET_MAX_BYTES:-}
+      # Default daily token budgets for a BRAND NEW project (onboarding-work-plan
+      # §1.3). Applied only when a project has no project_settings row yet;
+      # existing projects keep what they have. Unset or 0 → off (today's
+      # behaviour).
+      AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT: ${AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT:-}
+      AGENTKIT_DEFAULT_DAILY_TOKENS_HARD: ${AGENTKIT_DEFAULT_DAILY_TOKENS_HARD:-}
       # Agent Wolf project credentials (see .env.example). WOLF_API_KEY is
       # resolved via AGENTKIT_PROJECT_MAP's object form (api_key_env);
       # WOLF_MCP_TOKEN reaches session containers only because

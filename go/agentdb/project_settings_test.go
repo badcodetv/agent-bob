@@ -49,6 +49,78 @@ func TestProjectSettingsDefaultsForUnwrittenProject(t *testing.T) {
 	}
 }
 
+// SetDefaultBudgets (onboarding-work-plan §1.3) changes what
+// DefaultProjectSettings hands to a project with no stored row — and ONLY
+// that: a project that already has a row keeps it untouched.
+func TestSetDefaultBudgets(t *testing.T) {
+	t.Cleanup(func() {
+		if err := SetDefaultBudgets(0, 0); err != nil {
+			t.Fatalf("restore SetDefaultBudgets(0, 0): %v", err)
+		}
+	})
+
+	t.Run("negative values are refused and leave the previous defaults in place", func(t *testing.T) {
+		if err := SetDefaultBudgets(10, 20); err != nil {
+			t.Fatalf("SetDefaultBudgets(10, 20): %v", err)
+		}
+		if err := SetDefaultBudgets(-1, 20); err == nil {
+			t.Fatalf("SetDefaultBudgets(-1, 20): want error")
+		}
+		if !errors.Is(SetDefaultBudgets(-1, 20), ErrInvalidProjectSettings) {
+			t.Fatalf("SetDefaultBudgets(-1, 20): want ErrInvalidProjectSettings")
+		}
+		got := DefaultProjectSettings("whatever")
+		if got.DailyTokensSoft != 10 || got.DailyTokensHard != 20 {
+			t.Fatalf("a refused call must not change the defaults: got %d/%d, want 10/20",
+				got.DailyTokensSoft, got.DailyTokensHard)
+		}
+	})
+
+	t.Run("DefaultProjectSettings picks up the configured defaults", func(t *testing.T) {
+		if err := SetDefaultBudgets(50000, 100000); err != nil {
+			t.Fatalf("SetDefaultBudgets: %v", err)
+		}
+		got := DefaultProjectSettings("brand-new")
+		if got.DailyTokensSoft != 50000 || got.DailyTokensHard != 100000 {
+			t.Fatalf("defaults = %d/%d, want 50000/100000", got.DailyTokensSoft, got.DailyTokensHard)
+		}
+	})
+
+	t.Run("a project that already has a stored row is untouched", func(t *testing.T) {
+		s := newProjectSettingsTestStore(t)
+		if err := SetDefaultBudgets(0, 0); err != nil {
+			t.Fatalf("SetDefaultBudgets(0, 0): %v", err)
+		}
+		if _, err := s.PutProjectSettings(context.Background(), &ProjectSettings{
+			Project: "existing", DailyTokensSoft: 5, DailyTokensHard: 9,
+		}, ConfigWrite{}); err != nil {
+			t.Fatalf("seed put: %v", err)
+		}
+
+		if err := SetDefaultBudgets(50000, 100000); err != nil {
+			t.Fatalf("SetDefaultBudgets: %v", err)
+		}
+		got, err := s.GetProjectSettings(context.Background(), "existing")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.DailyTokensSoft != 5 || got.DailyTokensHard != 9 {
+			t.Fatalf("existing row must keep what it has: got %d/%d, want 5/9",
+				got.DailyTokensSoft, got.DailyTokensHard)
+		}
+
+		// A genuinely new project, meanwhile, gets the new defaults.
+		fresh, err := s.GetProjectSettings(context.Background(), "genuinely-new")
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if fresh.DailyTokensSoft != 50000 || fresh.DailyTokensHard != 100000 {
+			t.Fatalf("a fresh project must see the new defaults: got %d/%d, want 50000/100000",
+				fresh.DailyTokensSoft, fresh.DailyTokensHard)
+		}
+	})
+}
+
 // Round-trip every column, including the four §5 budget/cap columns and the
 // zero-means-something cases the spec calls out.
 func TestProjectSettingsPutRoundTrip(t *testing.T) {
