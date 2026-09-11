@@ -582,10 +582,13 @@ func (a *sessionTokenAuth) verifyToken(ctx context.Context, raw string, requireL
 // runs. The Status values actually SET on a session row today
 // (go/cmd/agentd/dispatch.go, go/httpapi/session.go) are "creating", "running"
 // and the terminal "error"; the gorm default is "active". SnapshotState is
-// only ever compared to "archived" (go/agentdb/sessions.go), which is the
-// value the idle-archive sweep is DESIGNED to leave — see the Discovered
-// Issues Log entry from this ticket about that sweep not actually writing it
-// yet.
+// only ever READ, never written, elsewhere in the codebase
+// (go/agentdb/sessions.go:455,484, go/httpapi/lifecycle.go:133) — the
+// idle-archive sweep (go/cmd/agentd/gc.go) calls SetSnapshotHandle but never
+// sets SnapshotState = "archived". So the archived half of this check has no
+// live path to it today: an expired token for an idle-archived session is
+// still honoured. It starts working the moment something makes the sweep
+// write that field; nothing here needs to change when it does.
 func sessionIsLive(sess *agentdb.Session) bool {
 	if sess == nil {
 		return false

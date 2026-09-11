@@ -814,10 +814,17 @@ uses (`authenticate` there calls the same method with `requireLive=false`, so th
 drift). `requireLive=true` means: a valid, unexpired token is always honoured; an **expired** one is
 honoured only while its session is still live — not archived (`SnapshotState == "archived"`) and
 not in a terminal `Status` (today, that is just `"error"`; see `sessionIsLive` in
-`go/cmd/agentd/mcpserver.go`). A request that fails this is refused with a 401 JSON body and the
-upstream is never contacted. `/mcp` itself is unchanged (out of scope for T13; the same
-live-session gap for the core tools is still open — see the Discovered Issues Log entry T13 left in
-`design/2026-09-11-project-connections.md`). T12's `/connect/` proxy uses the same
+`go/cmd/agentd/mcpserver.go`). Of those two halves, only the `Status == "error"` one actually
+bites today: `SnapshotState` is only ever **read** (`go/agentdb/sessions.go:455,484`,
+`go/httpapi/lifecycle.go:133`), never **written** — the idle-archive sweep
+(`go/cmd/agentd/gc.go`) snapshots a session and calls `SetSnapshotHandle`, but nothing sets
+`SnapshotState = "archived"`. So an expired token for an idle-archived session is still
+forwarded with the real key today; the archived half of the rule is real code with no live path
+to it yet, and starts working the moment the archive sweep is made to write that field. A
+request that fails the live check (the `Status == "error"` half) is refused with a 401 JSON body
+and the upstream is never contacted. `/mcp` itself is unchanged: it deliberately keeps
+`requireLive=false` (out of scope for T13), so this gap does not apply there — the core tools
+already tolerate an archived session by design. T12's `/connect/` proxy uses the same
 `requireLive=true` rule.
 
 ### H7 — sessions created **before** T15 never gain core tools
