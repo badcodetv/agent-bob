@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/connections"
 )
 
 // ---------------------------------------------------------------------------
@@ -56,7 +57,10 @@ type fakeManagementStore struct {
 
 	memoryErr error
 	eventErr  error
-	nextID    int
+	// getWorkerErr makes GetWorker fail for one worker name — the store blip a
+	// caller's own holdings lookup must fail closed on.
+	getWorkerErr map[string]error
+	nextID       int
 }
 
 func newFakeManagementStore() *fakeManagementStore {
@@ -104,6 +108,9 @@ func (f *fakeManagementStore) ListWorkers(_ context.Context, project string) ([]
 
 func (f *fakeManagementStore) GetWorker(_ context.Context, project, name string) (*agentdb.Worker, error) {
 	f.scope(project)
+	if err := f.getWorkerErr[name]; err != nil {
+		return nil, err
+	}
 	w, ok := f.workers[key(project, name)]
 	if !ok {
 		return nil, fmt.Errorf("%w: %s/%s", agentdb.ErrWorkerNotFound, project, name)
@@ -343,7 +350,7 @@ func (f *fakeAttention) Request(_ context.Context, in attentionRequestInput) (*a
 }
 
 func testManagementTools(store managementStore, attention attentionRequester) *managementTools {
-	return newManagementTools(store, nil, attention, testPermalinker())
+	return newManagementTools(store, nil, attention, testPermalinker(), nil)
 }
 
 // seededTools returns the tools over a store holding one worker.
@@ -375,7 +382,7 @@ func TestManagementToolsSurface(t *testing.T) {
 		}
 	}
 	want := []string{
-		"worker_list", "worker_create", "worker_update",
+		"worker_list", "worker_create", "worker_update", "connection_list",
 		"worker_prompt_read", "worker_prompt_write",
 		"project_prompt_read", "project_prompt_write",
 		"subscription_list", "subscription_create", "subscription_delete",
@@ -843,6 +850,10 @@ func TestManagementToolsWorkerPromptWrite(t *testing.T) {
 func TestManagementToolsProjectPromptWrite(t *testing.T) {
 	store, tools := seededTools(t)
 	store.settings["acme"] = &agentdb.ProjectSettings{Project: "acme", SystemPrompt: "We are BadCode."}
+	// The project prompt steers every worker, so only a "*" holder may rewrite
+	// it (project connections, Decision 3) — the caller is given "*" here so
+	// this test keeps pinning what the write does, not who may make it.
+	store.workers[key("acme", "email-answerer")].Connections = agentdb.ConnectionList{"*"}
 
 	res, err := invokeTool(t, tools, "project_prompt_write", testCaller(), map[string]any{
 		"system_prompt": "We are BadCode. Write in plain English.",
@@ -1185,7 +1196,7 @@ func TestManagementToolsRequestHumanAttentionNeedsASession(t *testing.T) {
 // told. (A typed nil in an interface is not nil — this is the regression guard.)
 func TestManagementToolsRequestHumanAttentionUnavailable(t *testing.T) {
 	var svc *attentionService
-	tools := newManagementTools(newFakeManagementStore(), nil, svc, testPermalinker()).tools()
+	tools := newManagementTools(newFakeManagementStore(), nil, svc, testPermalinker(), nil).tools()
 
 	_, err := invokeTool(t, tools, "request_human_attention", testCaller(), map[string]any{"message": "help"})
 	if err == nil || !strings.Contains(err.Error(), "NO human was told") {
@@ -1201,6 +1212,8 @@ func TestManagementToolsRequestHumanAttentionUnavailable(t *testing.T) {
 func TestManagementToolsScopeAlwaysComesFromTheToken(t *testing.T) {
 	store, tools := seededTools(t)
 	caller := testCaller()
+	// "*" so project_prompt_write is allowed to reach the store at all.
+	store.workers[key("acme", "email-answerer")].Connections = agentdb.ConnectionList{"*"}
 
 	calls := []struct {
 		tool string
@@ -1209,6 +1222,7 @@ func TestManagementToolsScopeAlwaysComesFromTheToken(t *testing.T) {
 		{"worker_list", map[string]any{}},
 		{"worker_create", map[string]any{"name": "new-hire", "description": "d", "system_prompt": "p"}},
 		{"worker_update", map[string]any{"name": "email-answerer", "fields": map[string]any{"enabled": true}}},
+		{"connection_list", map[string]any{}},
 		{"worker_prompt_read", map[string]any{"name": "email-answerer"}},
 		{"worker_prompt_write", map[string]any{"name": "email-answerer", "system_prompt": "p2", "rationale": "r"}},
 		{"project_prompt_read", map[string]any{}},
@@ -1245,5 +1259,469 @@ func TestManagementToolsRejectUnknownArguments(t *testing.T) {
 				t.Fatalf("%s accepted an unknown argument: %v", tool.Name, err)
 			}
 		})
+	}
+}
+
+// ── Connections: grants under the trust rule (project connections, T9) ──────
+//
+// Decision 3 of design/2026-09-11-project-connections.md, as the core tools
+// see it. Reach into the outside world cannot be reverted, so:
+//
+//  1. a worker may GRANT only connections it holds itself; anyone may REMOVE;
+//  2. a worker may change another worker only while holding every connection
+//     that worker holds ("you cannot steer someone stronger"); and
+//  3. rewriting the project prompt, which every worker reads, needs "*".
+//
+// The caller throughout is testCaller()'s email-answerer; its holdings are
+// whatever its own row says.
+
+// connectionSecret is the value of every token env var in testConnections. It
+// must never appear in any tool result.
+const connectionSecret = "ghp_THIS-MUST-NEVER-LEAVE-AGENTD"
+
+// testConnections is a real Registry: acme has github and gmail (available)
+// and docs (unavailable — its env var is unset); globex has jira.
+func testConnections(t *testing.T) *connections.Registry {
+	t.Helper()
+	bearer := func(env string) connections.Spec {
+		return connections.Spec{
+			Description: "desc of " + env,
+			URL:         "https://mcp.example.com/" + strings.ToLower(env),
+			Auth:        connections.Auth{Type: connections.AuthBearer, TokenEnv: env},
+		}
+	}
+	specs := map[string]map[string]connections.Spec{
+		"acme": {
+			"github": bearer("ACME_GITHUB_PAT"),
+			"gmail":  bearer("ACME_GMAIL_TOKEN"),
+			"docs":   bearer("ACME_DOCS_TOKEN"),
+		},
+		"globex": {"jira": bearer("GLOBEX_JIRA")},
+	}
+	env := map[string]string{
+		"ACME_GITHUB_PAT": connectionSecret, "ACME_GMAIL_TOKEN": connectionSecret, "GLOBEX_JIRA": connectionSecret,
+	}
+	reg, err := connections.NewRegistry(specs, func(k string) string { return env[k] }, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	return reg
+}
+
+// connectionFixture seeds the caller (email-answerer) holding callerHolds and
+// a second worker, researcher, holding targetHolds.
+func connectionFixture(t *testing.T, callerHolds, targetHolds agentdb.ConnectionList) (*fakeManagementStore, []*mcpTool) {
+	t.Helper()
+	store := newFakeManagementStore()
+	caller := agentdb.NewWorker("acme", "email-answerer")
+	caller.SystemPrompt = "Answer customer email."
+	caller.Connections = callerHolds
+	store.seedWorker(caller)
+	target := agentdb.NewWorker("acme", "researcher")
+	target.Description = "researches"
+	target.SystemPrompt = "Research things."
+	target.Connections = targetHolds
+	store.seedWorker(target)
+	tools := newManagementTools(store, nil, &fakeAttention{}, testPermalinker(), testConnections(t)).tools()
+	return store, tools
+}
+
+// humanChat is an identified caller with no worker: a person chatting to Bob.
+// It holds nothing.
+func humanChat() mcpCaller {
+	return mcpCaller{Project: "acme", SessionID: "sess-h", Identified: true}
+}
+
+func TestConnectionGrantsUnderTheTrustRule(t *testing.T) {
+	cases := []struct {
+		name        string
+		caller      mcpCaller
+		callerHolds agentdb.ConnectionList
+		targetHolds agentdb.ConnectionList
+		tool        string
+		args        map[string]any
+		want        []string // nil = success; otherwise every substring of the refusal
+		stored      []string // researcher / new-hire's connections after success
+	}{
+		{name: "wildcard holder grants anything on create", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"github", "gmail"}},
+			stored: []string{"github", "gmail"}},
+		{name: "wildcard holder grants the wildcard", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"*"}},
+			stored: []string{"*"}},
+		{name: "wildcard holder grants on update", callerHolds: agentdb.ConnectionList{"*"},
+			targetHolds: agentdb.ConnectionList{"gmail"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{"gmail", "github"}}},
+			stored: []string{"gmail", "github"}},
+		{name: "gmail holder grants gmail", callerHolds: agentdb.ConnectionList{"gmail"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"gmail"}},
+			stored: []string{"gmail"}},
+		{name: "gmail holder cannot grant github", callerHolds: agentdb.ConnectionList{"gmail"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"gmail", "github"}},
+			want: []string{`"github"`, "can only grant connections it holds itself", "you hold [gmail]"}},
+		{name: "gmail holder cannot grant the wildcard", callerHolds: agentdb.ConnectionList{"gmail"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"*"}},
+			want: []string{`"*"`, "can only grant connections it holds itself"}},
+		{name: "gmail holder cannot add github on update", callerHolds: agentdb.ConnectionList{"gmail"},
+			targetHolds: agentdb.ConnectionList{"gmail"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{"gmail", "github"}}},
+			want: []string{`"github"`, "can only grant connections it holds itself"}},
+		{name: "gmail holder removes github from another worker", callerHolds: agentdb.ConnectionList{"gmail"},
+			targetHolds: agentdb.ConnectionList{"github", "gmail"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{"gmail"}}},
+			stored: []string{"gmail"}},
+		{name: "no-worker caller cannot grant", caller: humanChat(),
+			tool: "worker_create", args: map[string]any{"connections": []string{"github"}},
+			want: []string{`"github"`, "can only grant connections it holds itself", "you hold none"}},
+		{name: "no-worker caller can remove", caller: humanChat(),
+			targetHolds: agentdb.ConnectionList{"github"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{}}},
+			stored: []string{}},
+		{name: "a worker with nothing strips the architect's wildcard", callerHolds: agentdb.ConnectionList{},
+			targetHolds: agentdb.ConnectionList{"*"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{}}},
+			stored: []string{}},
+		{name: "a removal bundled with another field is not a pure removal", callerHolds: agentdb.ConnectionList{"gmail"},
+			targetHolds: agentdb.ConnectionList{"github", "gmail"},
+			tool:        "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{"gmail"}, "description": "x"}},
+			want: []string{"can reach connections you do not hold (github)"}},
+		{name: "unknown connection on create", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"jira"}},
+			want: []string{`no connection "jira" in this project`, "connection_list"}},
+		{name: "unknown connection on update", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_update", args: map[string]any{"fields": map[string]any{"connections": []string{"jira"}}},
+			want: []string{`no connection "jira" in this project`}},
+		{name: "duplicate entry", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"github", "github"}},
+			want: []string{`"github"`, "more than once"}},
+		{name: "blank entry", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{" "}},
+			want: []string{"blank"}},
+		{name: "a disabled caller holds nothing", callerHolds: agentdb.ConnectionList{"*"},
+			tool: "worker_create", args: map[string]any{"connections": []string{"github"}},
+			want: []string{"can only grant connections it holds itself", "you hold none"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, tools := connectionFixture(t, tc.callerHolds, tc.targetHolds)
+			if tc.name == "a disabled caller holds nothing" {
+				store.workers[key("acme", "email-answerer")].Enabled = false
+			}
+			caller := tc.caller
+			if caller.Project == "" {
+				caller = testCaller()
+			}
+			args := map[string]any{}
+			for k, v := range tc.args {
+				args[k] = v
+			}
+			subject := "researcher"
+			if tc.tool == "worker_create" {
+				subject = "new-hire"
+				args["description"], args["system_prompt"] = "d", "p"
+			}
+			args["name"] = subject
+			before := store.workers[key("acme", "researcher")].Connections
+
+			_, err := invokeTool(t, tools, tc.tool, caller, args)
+			if tc.want == nil {
+				if err != nil {
+					t.Fatalf("%s: %v", tc.tool, err)
+				}
+				got := store.workers[key("acme", subject)]
+				if got == nil || fmt.Sprint([]string(got.Connections)) != fmt.Sprint(tc.stored) || got.Connections == nil {
+					t.Fatalf("stored connections = %#v, want %v", got, tc.stored)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want a refusal mentioning %q", tc.want)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Fatalf("refusal %q should mention %q", err, w)
+				}
+			}
+			if countConfigWrites(store) != 0 {
+				t.Fatalf("a refused grant still wrote: %+v", store.writes)
+			}
+			if _, created := store.workers[key("acme", "new-hire")]; created {
+				t.Fatalf("a refused create stored a worker")
+			}
+			if got := store.workers[key("acme", "researcher")].Connections; fmt.Sprint(got) != fmt.Sprint(before) {
+				t.Fatalf("a refused update moved connections: %v → %v", before, got)
+			}
+		})
+	}
+}
+
+// A store failure reading the CALLER's own row must refuse, never be read as
+// "holds nothing" (which would still be safe) or — worse — skipped.
+func TestConnectionGrantFailsClosedWhenTheCallerCannotBeRead(t *testing.T) {
+	store, tools := connectionFixture(t, agentdb.ConnectionList{"*"}, nil)
+	store.getWorkerErr = map[string]error{"email-answerer": errDatabaseUnhappy}
+	_, err := invokeTool(t, tools, "worker_create", testCaller(), map[string]any{
+		"name": "new-hire", "description": "d", "system_prompt": "p", "connections": []string{"github"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "retry") {
+		t.Fatalf("want a retryable refusal, got %v", err)
+	}
+	if countConfigWrites(store) != 0 {
+		t.Fatalf("wrote despite not knowing what the caller holds: %+v", store.writes)
+	}
+}
+
+// Frozen still wins: a frozen target is refused as frozen, even for a pure
+// removal that the trust rule alone would allow.
+func TestConnectionRemovalFromAFrozenWorkerIsStillRefused(t *testing.T) {
+	store, tools := connectionFixture(t, agentdb.ConnectionList{"*"}, agentdb.ConnectionList{"github"})
+	store.workers[key("acme", "researcher")].Frozen = true
+	_, err := invokeTool(t, tools, "worker_update", testCaller(), map[string]any{
+		"name": "researcher", "fields": map[string]any{"connections": []string{}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "frozen") {
+		t.Fatalf("want the frozen refusal, got %v", err)
+	}
+	if got := store.workers[key("acme", "researcher")].Connections; len(got) != 1 {
+		t.Fatalf("a frozen worker's connections moved: %v", got)
+	}
+}
+
+func TestWorkerSteeringRule(t *testing.T) {
+	prompt := func(name string) (string, map[string]any) {
+		return "worker_prompt_write", map[string]any{"name": name, "system_prompt": "New.", "rationale": "better"}
+	}
+	describe := func(name string) (string, map[string]any) {
+		return "worker_update", map[string]any{"name": name, "fields": map[string]any{"description": "new"}}
+	}
+	cases := []struct {
+		name        string
+		callerHolds agentdb.ConnectionList
+		targetHolds agentdb.ConnectionList
+		call        func(string) (string, map[string]any)
+		want        string // "" = allowed
+	}{
+		// §8.7's acceptance loop: workers with no connections improve each other.
+		{"[] rewrites the prompt of []", agentdb.ConnectionList{}, agentdb.ConnectionList{}, prompt, ""},
+		{"nil rewrites the prompt of nil", nil, nil, prompt, ""},
+		{"[] cannot rewrite the prompt of [github]", agentdb.ConnectionList{}, agentdb.ConnectionList{"github"}, prompt,
+			`worker "researcher" can reach connections you do not hold (github); only a worker holding all of them may change it`},
+		{"[] cannot rewrite the prompt of the * architect", nil, agentdb.ConnectionList{"*"}, prompt,
+			"can reach connections you do not hold (*)"},
+		{"[github] updates [github]", agentdb.ConnectionList{"github"}, agentdb.ConnectionList{"github"}, describe, ""},
+		{"[github] cannot update [github gmail]", agentdb.ConnectionList{"github"}, agentdb.ConnectionList{"github", "gmail"}, describe,
+			"can reach connections you do not hold (gmail)"},
+		{"[github gmail] cannot update the * architect", agentdb.ConnectionList{"github", "gmail"}, agentdb.ConnectionList{"*"}, describe,
+			"(*)"},
+		{"* updates the * architect", agentdb.ConnectionList{"*"}, agentdb.ConnectionList{"*"}, describe, ""},
+		{"* rewrites anyone", agentdb.ConnectionList{"*"}, agentdb.ConnectionList{"github", "gmail"}, prompt, ""},
+		{"disabling a stronger worker is a change too", agentdb.ConnectionList{}, agentdb.ConnectionList{"gmail"},
+			func(name string) (string, map[string]any) {
+				return "worker_update", map[string]any{"name": name, "fields": map[string]any{"enabled": false}}
+			}, "can reach connections you do not hold (gmail)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, tools := connectionFixture(t, tc.callerHolds, tc.targetHolds)
+			before := *store.workers[key("acme", "researcher")]
+			tool, args := tc.call("researcher")
+			_, err := invokeTool(t, tools, tool, testCaller(), args)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("%s: %v", tool, err)
+				}
+				if countConfigWrites(store) != 1 {
+					t.Fatalf("want exactly one write, got %+v", store.writes)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a refusal mentioning %q, got %v", tc.want, err)
+			}
+			after := store.workers[key("acme", "researcher")]
+			if countConfigWrites(store) != 0 || len(store.memories) != 0 ||
+				after.SystemPrompt != before.SystemPrompt || after.Description != before.Description || after.Enabled != before.Enabled {
+				t.Fatalf("a refused steer still changed something: writes=%+v row=%+v", store.writes, after)
+			}
+		})
+	}
+}
+
+// Error precedence is not found → frozen → steering, so a model is told the
+// most useful fact first.
+func TestWorkerSteeringRuleErrorPrecedence(t *testing.T) {
+	store, tools := connectionFixture(t, nil, agentdb.ConnectionList{"github"})
+	store.workers[key("acme", "researcher")].Frozen = true
+	for _, tool := range []string{"worker_update", "worker_prompt_write"} {
+		args := map[string]any{"name": "researcher", "fields": map[string]any{"description": "x"}}
+		if tool == "worker_prompt_write" {
+			args = map[string]any{"name": "researcher", "system_prompt": "x", "rationale": "y"}
+		}
+		if _, err := invokeTool(t, tools, tool, testCaller(), args); err == nil || !strings.Contains(err.Error(), "frozen") {
+			t.Fatalf("%s: a frozen, stronger target must be refused as frozen first, got %v", tool, err)
+		}
+		args["name"] = "nobody"
+		if _, err := invokeTool(t, tools, tool, testCaller(), args); err == nil || !strings.Contains(err.Error(), "no worker") {
+			t.Fatalf("%s: an unknown target must be refused as not found first, got %v", tool, err)
+		}
+	}
+}
+
+func TestConnectionProjectPromptWriteRequiresTheWildcard(t *testing.T) {
+	cases := []struct {
+		name   string
+		caller mcpCaller
+		holds  agentdb.ConnectionList
+		ok     bool
+	}{
+		{"* holder", testCaller(), agentdb.ConnectionList{"*"}, true},
+		{"every named connection is not *", testCaller(), agentdb.ConnectionList{"docs", "github", "gmail"}, false},
+		{"[] holder", testCaller(), agentdb.ConnectionList{}, false},
+		{"no-worker caller", humanChat(), nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store, tools := connectionFixture(t, tc.holds, nil)
+			_, err := invokeTool(t, tools, "project_prompt_write", tc.caller, map[string]any{
+				"system_prompt": "We are BadCode.", "rationale": "voice",
+			})
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("project_prompt_write: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), `hold every connection ("*")`) {
+				t.Fatalf("want the * refusal, got %v", err)
+			}
+			if countConfigWrites(store) != 0 || len(store.memories) != 0 {
+				t.Fatalf("a refused project prompt write still wrote: %+v", store.writes)
+			}
+		})
+	}
+}
+
+func TestConnectionList(t *testing.T) {
+	cases := []struct {
+		name   string
+		caller mcpCaller
+		holds  agentdb.ConnectionList
+		held   map[string]bool
+	}{
+		{"named holdings", testCaller(), agentdb.ConnectionList{"github"}, map[string]bool{"github": true}},
+		{"wildcard holds everything", testCaller(), agentdb.ConnectionList{"*"},
+			map[string]bool{"docs": true, "github": true, "gmail": true}},
+		{"no-worker caller holds nothing", humanChat(), nil, map[string]bool{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, tools := connectionFixture(t, tc.holds, nil)
+			blob, err := invokeToolRaw(t, tools, "connection_list", tc.caller, map[string]any{})
+			if err != nil {
+				t.Fatalf("connection_list: %v", err)
+			}
+			if strings.Contains(string(blob), connectionSecret) || strings.Contains(string(blob), "mcp.example.com") {
+				t.Fatalf("connection_list leaked a credential or upstream URL: %s", blob)
+			}
+			var res struct {
+				Connections []map[string]any `json:"connections"`
+				Count       int              `json:"count"`
+			}
+			if err := json.Unmarshal(blob, &res); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			var names []string
+			for _, c := range res.Connections {
+				name := fmt.Sprint(c["name"])
+				names = append(names, name)
+				if c["held"] != tc.held[name] {
+					t.Fatalf("%s: held = %v, want %v", name, c["held"], tc.held[name])
+				}
+				if name == "docs" {
+					if c["available"] != false || !strings.Contains(fmt.Sprint(c["unavailable"]), "ACME_DOCS_TOKEN") {
+						t.Fatalf("docs must be unavailable, naming its env var: %v", c)
+					}
+				} else if c["available"] != true || c["description"] == "" {
+					t.Fatalf("%s must be available with a description: %v", name, c)
+				}
+			}
+			// Only acme's: globex's jira is another project's.
+			if strings.Join(names, ",") != "docs,github,gmail" || res.Count != 3 {
+				t.Fatalf("connections = %v (count %d), want acme's three, sorted", names, res.Count)
+			}
+		})
+	}
+}
+
+// Without a registry (no project map, or before agentd wires one) the project
+// has no connections: the list is empty rather than an error, and granting a
+// name is refused as unknown — only "*" can be recorded.
+func TestConnectionToolsWithoutACatalog(t *testing.T) {
+	store, tools := seededTools(t) // nil catalog
+	store.workers[key("acme", "email-answerer")].Connections = agentdb.ConnectionList{"*"}
+	res, err := invokeTool(t, tools, "connection_list", testCaller(), map[string]any{})
+	if err != nil {
+		t.Fatalf("connection_list: %v", err)
+	}
+	if res["count"] != float64(0) {
+		t.Fatalf("want no connections, got %v", res)
+	}
+	if list, ok := res["connections"].([]any); !ok || len(list) != 0 {
+		t.Fatalf("connections must be an empty list, never null: %v", res["connections"])
+	}
+	if _, err := invokeTool(t, tools, "worker_create", testCaller(), map[string]any{
+		"name": "new-hire", "description": "d", "system_prompt": "p", "connections": []string{"github"},
+	}); err == nil || !strings.Contains(err.Error(), `no connection "github"`) {
+		t.Fatalf("want an unknown-connection refusal, got %v", err)
+	}
+	if _, err := invokeTool(t, tools, "worker_create", testCaller(), map[string]any{
+		"name": "new-hire", "description": "d", "system_prompt": "p", "connections": []string{"*"},
+	}); err != nil {
+		t.Fatalf(`"*" needs no catalog: %v`, err)
+	}
+}
+
+// worker_list shows every worker's connections, [] (never null) for none.
+func TestWorkerListShowsConnections(t *testing.T) {
+	_, tools := connectionFixture(t, nil, agentdb.ConnectionList{"github"})
+	res, err := invokeTool(t, tools, "worker_list", testCaller(), map[string]any{})
+	if err != nil {
+		t.Fatalf("worker_list: %v", err)
+	}
+	got := map[string]string{}
+	for _, w := range res["workers"].([]any) {
+		row := w.(map[string]any)
+		list, ok := row["connections"].([]any)
+		if !ok {
+			t.Fatalf("worker %v: connections must be a list, never null or absent: %v", row["name"], row["connections"])
+		}
+		got[fmt.Sprint(row["name"])] = fmt.Sprint(list)
+	}
+	if got["email-answerer"] != "[]" || got["researcher"] != "[github]" {
+		t.Fatalf("connections = %v", got)
+	}
+}
+
+// A model reads the descriptions long before it reads a refusal, so both rules
+// are stated there.
+func TestConnectionRulesAreInTheToolDescriptions(t *testing.T) {
+	_, tools := connectionFixture(t, nil, nil)
+	for tool, phrases := range map[string][]string{
+		"worker_create":        {"connections", "only grant connections you hold", "connection_list"},
+		"worker_update":        {"connections", "only grant connections you hold", "remove", "every connection it holds"},
+		"worker_prompt_write":  {"every connection it holds"},
+		"project_prompt_write": {`"*"`},
+		"connection_list":      {"held", "worker_create", "worker_update"},
+	} {
+		desc := findTool(t, tools, tool).Description
+		for _, p := range phrases {
+			if !strings.Contains(desc, p) {
+				t.Errorf("%s's description should mention %q", tool, p)
+			}
+		}
+	}
+	props := findTool(t, tools, "worker_update").InputSchema["properties"].(map[string]any)["fields"].(map[string]any)["properties"].(map[string]any)
+	if _, ok := props["connections"]; !ok {
+		t.Fatalf("worker_update's fields schema must declare connections")
 	}
 }

@@ -8,6 +8,7 @@ package main
 //	worker_list()                                    → the workforce
 //	worker_create(name, description, system_prompt, …) → hire (§8.8)
 //	worker_update(name, fields, rationale?)          → retune the NON-prompt fields
+//	connection_list()                                → the project's external reach, and what you hold
 //	worker_prompt_read(name)  / worker_prompt_write(name, system_prompt, rationale)
 //	project_prompt_read()     / project_prompt_write(system_prompt, rationale)
 //	subscription_list/create/delete                  → rewire what triggers whom (§8.3)
@@ -65,6 +66,33 @@ package main
 //
 // And no tool takes a project parameter: the project is the session token's
 // `customer` claim, applied in code (D3's rule).
+//
+// # Connections: authority is passed down, never taken
+//
+// A worker's `connections` field names the external services (GitHub, Gmail…)
+// its sessions can reach through agentd's /connect/ proxy
+// (design/2026-09-11-project-connections.md, Decision 3). Everything else in
+// this file is revertable; reach into the outside world is not — an email
+// drafted or a branch pushed stays done — so three rules apply here, and ONLY
+// here, because the core MCP server is the workers' path (the console's HTTP
+// route has its own rule: only a logged-in person may change grants):
+//
+//  1. GRANT only what you hold (connections.CanGrant): worker_create and
+//     worker_update may add a connection only if the caller's own worker holds
+//     it; adding "*" needs "*". Removing is always allowed.
+//  2. You cannot STEER someone stronger (connections.Covers): any change to an
+//     existing worker — worker_update, worker_prompt_write — needs the caller
+//     to hold every connection that worker holds. Otherwise "rewrite the
+//     architect's prompt to grant me github" would be a grant by proxy. The
+//     one exemption is an update that ONLY removes connections, which rule 1
+//     already allows from anyone.
+//  3. project_prompt_write needs "*": every worker reads the project prompt.
+//
+// What the caller holds is read from ITS OWN worker row on every call
+// (callerHoldings) — never an argument. A caller with no worker (a person
+// chatting to Bob), a deleted worker or a disabled one holds nothing, matching
+// what the proxy lets it reach. There is no architect-specific code: the
+// architect can do everything because it is created holding "*".
 
 import (
 	"context"
@@ -76,6 +104,7 @@ import (
 	"time"
 
 	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/extension/embedding"
 )
 
@@ -129,24 +158,40 @@ type attentionRequester interface {
 
 var _ attentionRequester = (*attentionService)(nil)
 
-// managementTools is the tool set. attention may be nil (no product-layer
-// tables), in which case request_human_attention refuses loudly rather than
-// pretending a human was told.
-type managementTools struct {
-	store      managementStore
-	embedder   embedding.Provider
-	attention  attentionRequester
-	permalinks permalinker
+// connectionCatalog is what these tools need to know about a project's
+// connections: names, descriptions and availability — never a URL, never a
+// credential. *connections.Registry satisfies it.
+type connectionCatalog interface {
+	List(project string) []connections.Info
+	Names(project string) []string
 }
 
-func newManagementTools(store managementStore, embedder embedding.Provider, attention attentionRequester, permalinks permalinker) *managementTools {
+var _ connectionCatalog = (*connections.Registry)(nil)
+
+// managementTools is the tool set. attention may be nil (no product-layer
+// tables), in which case request_human_attention refuses loudly rather than
+// pretending a human was told. connections may be nil (no project map), in
+// which case every project has no connections: the list is empty and only
+// "*" can be granted.
+type managementTools struct {
+	store       managementStore
+	embedder    embedding.Provider
+	attention   attentionRequester
+	permalinks  permalinker
+	connections connectionCatalog
+}
+
+func newManagementTools(store managementStore, embedder embedding.Provider, attention attentionRequester, permalinks permalinker, catalog connectionCatalog) *managementTools {
 	// A typed nil pointer in an interface is NOT nil, so an unconfigured
 	// attention service would sail past the handler's nil check and panic on the
 	// first call. Unwrap it here, once.
 	if svc, ok := attention.(*attentionService); ok && svc == nil {
 		attention = nil
 	}
-	return &managementTools{store: store, embedder: embedder, attention: attention, permalinks: permalinks}
+	if reg, ok := catalog.(*connections.Registry); ok && reg == nil {
+		catalog = nil
+	}
+	return &managementTools{store: store, embedder: embedder, attention: attention, permalinks: permalinks, connections: catalog}
 }
 
 // ---------------------------------------------------------------------------
@@ -168,10 +213,13 @@ type workerRecord struct {
 	Enabled     bool   `json:"enabled"`
 	// Frozen is surfaced so a manager reading worker_list knows BEFORE calling
 	// worker_update / worker_prompt_write that this worker is off-limits to it.
-	Frozen            bool           `json:"frozen"`
-	Image             string         `json:"image"`
-	MaxInstances      int            `json:"max_instances"`
-	Briefing          []string       `json:"briefing"`
+	Frozen       bool     `json:"frozen"`
+	Image        string   `json:"image"`
+	MaxInstances int      `json:"max_instances"`
+	Briefing     []string `json:"briefing"`
+	// Connections is what this worker can reach outside Bob — never null, so
+	// "holds nothing" reads as [] rather than as a missing field.
+	Connections       []string       `json:"connections"`
 	MCPConfig         map[string]any `json:"mcp_config,omitempty"`
 	SystemPromptBytes int            `json:"system_prompt_bytes"`
 	CreatedAt         int64          `json:"created_at"`
@@ -190,6 +238,10 @@ func toWorkerRecord(w *agentdb.Worker) workerRecord {
 	if briefing == nil {
 		briefing = []string{}
 	}
+	conns := []string(w.Connections)
+	if conns == nil {
+		conns = []string{}
+	}
 	var mcp map[string]any
 	if len(w.MCPConfig) > 0 {
 		mcp = map[string]any(w.MCPConfig)
@@ -202,6 +254,7 @@ func toWorkerRecord(w *agentdb.Worker) workerRecord {
 		Image:             w.Image,
 		MaxInstances:      w.MaxInstances,
 		Briefing:          briefing,
+		Connections:       conns,
 		MCPConfig:         mcp,
 		SystemPromptBytes: len(w.SystemPrompt),
 		CreatedAt:         w.CreatedAt,
@@ -282,7 +335,8 @@ type promptRevision struct {
 // ---------------------------------------------------------------------------
 
 const workerListDescription = `List this project's workers: who exists, what each is for, ` +
-	`whether it is switched on, which image it runs, its instance cap and its briefing selectors.
+	`whether it is switched on, which image it runs, its instance cap, its briefing selectors ` +
+	`and the connections (external services) it holds.
 
 Prompts are NOT included — they are large. Read one with worker_prompt_read.
 
@@ -304,12 +358,19 @@ The optional fields are plumbing: image points it at a project image (§13; bare
 	`of its jobs may run at once (default 1), briefing is a list of label selectors ` +
 	`whose newest matching memory is injected into every job it runs.
 
+connections (optional) names the external services this worker's sessions can ` +
+	`reach — GitHub, Gmail and so on, exactly as connection_list names them; "*" ` +
+	`means every connection the project has. You can only grant connections you hold ` +
+	`yourself: reach into the outside world cannot be reverted the way a config ` +
+	`change can, so authority is passed down, never taken. Grant each worker only ` +
+	`what its job needs; omit it and the worker reaches nothing outside.
+
 This refuses a name that already exists rather than overwriting it — a silent ` +
 	`overwrite would throw away a working prompt. Retune with worker_update, or ` +
 	`replace the prompt with worker_prompt_write.`
 
 const workerUpdateDescription = `Change a worker's NON-prompt fields: description, image, ` +
-	`max_instances, briefing, enabled. Pass only the fields you want to change.
+	`max_instances, briefing, enabled, connections. Pass only the fields you want to change.
 
 It REFUSES system_prompt. Rewriting a prompt goes through worker_prompt_write, ` +
 	`which demands a rationale and records the superseded text as a memory — ` +
@@ -322,6 +383,16 @@ Adopting an image is done HERE, deliberately: burning an image (image_create) ` 
 	`points nothing at it, so "when did this worker change environment, and who ` +
 	`decided?" stays answerable. Use "toolbox" to follow the latest version or ` +
 	`"toolbox:3" to pin one.
+
+connections REPLACES the worker's list — send the whole list you want it to ` +
+	`hold (connection_list shows what exists). You can only grant connections you ` +
+	`hold yourself; you may remove any connection from any worker, because that ` +
+	`only reduces what it can reach.
+
+You can change a worker at all — any field here, or its prompt — only if you hold ` +
+	`every connection it holds ("*" if it holds "*"). Rewriting a worker that can ` +
+	`reach more than you would be a way to borrow its reach. The one exception is an ` +
+	`update whose only field is connections and which only removes.
 
 rationale is optional but worth writing — it is the commit message on this change.`
 
@@ -348,7 +419,12 @@ rationale is REQUIRED: the commit-message WHY. A diff shows that "acknowledge ` 
 	`SUPERSEDED prompt — so a bad rewrite can be found and put back by writing the ` +
 	`old text again.
 
-The new prompt applies to the worker's NEXT job, never to one already running.`
+The new prompt applies to the worker's NEXT job, never to one already running.
+
+You may rewrite a worker's prompt only if you hold every connection it holds ` +
+	`("*" if it holds "*") — see connection_list. A prompt is how a worker is ` +
+	`steered, and steering a worker that can reach more than you would be a way ` +
+	`to borrow its reach.`
 
 const projectPromptReadDescription = `Read the project-level system prompt in full.
 
@@ -365,7 +441,24 @@ It is prepended to EVERY worker's prompt in this project, so a careless rewrite 
 rationale is REQUIRED, exactly as for worker_prompt_write, and the superseded ` +
 	`text is recorded as a prompt-revision memory.
 
-Prefer a worker's own prompt for anything that is not true of every worker.`
+Prefer a worker's own prompt for anything that is not true of every worker.
+
+Only a worker holding every connection ("*") may call this: every worker reads ` +
+	`the project prompt, including ones that can reach things you cannot.`
+
+const connectionListDescription = `List this project's connections: the external services ` +
+	`(GitHub, Gmail, Google Docs…) a worker's sessions can reach as mcp__<name>__* tools, ` +
+	`once the worker is granted them.
+
+Each entry says what the connection is for, whether it is available right now ` +
+	`(an unavailable one names what the operator must set), and whether YOU hold it ` +
+	`(held). Credentials never appear here or anywhere a worker can see: agentd adds ` +
+	`them as the traffic passes through.
+
+Grant a connection with worker_create or worker_update (the connections field). ` +
+	`You can only grant what you hold, and you can only change a worker if you hold ` +
+	`every connection it holds. Connections themselves are defined by the operator, ` +
+	`not by any tool.`
 
 const subscriptionListDescription = `List this project's subscriptions: which event type starts ` +
 	`which worker, with what envelope filter and what firing cap.
@@ -531,6 +624,12 @@ func (m *managementTools) tools() []*mcpTool {
 					"items":       map[string]any{"type": "string"},
 					"description": "Optional label selectors; the newest memory matching each is injected as a briefing section into every job.",
 				},
+				"connections": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+					"description": "Optional connection names from connection_list, or \"*\" for all of them. " +
+						"You can only grant connections you hold yourself.",
+				},
 				"rationale": map[string]any{
 					"type":        "string",
 					"description": "Optional commit-message why, recorded in the config log.",
@@ -546,7 +645,8 @@ func (m *managementTools) tools() []*mcpTool {
 				"fields": map[string]any{
 					"type": "object",
 					"description": "The fields to change, and only those: description (string), image (string), " +
-						"max_instances (integer), briefing (array of strings), enabled (boolean). " +
+						"max_instances (integer), briefing (array of strings), enabled (boolean), " +
+						"connections (array of connection names or \"*\"; replaces the whole list). " +
 						"system_prompt is REFUSED here — use worker_prompt_write.",
 					"properties": map[string]any{
 						"description":   map[string]any{"type": "string"},
@@ -554,6 +654,7 @@ func (m *managementTools) tools() []*mcpTool {
 						"max_instances": map[string]any{"type": "integer"},
 						"briefing":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 						"enabled":       map[string]any{"type": "boolean"},
+						"connections":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 					},
 					"additionalProperties": false,
 				},
@@ -563,6 +664,12 @@ func (m *managementTools) tools() []*mcpTool {
 				},
 			}, []string{"name", "fields"}),
 			Handler: m.workerUpdate,
+		},
+		{
+			Name:        "connection_list",
+			Description: connectionListDescription,
+			InputSchema: objectSchema(nil, nil),
+			Handler:     m.connectionList,
 		},
 		{
 			Name:        "worker_prompt_read",
@@ -900,6 +1007,155 @@ func validateBriefing(selectors []string) error {
 }
 
 // ---------------------------------------------------------------------------
+// Connections — the trust rule (see the file comment)
+// ---------------------------------------------------------------------------
+
+// connectionNames is the project's connection names; none without a catalog.
+func (m *managementTools) connectionNames(project string) []string {
+	if m.connections == nil {
+		return nil
+	}
+	return m.connections.Names(project)
+}
+
+// callerHoldings is what the caller holds, read from its OWN worker row — the
+// token names the worker, the row says what it holds, and no argument can say
+// otherwise. No worker, a deleted worker or a disabled one holds nothing: the
+// same answer the /connect/ proxy gives, so what a worker may pass on never
+// exceeds what it could reach itself. A store error refuses rather than being
+// read as "holds nothing": the caller should retry, not be told a rule it is
+// not actually breaking.
+func (m *managementTools) callerHoldings(ctx context.Context, caller mcpCaller) ([]string, error) {
+	if caller.Worker == "" {
+		return nil, nil
+	}
+	w, err := m.store.GetWorker(ctx, caller.Project, caller.Worker)
+	if err != nil {
+		if errors.Is(err, agentdb.ErrWorkerNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("could not read your own worker %q to see which connections you hold, "+
+			"so nothing was changed; retry: %w", caller.Worker, err)
+	}
+	if !w.Enabled {
+		return nil, nil
+	}
+	return []string(w.Connections), nil
+}
+
+// holdingsOnce defers callerHoldings until a rule actually needs it, and reads
+// the row at most once per call: most calls touch no connections at all.
+func (m *managementTools) holdingsOnce(ctx context.Context, caller mcpCaller) func() ([]string, error) {
+	var (
+		done bool
+		held []string
+		err  error
+	)
+	return func() ([]string, error) {
+		if !done {
+			held, err = m.callerHoldings(ctx, caller)
+			done = true
+		}
+		return held, err
+	}
+}
+
+func describeHeld(held []string) string {
+	if len(held) == 0 {
+		return "none"
+	}
+	return fmt.Sprint(held)
+}
+
+// validateGrants checks a requested connections list before anything is
+// written: no blank or repeated entries, and every name it ADDS (absent from
+// before) is "*" or a connection this project has. A name already held is not
+// re-checked, so a connection the operator has since removed from the project
+// map does not block every other edit to the worker holding it.
+func (m *managementTools) validateGrants(project string, after, before []string) error {
+	seen := make(map[string]bool, len(after))
+	for i, name := range after {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("connections entry %d is blank", i)
+		}
+		if seen[name] {
+			return fmt.Errorf("connection %q is listed more than once", name)
+		}
+		seen[name] = true
+		if name == connections.Wildcard || contains(before, name) {
+			continue
+		}
+		if !contains(m.connectionNames(project), name) {
+			return fmt.Errorf("no connection %q in this project (connection_list shows what exists; "+
+				"connections are defined by the operator, not by any tool)", name)
+		}
+	}
+	return nil
+}
+
+// refuseGrant is rule 1: a transition before → after may add only what the
+// caller holds (connections.CanGrant — one rule, not a second copy of it).
+func refuseGrant(held, before, after []string) error {
+	if err := connections.CanGrant(held, before, after); err != nil {
+		return fmt.Errorf("%w — a worker can only grant connections it holds itself, because reach into the "+
+			"outside world cannot be reverted like a config change; you hold %s (removing a connection is "+
+			"always allowed)", err, describeHeld(held))
+	}
+	return nil
+}
+
+// refuseSteering is rule 2: changing target needs holding everything it holds.
+func refuseSteering(target *agentdb.Worker, held []string) error {
+	if connections.Covers(held, target.Connections) {
+		return nil
+	}
+	var missing []string
+	for _, c := range target.Connections {
+		if !connections.Holds(held, c) {
+			missing = append(missing, c)
+		}
+	}
+	return fmt.Errorf("worker %q can reach connections you do not hold (%s); only a worker holding all of them "+
+		"may change it — changing a worker that can reach more than you would be a way to borrow its reach. "+
+		"You hold %s", target.Name, strings.Join(missing, ", "), describeHeld(held))
+}
+
+// connectionRecord is one connection_list entry. It is built from
+// connections.Info, which carries no URL and no credential by construction.
+type connectionRecord struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Available   bool   `json:"available"`
+	Unavailable string `json:"unavailable,omitempty"`
+	Held        bool   `json:"held"`
+}
+
+func (m *managementTools) connectionList(ctx context.Context, caller mcpCaller, raw json.RawMessage) (any, error) {
+	if err := decodeArgs(raw, &struct{}{}); err != nil {
+		return nil, err
+	}
+	held, err := m.callerHoldings(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	var infos []connections.Info
+	if m.connections != nil {
+		infos = m.connections.List(caller.Project) // project in code, never an argument
+	}
+	out := make([]connectionRecord, 0, len(infos))
+	for _, in := range infos {
+		out = append(out, connectionRecord{
+			Name:        in.Name,
+			Description: in.Description,
+			Available:   in.Available,
+			Unavailable: in.Unavailable,
+			Held:        connections.Holds(held, in.Name),
+		})
+	}
+	return map[string]any{"connections": out, "count": len(out)}, nil
+}
+
+// ---------------------------------------------------------------------------
 // Workers
 // ---------------------------------------------------------------------------
 
@@ -926,6 +1182,7 @@ type workerCreateArgs struct {
 	Image        string         `json:"image"`
 	MaxInstances int            `json:"max_instances"`
 	Briefing     []string       `json:"briefing"`
+	Connections  []string       `json:"connections"`
 	Rationale    string         `json:"rationale"`
 }
 
@@ -963,6 +1220,9 @@ func (m *managementTools) workerCreate(ctx context.Context, caller mcpCaller, ra
 	if err != nil {
 		return nil, err
 	}
+	if err := m.validateGrants(caller.Project, args.Connections, nil); err != nil {
+		return nil, err
+	}
 
 	// Hiring is not overwriting. UpsertWorker would happily replace a live
 	// worker's prompt, which is exactly the accident that must not be possible
@@ -976,6 +1236,17 @@ func (m *managementTools) workerCreate(ctx context.Context, caller mcpCaller, ra
 	} else if !errors.Is(err, agentdb.ErrWorkerNotFound) {
 		return nil, err
 	}
+	// Rule 1, checked last because it is the one check that reads the caller's
+	// own row: a new worker starts with nothing, so every entry is a grant.
+	if len(args.Connections) > 0 {
+		held, err := m.callerHoldings(ctx, caller)
+		if err != nil {
+			return nil, err
+		}
+		if err := refuseGrant(held, nil, args.Connections); err != nil {
+			return nil, err
+		}
+	}
 
 	w := agentdb.NewWorker(caller.Project, name) // project in code, never an argument
 	w.Description = strings.TrimSpace(args.Description)
@@ -987,6 +1258,9 @@ func (m *managementTools) workerCreate(ctx context.Context, caller mcpCaller, ra
 	}
 	if args.Briefing != nil {
 		w.Briefing = agentdb.SelectorList(args.Briefing)
+	}
+	if args.Connections != nil {
+		w.Connections = agentdb.ConnectionList(args.Connections)
 	}
 
 	cw, err := m.configWrite(caller, args.Rationale)
@@ -1005,7 +1279,7 @@ func (m *managementTools) workerCreate(ctx context.Context, caller mcpCaller, ra
 }
 
 // workerUpdatableFields is §9's closed set: the prompt is NOT in it.
-var workerUpdatableFields = []string{"description", "image", "max_instances", "briefing", "enabled"}
+var workerUpdatableFields = []string{"description", "image", "max_instances", "briefing", "enabled", "connections"}
 
 // workerRefusedFields explains, rather than merely rejecting, the one mistake
 // this tool exists to prevent.
@@ -1056,6 +1330,48 @@ func (m *managementTools) workerUpdate(ctx context.Context, caller mcpCaller, ra
 		return nil, m.refuseFrozen(ctx, caller, name, "worker_update")
 	}
 
+	// Connections, decoded first because they decide which rules apply. An
+	// update whose ONLY field is connections and which adds nothing is a pure
+	// removal: rule 1 lets anyone make it, so rule 2 must not stop it (a
+	// worker holding nothing may still strip a connection from a stronger
+	// one). Anything else is a change to the worker, and steering applies —
+	// after the frozen check, so the precedence is not found → frozen → steering.
+	holdings := m.holdingsOnce(ctx, caller)
+	var conns agentdb.ConnectionList
+	_, touchesConns := fields["connections"]
+	if touchesConns {
+		var v []string
+		if err := decodeField(fields, "connections", &v); err != nil {
+			return nil, err
+		}
+		if err := m.validateGrants(caller.Project, v, next.Connections); err != nil {
+			return nil, fmt.Errorf("fields.connections: %w", err)
+		}
+		conns = agentdb.ConnectionList(v)
+	}
+	// "Adds nothing" is CanGrant for a caller holding nothing — the same rule,
+	// asked the other way round, rather than a second set comparison.
+	grants := touchesConns && connections.CanGrant(nil, next.Connections, conns) != nil
+	pureRemoval := touchesConns && !grants && len(fields) == 1
+	if !pureRemoval && len(next.Connections) > 0 {
+		held, err := holdings()
+		if err != nil {
+			return nil, err
+		}
+		if err := refuseSteering(next, held); err != nil {
+			return nil, err
+		}
+	}
+	if grants {
+		held, err := holdings()
+		if err != nil {
+			return nil, err
+		}
+		if err := refuseGrant(held, next.Connections, conns); err != nil {
+			return nil, err
+		}
+	}
+
 	for key := range fields {
 		switch key {
 		case "description":
@@ -1100,6 +1416,10 @@ func (m *managementTools) workerUpdate(ctx context.Context, caller mcpCaller, ra
 				return nil, err
 			}
 			next.Enabled = v
+		case "connections":
+			// Decoded, validated and checked against the trust rule above. Like
+			// briefing, [] ("holds nothing") is kept distinct from NULL.
+			next.Connections = conns
 		}
 	}
 
@@ -1179,6 +1499,16 @@ func (m *managementTools) workerPromptWrite(ctx context.Context, caller mcpCalle
 	if target.Frozen {
 		return nil, m.refuseFrozen(ctx, caller, name, "worker_prompt_write")
 	}
+	// Rule 2: a prompt is how a worker is steered.
+	if len(target.Connections) > 0 {
+		held, err := m.callerHoldings(ctx, caller)
+		if err != nil {
+			return nil, err
+		}
+		if err := refuseSteering(target, held); err != nil {
+			return nil, err
+		}
+	}
 
 	cw, err := m.configWrite(caller, args.Rationale)
 	if err != nil {
@@ -1248,6 +1578,16 @@ func (m *managementTools) projectPromptWrite(ctx context.Context, caller mcpCall
 	}
 	if err := requireRationale(args.Rationale); err != nil {
 		return nil, err
+	}
+	// Rule 3: every worker reads the project prompt, so it steers them all.
+	held, err := m.callerHoldings(ctx, caller)
+	if err != nil {
+		return nil, err
+	}
+	if !connections.Holds(held, connections.Wildcard) {
+		return nil, fmt.Errorf("project_prompt_write needs you to hold every connection (\"*\"): every worker "+
+			"reads the project prompt, including ones that can reach things you cannot, so rewriting it would "+
+			"steer them all. You hold %s", describeHeld(held))
 	}
 
 	cw, err := m.configWrite(caller, args.Rationale)
