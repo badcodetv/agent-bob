@@ -751,7 +751,7 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - [ ] done
 - Notes:
 
-### T13: Guard `/agent-proxy/` with the session token   [Status: pending | Model: sonnet]
+### T13: Guard `/agent-proxy/` with the session token   [Status: done | Model: sonnet]
 - **Scope:** in real-key mode only (the `modelproxy.Handler` branch of `newModelProxyHandler`,
   `go/cmd/agentd/modelproxy.go:43-68`), wrap the handler so a request must carry a valid session
   JWT — read from `X-Api-Key` (what the SDK sends; the Runner puts the JWT there,
@@ -781,8 +781,18 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'ModelProxy|SessionToken' -count=1` → PASS;
   mock stack still answers a chat turn (T15 covers this).
 - **Depends on:** —
-- [ ] done
+- [x] done
 - Notes:
+  This resubmission touched only docs/19-embedding.md and go/cmd/agentd/mcpserver.go (comment-only
+  change in the latter, no logic touched). Recommend the orchestrator's merge step add a Discovered
+  Issues Log entry to design/2026-09-11-project-connections.md along these lines: "T13: the archived
+  half of the requireLive check (SnapshotState=='archived') has no live path today because the
+  idle-archive sweep (go/cmd/agentd/gc.go) never writes SnapshotState — it only calls
+  SetSnapshotHandle. Only the Status=='error' half of sessionIsLive currently protects an expired,
+  replayed session token. Fixing the sweep to write SnapshotState='archived' would close this
+  without any change to sessionIsLive or verifyToken." No such entry could be added by this run
+  since design/2026-09-11-project-connections.md is explicitly out of scope (owned by a separate
+  merge step). (Merge step: added as the (T13) Discovered Issues Log entry below.)
 
 ### T14: Operator guide `docs/22-connections.md`   [Status: pending | Model: sonnet]
 - **Scope:** write the doc, in the house style of `docs/18`–`21`:
@@ -935,3 +945,12 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - (T5) None beyond what the verifier already found — this was purely a test-strength fix, no new
   code-path bugs were discovered while adding the missing rows (all four new error cases already
   behave correctly per connections/spec.go).
+- (T13) The idle-archive sweep (go/cmd/agentd/gc.go) snapshots a session and calls
+  SetSnapshotHandle but never sets SnapshotState="archived"; SnapshotState is only ever read
+  (go/agentdb/sessions.go:455,484, go/httpapi/lifecycle.go:133). This means the 'archived' half of
+  sessionIsLive's live-session check can never actually trigger in production today — an expired
+  session token for an idle-archived session is still honoured and forwarded with the real
+  Anthropic key. Only the terminal Status=="error" half of the check currently provides
+  protection. This was flagged by an earlier builder in the mcpserver.go sessionIsLive comment but
+  the original docs/19-embedding.md H6 text stated the rule as fully working; this fix corrected
+  the doc but did not fix the underlying sweep (out of T13's scope).
