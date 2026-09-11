@@ -134,30 +134,9 @@ up to 100 session containers mid-turn.
 The hourly script is `/usr/local/sbin/box-backup`, run by a systemd timer at :05 past every hour.
 It lives in the ops repo (§8).
 
-```bash
-#!/usr/bin/env bash
-# Back up every LV in vg0 tagged "backup": thin snapshot → read-only mount → restic → GCS.
-set -euo pipefail
-exec 9>/run/box-backup.lock; flock -n 9 || { echo "previous run still going"; exit 1; }
-source /etc/box-backup.env   # RESTIC_REPOSITORY=gs:<bucket>:/restic, RESTIC_PASSWORD_FILE,
-                             # GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_PROJECT_ID, HC_URL
-curl -fsS -m 10 "$HC_URL/start" >/dev/null || true
-trap 'curl -fsS -m 10 "$HC_URL/fail" >/dev/null || true' ERR
-cleanup() {
-  for m in /mnt/snap/*; do mountpoint -q "$m" && umount "$m"; done
-  lvs --noheadings -o lv_name -S 'lv_tags=snap' vg0 | xargs -r -I{} lvremove -qy vg0/{}
-}
-trap cleanup EXIT
-cleanup   # a crashed earlier run must never leave a snapshot eating the pool
-stamp=$(date -u +%Y%m%dT%H%M)
-for lv in $(lvs --noheadings -o lv_name -S 'lv_tags=backup' vg0); do
-  lvcreate -qq -s -kn --addtag snap -n "${lv}-snap-${stamp}" "vg0/${lv}"
-  mkdir -p "/mnt/snap/${lv}"
-  mount -o ro,noload "/dev/vg0/${lv}-snap-${stamp}" "/mnt/snap/${lv}"
-  restic backup --host box1 --tag "app=${lv}" "/mnt/snap/${lv}"
-done
-curl -fsS -m 10 "$HC_URL" >/dev/null
-```
+> **The runnable script lives in `docs/ops.md` (step 9b)** and supersedes the sketch that used to be
+> here: that sketch sourced its env file without exporting it, so restic would not have seen the
+> repository or password.
 
 Other jobs, all behind the same `flock` so they never overlap:
 
