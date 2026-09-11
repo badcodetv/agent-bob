@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/connections"
 )
 
 // TestDispatchIncludesConnectionServers proves a worker holding a grant gets
@@ -127,5 +128,68 @@ func TestDispatchConnectionsAreKeyedOnTheWorkerNotPersona(t *testing.T) {
 	}
 	if len(created.MCPServers) != 0 {
 		t.Errorf("bystander holds no connections, want none on the composed job, got %v", created.MCPServers)
+	}
+}
+
+// TestDispatchIncludesConnectionServers_RealResolver re-runs
+// TestDispatchIncludesConnectionServers's shape but with the REAL
+// connections.Servers (go/connections/resolve.go) as ConnectionServers,
+// backed by a REAL connections.Registry, rather than a stub that builds the
+// "/connect/" URL itself. The stub proves the plumbing calls
+// ConnectionServers with the right grants; this proves the full resolver
+// (registry lookup, availability check, URL join) produces the URL a
+// container would actually receive.
+func TestDispatchIncludesConnectionServers_RealResolver(t *testing.T) {
+	reg, err := connections.NewRegistry(map[string]map[string]connections.Spec{
+		"acme": {
+			"github": {
+				Description: "GitHub",
+				URL:         "https://api.github.com",
+				Auth:        connections.Auth{Type: connections.AuthBearer, TokenEnv: "GITHUB_TOKEN"},
+			},
+		},
+	}, func(string) string { return "gh-secret-token" }, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+
+	store := newFakeRouterStore()
+	w := seedWorker(store, "acme", "researcher", 1)
+	w.Connections = agentdb.ConnectionList{"github"}
+	store.addSubscription(&agentdb.Subscription{
+		Project: "acme", EventType: "email.received", Worker: "researcher", Enabled: true,
+	})
+
+	runner := &stubRunner{}
+	starter := newRunnerSessionStarter(runner, store).withLeases(store)
+	starter.now = store.now
+	starter.logf = quietf
+	starter.run = func(fn func()) { fn() }
+	starter.newID = func() string { return "job-1" }
+
+	rt, _ := newTestRouter(store, starter, func(cfg *dispatcherConfig) {
+		cfg.ConnectionServers = func(project string, grants []string) agentdb.MCPServers {
+			return connections.Servers(reg, project, grants, "https://self.example")
+		}
+	})
+
+	postEvent(t, store, "acme", "email.received", "a customer wrote in", agentdb.EventEnvelope{Depth: 0})
+	if err := rt.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(runner.created) != 1 {
+		t.Fatalf("expected exactly one CreateSession, got %d", len(runner.created))
+	}
+	created := runner.created[0]
+
+	got, ok := created.MCPServers["github"]
+	if !ok {
+		t.Fatalf("composed MCP map is missing the github connection: %v", created.MCPServers)
+	}
+	if got.URL != "https://self.example/connect/github/" {
+		t.Errorf("github entry URL = %q, want the real resolver's /connect/ URL", got.URL)
+	}
+	if got.Headers["Authorization"] != "${SESSION_TOKEN}" {
+		t.Errorf("github entry Authorization header = %q, want the ${SESSION_TOKEN} placeholder connections.Servers sets, not a resolved credential", got.Headers["Authorization"])
 	}
 }
