@@ -753,6 +753,23 @@ func newTokenBudget(cfg tokenBudgetConfig) *tokenBudget {
 	}
 }
 
+// Location is the stack-local zone this budget's midnight rule uses (§5).
+// GET /agent/usage (A4) reads it from here rather than defaulting its own
+// zone, so "today" on that route and the router's own day boundary can never
+// silently disagree.
+func (b *tokenBudget) Location() *time.Location { return b.loc }
+
+// usageLocationFrom is main.go's one call site for wiring GET /agent/usage's
+// httpapi.Config.UsageLocation. A nil budget (the sqlite fallback, where
+// GET /agent/usage answers 501 anyway) yields nil, which httpapi defaults to
+// time.Local — the same default tokenBudget itself applies.
+func usageLocationFrom(b *tokenBudget) *time.Location {
+	if b == nil {
+		return nil
+	}
+	return b.Location()
+}
+
 // Allow answers the gate's §8.4 step 6 question.
 func (b *tokenBudget) Allow(ctx context.Context, project string, settings *agentdb.ProjectSettings) (bool, error) {
 	if settings == nil {
