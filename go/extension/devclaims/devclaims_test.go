@@ -390,3 +390,55 @@ func TestIssueTokenIsHS256(t *testing.T) {
 		t.Errorf("alg = %q, want HS256", parsed.Method.Alg())
 	}
 }
+
+// TestIssueOperatorClaim covers §1.1 of the onboarding work plan: the claim is
+// present and true only when requested, and Issue/IssueScoped never write it.
+func TestIssueOperatorClaim(t *testing.T) {
+	secret := []byte("op-secret")
+	iss := New(secret)
+	scope := extension.ContextScope{Customer: "acme", Job: "web", UserEmail: "u@x.y"}
+
+	t.Run("operator true sets the claim", func(t *testing.T) {
+		tok, err := iss.IssueOperator(context.Background(), scope, "", true)
+		if err != nil {
+			t.Fatalf("IssueOperator: %v", err)
+		}
+		claims := parse(t, tok, secret)
+		if v, ok := claims[OperatorClaim].(bool); !ok || !v {
+			t.Fatalf("claims[%q] = %v, want true", OperatorClaim, claims[OperatorClaim])
+		}
+	})
+
+	t.Run("operator false writes no claim at all", func(t *testing.T) {
+		tok, err := iss.IssueOperator(context.Background(), scope, "", false)
+		if err != nil {
+			t.Fatalf("IssueOperator: %v", err)
+		}
+		claims := parse(t, tok, secret)
+		if _, present := claims[OperatorClaim]; present {
+			t.Fatalf("claims = %v, operator claim must be absent when false", claims)
+		}
+	})
+
+	t.Run("Issue never writes the operator claim", func(t *testing.T) {
+		tok, err := iss.Issue(context.Background(), scope, "")
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		claims := parse(t, tok, secret)
+		if _, present := claims[OperatorClaim]; present {
+			t.Fatalf("Issue must never carry an operator claim, got %v", claims)
+		}
+	})
+
+	t.Run("IssueScoped never writes the operator claim", func(t *testing.T) {
+		tok, err := iss.IssueScoped(context.Background(), scope, "", SessionScope("sess-1"))
+		if err != nil {
+			t.Fatalf("IssueScoped: %v", err)
+		}
+		claims := parse(t, tok, secret)
+		if _, present := claims[OperatorClaim]; present {
+			t.Fatalf("IssueScoped must never carry an operator claim, got %v", claims)
+		}
+	})
+}

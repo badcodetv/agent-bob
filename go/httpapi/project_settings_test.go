@@ -55,10 +55,22 @@ func (f *fakeProjectSettingsStore) PutProjectSettings(_ context.Context, ps *age
 	return &stored, nil
 }
 
-// identityFor builds an IdentityFunc pinned to one project (the customer claim).
+// identityFor builds an IdentityFunc pinned to one project (the customer
+// claim). Operator: true — most tests across this package are not about the
+// §1.2 budget/cap guard, and treating the default test identity as the
+// operator (matching the wildcard/test login, which is always one) keeps
+// them from tripping over PutProjectSettings' 403. Tests that specifically
+// exercise the guard use identityForOperator with an explicit bool instead.
 func identityFor(customer string) IdentityFunc {
 	return func(*http.Request) (Identity, error) {
-		return Identity{UserEmail: "u@" + customer + ".com", Customer: customer}, nil
+		return Identity{UserEmail: "u@" + customer + ".com", Customer: customer, Operator: true}, nil
+	}
+}
+
+// identityForOperator is identityFor plus Identity.Operator (§1.2's guard).
+func identityForOperator(customer string, operator bool) IdentityFunc {
+	return func(*http.Request) (Identity, error) {
+		return Identity{UserEmail: "u@" + customer + ".com", Customer: customer, Operator: operator}, nil
 	}
 }
 
@@ -233,6 +245,128 @@ func TestProjectSettingsProjectIsolation(t *testing.T) {
 	if back := decodeProjectSettings(t, doProjectSettings(alpha, "GET", "")); back.SystemPrompt != "alpha secrets" {
 		t.Fatalf("alpha read back: %+v", back)
 	}
+}
+
+// TestProjectSettingsOperatorGuard pins onboarding-work-plan §1.2's 403
+// matrix: a non-operator identity may PUT freely as long as the three
+// budget/cap fields echo back what is already stored; changing any of them
+// without Identity.Operator is refused with the exact body operatorOnlyMessage
+// names. An operator may change all three.
+func TestProjectSettingsOperatorGuard(t *testing.T) {
+	baseBody := func(soft, hard, maxJobs int, prompt string) string {
+		return fmt.Sprintf(`{"system_prompt":%q,"daily_tokens_soft":%d,"daily_tokens_hard":%d,"max_concurrent_jobs":%d}`,
+			prompt, soft, hard, maxJobs)
+	}
+
+	t.Run("operator establishes a budget on a brand-new project", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		h := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		rec := doProjectSettings(h, "PUT", baseBody(1000, 2000, 6, "be excellent"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("operator PUT: status=%d body=%s", rec.Code, rec.Body)
+		}
+		got := decodeProjectSettings(t, rec)
+		if got.DailyTokensSoft != 1000 || got.DailyTokensHard != 2000 || got.MaxConcurrentJobs != 6 {
+			t.Fatalf("budgets not written: %+v", got)
+		}
+	})
+
+	t.Run("non-operator may change the prompt while echoing the stored budgets back unchanged", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		op := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		if rec := doProjectSettings(op, "PUT", baseBody(1000, 2000, 6, "v1")); rec.Code != http.StatusOK {
+			t.Fatalf("seed PUT: status=%d body=%s", rec.Code, rec.Body)
+		}
+
+		nonOp := newProjectSettingsHandlers(t, store, identityForOperator("acme", false))
+		rec := doProjectSettings(nonOp, "PUT", baseBody(1000, 2000, 6, "v2 — new prompt"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("non-operator prompt-only PUT: status=%d body=%s", rec.Code, rec.Body)
+		}
+		got := decodeProjectSettings(t, rec)
+		if got.SystemPrompt != "v2 — new prompt" {
+			t.Fatalf("prompt not written: %+v", got)
+		}
+	})
+
+	t.Run("non-operator changing daily_tokens_soft is refused", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		op := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		doProjectSettings(op, "PUT", baseBody(1000, 2000, 6, "v1"))
+
+		nonOp := newProjectSettingsHandlers(t, store, identityForOperator("acme", false))
+		rec := doProjectSettings(nonOp, "PUT", baseBody(1500, 2000, 6, "v1"))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s, want 403", rec.Code, rec.Body)
+		}
+		if got := strings.TrimSpace(rec.Body.String()); got != operatorOnlyMessage {
+			t.Fatalf("body = %q, want %q", got, operatorOnlyMessage)
+		}
+		if store.puts != 1 {
+			t.Fatalf("refused PUT must not reach the store: puts=%d", store.puts)
+		}
+	})
+
+	t.Run("non-operator changing daily_tokens_hard is refused", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		op := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		doProjectSettings(op, "PUT", baseBody(1000, 2000, 6, "v1"))
+
+		nonOp := newProjectSettingsHandlers(t, store, identityForOperator("acme", false))
+		rec := doProjectSettings(nonOp, "PUT", baseBody(1000, 2500, 6, "v1"))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s, want 403", rec.Code, rec.Body)
+		}
+	})
+
+	t.Run("non-operator changing max_concurrent_jobs is refused", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		op := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		doProjectSettings(op, "PUT", baseBody(1000, 2000, 6, "v1"))
+
+		nonOp := newProjectSettingsHandlers(t, store, identityForOperator("acme", false))
+		rec := doProjectSettings(nonOp, "PUT", baseBody(1000, 2000, 8, "v1"))
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s, want 403", rec.Code, rec.Body)
+		}
+	})
+
+	t.Run("operator may change all three budget/cap fields", func(t *testing.T) {
+		store := newFakeProjectSettings()
+		op := newProjectSettingsHandlers(t, store, identityForOperator("acme", true))
+		doProjectSettings(op, "PUT", baseBody(1000, 2000, 6, "v1"))
+
+		rec := doProjectSettings(op, "PUT", baseBody(1500, 2500, 8, "v1"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("operator PUT: status=%d body=%s", rec.Code, rec.Body)
+		}
+		got := decodeProjectSettings(t, rec)
+		if got.DailyTokensSoft != 1500 || got.DailyTokensHard != 2500 || got.MaxConcurrentJobs != 8 {
+			t.Fatalf("budgets not updated: %+v", got)
+		}
+	})
+
+	t.Run("non-operator PUT on an untouched project is refused if it omits the env-default budget", func(t *testing.T) {
+		// GetProjectSettings answers DefaultProjectSettings for an unwritten
+		// project; if that default carries a non-zero budget (§1.3), a
+		// non-operator body that omits the fields (JSON zero value) reads as
+		// a change from the default and is refused, same as any other diff.
+		if err := agentdb.SetDefaultBudgets(777, 999); err != nil {
+			t.Fatalf("SetDefaultBudgets: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := agentdb.SetDefaultBudgets(0, 0); err != nil {
+				t.Fatalf("restore SetDefaultBudgets: %v", err)
+			}
+		})
+
+		store := newFakeProjectSettings()
+		nonOp := newProjectSettingsHandlers(t, store, identityForOperator("brandnew", false))
+		rec := doProjectSettings(nonOp, "PUT", `{"system_prompt":"hello"}`)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status=%d body=%s, want 403 (body omits the 777/999 default)", rec.Code, rec.Body)
+		}
+	})
 }
 
 func TestProjectSettingsErrorPaths(t *testing.T) {

@@ -110,6 +110,102 @@ func TestAuthMiddleware_EmptySecretIsDevOpen(t *testing.T) {
 	}
 }
 
+// --- principal.operator (onboarding-work-plan §1.1) ---
+
+func TestAuthMiddleware_OperatorClaim(t *testing.T) {
+	secret := []byte("test-secret")
+
+	t.Run("an ordinary bearer token with no claim is not the operator", func(t *testing.T) {
+		tok, err := devclaims.New(secret).Issue(context.Background(),
+			extensionScope("alice@acme.com", "acme"), "")
+		if err != nil {
+			t.Fatalf("issue: %v", err)
+		}
+		var got httpapi.Identity
+		h := captureIdentity(secret, noKeys(t), &got)
+		req := httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		if got.Operator {
+			t.Fatalf("identity = %+v, want operator=false", got)
+		}
+	})
+
+	t.Run("a bearer token carrying operator:true is the operator", func(t *testing.T) {
+		tok, err := devclaims.New(secret).IssueOperator(context.Background(),
+			extensionScope("kai@badcode.dev", "acme"), "", true)
+		if err != nil {
+			t.Fatalf("issue: %v", err)
+		}
+		var got httpapi.Identity
+		h := captureIdentity(secret, noKeys(t), &got)
+		req := httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		if !got.Operator {
+			t.Fatalf("identity = %+v, want operator=true", got)
+		}
+	})
+
+	t.Run("an embed (session-scoped) token is never the operator, even without its own claim", func(t *testing.T) {
+		tok, err := devclaims.New(secret).IssueScoped(context.Background(),
+			extension.ContextScope{Customer: "wolf", UserEmail: "api-key:wolf", Job: "embed"},
+			"", devclaims.SessionScope("s-hyp-a"))
+		if err != nil {
+			t.Fatalf("issue: %v", err)
+		}
+		var got httpapi.Identity
+		h := captureIdentity(secret, wolfKeys(t), &got)
+		req := httptest.NewRequest(http.MethodGet, "/agent/session/s-hyp-a/stream", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		if got.Operator {
+			t.Fatalf("identity = %+v, an embed token must not be the operator", got)
+		}
+	})
+
+	t.Run("an API key is the operator", func(t *testing.T) {
+		var got httpapi.Identity
+		h := captureIdentity([]byte("test-secret"), wolfKeys(t), &got)
+		req := httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+		req.Header.Set(apiKeyHeader, goodKey)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		if !got.Operator {
+			t.Fatalf("identity = %+v, an API key must be the operator", got)
+		}
+	})
+
+	t.Run("dev-open is the operator", func(t *testing.T) {
+		var got httpapi.Identity
+		h := captureIdentity(nil, noKeys(t), &got)
+		req := httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", rr.Code)
+		}
+		if !got.Operator {
+			t.Fatalf("identity = %+v, dev-open must be the operator", got)
+		}
+	})
+}
+
 // --- the API-key path ---
 
 func TestAuthMiddleware_APIKeyAuthenticatesItsProject(t *testing.T) {
