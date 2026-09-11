@@ -257,8 +257,8 @@ export default function DeskPage({
 
           {nothingAtAll && (
             <Typography variant="body2" color="text.secondary">
-              A quiet Desk means the fleet ran and nobody needed you — the Events view has the jobs
-              it ran, and Automation has what will wake it next.
+              A quiet Desk means the fleet ran and nobody needed you — Activity has the jobs it
+              ran, and each worker's Triggers tab has what will wake it next.
             </Typography>
           )}
         </Stack>

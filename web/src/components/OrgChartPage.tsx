@@ -20,7 +20,7 @@
 //
 //   - drag A → B, or a node's menu, opens the proposal card: the sentence
 //     first, the exact `event_type`/`filter` in mono beneath it, and a
-//     MANDATORY "Why are you wiring this?" — submitted through
+//     MANDATORY "Why?" — submitted through
 //     `useSubscriptions.save` with E3's rationale, the same route the form
 //     uses. There is no canvas-only endpoint and no optimistic local graph.
 //   - clicking a wire offers "Stop waking <worker> when <event>". Cutting is
@@ -464,7 +464,7 @@ export default function OrgChartPage({
           testId="cut-wire-dialog"
           title={cutWireTitle(cut)}
           sentence={`This writes a new record: the subscription stops existing, and the config log keeps what it was. ${cut.to} keeps every other way it is woken.`}
-          reasonLabel="Why are you stopping this?"
+          reasonLabel="Why?"
           confirmLabel={`Stop waking ${cut.to}`}
           busy={busy}
           onCancel={() => setCut(null)}
@@ -2010,7 +2010,7 @@ function WireProposalCard({
           fullWidth
           size="small"
           required
-          label="Why are you wiring this?"
+          label="Why?"
           value={why}
           onChange={(e) => setWhy(e.target.value)}
           helperText="Recorded on the config event. The drag is the cheap part; the reason is the record."

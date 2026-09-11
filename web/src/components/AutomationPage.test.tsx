@@ -120,7 +120,8 @@ function renderPage(props: Partial<React.ComponentProps<typeof AutomationPage>> 
 
 // K2: a subscription edit carries a reason, so the save button stays disabled
 // until the "Why?" field has one. (The schedule editor's own reason field is
-// older and still optional — it is labelled "Rationale".)
+// older and still optional — it used to carry a different, longer label; C3
+// renamed every reason field's label to "Why?", one word everywhere.)
 const explain = (why = 'the reviewer should see every answered mail') =>
   userEvent.type(screen.getByLabelText('Why?'), why)
 
@@ -242,7 +243,7 @@ describe('AutomationPage — schedules', () => {
     const cron = await screen.findByLabelText('Cron')
     await userEvent.clear(cron)
     await userEvent.type(cron, '0 10 * * 1-5')
-    await userEvent.type(screen.getByLabelText('Rationale'), 'engagement peaks at 10')
+    await userEvent.type(screen.getByLabelText('Why?'), 'engagement peaks at 10')
     await userEvent.click(screen.getByRole('button', { name: /save schedule/i }))
 
     await waitFor(() => expect(writes()).toHaveLength(1))

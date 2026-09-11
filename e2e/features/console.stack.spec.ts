@@ -213,11 +213,12 @@ test.describe('operator console', () => {
     await page.getByTestId('new-schedule').click()
 
     // The editor's own labels (ScheduleEditor.tsx): "Cron", "Instruction",
-    // "Rationale". This block previously asked for /what should .* do|input/i
-    // and /^Why\??$/, and neither has ever matched anything on that form —
-    // "Instruction" does not contain "input", and the reason field is called
-    // Rationale. Another consequence of the UNRUN note at the top of this
-    // file; see the plan's DI8.
+    // "Why?" (renamed from "Rationale" by C3 — the repo's reason field is one
+    // word everywhere now). This block previously asked for
+    // /what should .* do|input/i and /^Why\??$/, and neither ever matched
+    // anything on that form — "Instruction" does not contain "input", and the
+    // reason field was then called Rationale. Another consequence of the
+    // UNRUN note at the top of this file; see the plan's DI8.
     // FIXED (plan DI9). This line used to type the worker's name in by hand,
     // with a note explaining why it had to: the editor did not prefill the
     // worker even when opened from that worker's own Triggers tab.
@@ -229,7 +230,7 @@ test.describe('operator console', () => {
     await expect(page.getByLabel(/^Worker$/).first()).toHaveValue(WRITER)
     await page.getByLabel(/cron/i).first().fill('0 9 * * 1-5')
     await page.getByLabel(/^Instruction$/).first().fill('Write the morning blurb.')
-    await page.getByLabel(/^Rationale$/).first().fill('the catalogue goes out at nine')
+    await page.getByLabel(/^Why\?$/).first().fill('the catalogue goes out at nine')
     // "Create schedule" for a new one, "Save schedule" for an existing one —
     // /save/i matched neither on this form. The third assertion in this file
     // that could never have passed (DI8).
@@ -393,7 +394,7 @@ test.describe('operator console', () => {
     await expect(wireIt, 'a wire with no reason must not be committable (K2)').toBeDisabled()
 
     const why = 'the herald should announce whatever the scribe finishes'
-    await dialog.getByLabel('Why are you wiring this?').fill(why)
+    await dialog.getByLabel('Why?').fill(why)
     await expect(wireIt).toBeEnabled()
     await wireIt.click()
     await expect(dialog).toBeHidden({ timeout: 30_000 })

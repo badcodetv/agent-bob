@@ -62,8 +62,9 @@ export default function WorkerChatPanel({
       <Box sx={{ p: 3 }}>
         <Stack spacing={2} alignItems="flex-start">
           <Typography variant="body2" color="text.secondary">
-            Start an interactive job with <strong>{worker.name}</strong>. Its prompt, tools and
-            briefing are composed by the server exactly as they would be for an automated job.
+            Start an interactive chat with <strong>{worker.name}</strong>. It gets that worker's
+            prompt and tools, but — like every chat — none of the project's briefing, and nothing
+            it says is remembered unless it writes a memory.
           </Typography>
           {error !== null && <Alert severity="error">{error}</Alert>}
           <Button
@@ -81,7 +82,7 @@ export default function WorkerChatPanel({
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <AgentChat />
+      <AgentChat workerName={worker.name} />
     </Box>
   )
 }

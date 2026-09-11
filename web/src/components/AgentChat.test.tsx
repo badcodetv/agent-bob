@@ -133,6 +133,59 @@ test('AgentChat shows Send button in empty state', () => {
 })
 
 // ---------------------------------------------------------------------------
+// G3 — chat empty state (design 2026-09-11-onboarding-and-the-guide.md §3)
+// ---------------------------------------------------------------------------
+
+test('AgentChat empty state (base chat) names the base agent and shows three suggestions', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} />
+    </AgentChatProvider>
+  )
+  expect(screen.getByText('This is a chat with the base agent.')).toBeInTheDocument()
+  expect(screen.getByText(/gets none of the project.s briefing/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What is in this project’s memory?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Which workers exist and what wakes them?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Write a memory that records …' })).toBeInTheDocument()
+})
+
+test('AgentChat empty state (worker chat) names the worker and shows worker suggestions', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} workerName="email-answerer" />
+    </AgentChatProvider>
+  )
+  expect(screen.getByText('This is a chat with email-answerer.')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Show me your instructions.' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What did you do last time you ran?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What would you do if I sent you: …' })).toBeInTheDocument()
+})
+
+test('clicking an empty-state suggestion fills the composer without sending it', () => {
+  const onSendMessage = vi.fn()
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} onSendMessage={onSendMessage} />
+    </AgentChatProvider>
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Which workers exist and what wakes them?' }))
+  expect(screen.getByPlaceholderText(/type a message/i)).toHaveValue('Which workers exist and what wakes them?')
+  expect(onSendMessage).not.toHaveBeenCalled()
+})
+
+test('the empty state disappears once a message has been sent', () => {
+  const messages: AgentMessage[] = [
+    { id: 'm1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' },
+  ]
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={messages} />
+    </AgentChatProvider>
+  )
+  expect(screen.queryByTestId('chat-empty-state')).toBeNull()
+})
+
+// ---------------------------------------------------------------------------
 // stuck detection reaches a pixel (item B5)
 //
 // B1 left the stuck detector armed when a stream ends without query_complete

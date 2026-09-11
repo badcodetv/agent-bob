@@ -469,7 +469,7 @@ describe('drag to wire (OC4)', () => {
 
     const button = within(card).getByRole('button', { name: 'Wire it up' })
     expect(button.hasAttribute('disabled')).toBe(true)
-    await user.type(within(card).getByLabelText(/why are you wiring this/i), 'review every answer')
+    await user.type(within(card).getByLabelText(/^why\?/i), 'review every answer')
     expect(button.hasAttribute('disabled')).toBe(false)
     await user.click(button)
 
@@ -497,7 +497,7 @@ describe('drag to wire (OC4)', () => {
     const card = await screen.findByTestId('wire-proposal')
     await user.click(within(card).getByLabelText(/wake which worker/i))
     await user.click(await screen.findByRole('option', { name: 'fee-scorer' }))
-    await user.type(within(card).getByLabelText(/why are you wiring this/i), 'score every answer')
+    await user.type(within(card).getByLabelText(/^why\?/i), 'score every answer')
     await user.click(within(card).getByRole('button', { name: 'Wire it up' }))
 
     await waitFor(() => expect(writes()).toHaveLength(1))
@@ -518,7 +518,7 @@ describe('cutting a wire (OC4)', () => {
     ).toBeTruthy()
     expect(dialog.textContent).not.toMatch(/undo/i)
 
-    await user.type(within(dialog).getByLabelText(/why are you stopping this/i), 'reviews are noise')
+    await user.type(within(dialog).getByLabelText(/^why\?/i), 'reviews are noise')
     await user.click(within(dialog).getByRole('button', { name: /^Stop waking email-reviewer$/ }))
 
     await waitFor(() => expect(writes()).toHaveLength(1))
