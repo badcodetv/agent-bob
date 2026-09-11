@@ -640,7 +640,21 @@ func main() {
 		})
 	}
 
-	root.Handle("/agent-proxy/", http.StripPrefix("/agent-proxy", newModelProxyHandler()))
+	// modelProxySessions is deliberately NOT `agentDB` typed straight into the
+	// mcpSessionLookup interface: agentDB is a nil *agentdb.Store on the SQLite
+	// fallback, and a nil CONCRETE pointer boxed into a non-nil interface makes
+	// `a.sessions != nil` true while `a.sessions.GetSession` panics
+	// (agentdb/sessions.go GetSession dereferences s.gdb). Leaving the
+	// interface at its own zero value when there is no database keeps
+	// verifyToken's existing `a.sessions != nil` guard honest, and without a
+	// store an expired token is refused outright (sessionKnown can never
+	// become true) — exactly the T13 "nil-store trap" fallback.
+	var modelProxySessions mcpSessionLookup
+	if agentDB != nil {
+		modelProxySessions = agentDB
+	}
+	root.Handle("/agent-proxy/", http.StripPrefix("/agent-proxy",
+		newModelProxyHandler(newSessionTokenAuth(sessionSecret, modelProxySessions))))
 
 	// ── Core MCP tools (memory, images, skills, management) ──────────────────────
 	// One http MCP server, mounted outside the API auth middleware because it

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -40,7 +41,15 @@ func (p modelProvider) TargetPath(inboundPath string) string { return inboundPat
 // which the canned stream can never produce. That is what makes an offline test
 // able to drive a worker into calling an MCP tool. Neither set → the canned
 // stream, unchanged.
-func newModelProxyHandler() http.Handler {
+//
+// auth guards ONLY the real-key branch (H6, docs/19-embedding.md): before
+// 2026-09, that branch mounted a real Anthropic key behind no auth at all —
+// anything on the docker network that could reach agentd's port could spend
+// Kai's API budget with no session, no rate limit and no attribution. Mock
+// and subscription mode stay open: neither mounts a billing key (subscription
+// mode does not even mount THIS handler for sessions — see the log line
+// below), so there is nothing there for a guard to protect.
+func newModelProxyHandler(auth *sessionTokenAuth) http.Handler {
 	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
 		// Not mock mode — sessions are on the real model, direct. This only says
 		// the unused /agent-proxy/ route is inert (no billing key mounted on it).
@@ -63,8 +72,50 @@ func newModelProxyHandler() http.Handler {
 		return modelproxy.ScriptedMockHandler(table)
 	}
 	endpoint := envOr("ANTHROPIC_UPSTREAM_URL", "https://api.anthropic.com")
-	log.Printf("[agentd] real model proxy → %s", endpoint)
-	return modelproxy.Handler(modelProvider{endpoint: endpoint, apiKey: key})
+	log.Printf("[agentd] real model proxy → %s (session-token guarded)", endpoint)
+	return requireSessionToken(auth, modelproxy.Handler(modelProvider{endpoint: endpoint, apiKey: key}))
+}
+
+// requireSessionToken wraps next so it is reachable only with a session token
+// that verifyToken accepts under requireLive=true (H6): a valid, unexpired
+// token is always honoured; an expired one is honoured only for a session
+// that is still live (sessionIsLive) — the same live-only rule T12's
+// `/connect/` uses, sharing sessionTokenAuth.verifyToken so the two cannot
+// drift apart.
+//
+// The credential arrives in X-Api-Key: that is the header the Claude Agent
+// SDK sends its configured ANTHROPIC_API_KEY under, and the Runner puts the
+// per-session JWT there (runner.go sessionEnv, unless
+// Policy.DisableModelAPIKeyOverride is set) precisely so this guard has
+// something to check without the sandbox changing at all. Authorization is
+// checked too, as a fallback for a client that sends it there instead — never
+// the other way around, since X-Api-Key is what the SDK actually sends.
+//
+// The upstream is never contacted when this refuses: the wrapped handler's
+// http.Handler is only reached after this returns.
+func requireSessionToken(auth *sessionTokenAuth, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := bearerToken(r.Header.Get("X-Api-Key"))
+		if raw == "" {
+			raw = bearerToken(r.Header.Get("Authorization"))
+		}
+		if _, err := auth.verifyToken(r.Context(), raw, true); err != nil {
+			writeProxyUnauthorized(w, err)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeProxyUnauthorized writes the 401 JSON body for a request
+// requireSessionToken refused. The message is whatever verifyToken decided
+// ("session token rejected" / "session token expired" / etc — see
+// mcpserver.go's status table); this never leaks which case it was beyond
+// that message, and never contacts the upstream.
+func writeProxyUnauthorized(w http.ResponseWriter, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 }
 
 // The credential modes reported to the browser by GET /auth/config (RD18).

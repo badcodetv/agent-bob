@@ -93,7 +93,7 @@ func TestNewModelProxyHandler_UnscriptedIsTheCannedMock(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv(mockScriptEnv, "")
 	t.Setenv(mockScriptFileEnv, "")
-	if h := newModelProxyHandler(); h == nil {
+	if h := newModelProxyHandler(newSessionTokenAuth([]byte("s3cret"), nil)); h == nil {
 		t.Fatal("no handler")
 	}
 	// The behavioural assertion lives with the handler
