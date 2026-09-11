@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/badcodetv/agent-bob/connections"
 )
 
 // projectKeys resolves a raw API key to the project it grants, and reports the
@@ -163,4 +165,22 @@ func projectConfigsOf(s *projectSettings) map[string]projectConfig {
 		return nil
 	}
 	return s.projects
+}
+
+// connectionSpecsOf is the nil-tolerant accessor T12 builds the connections
+// Registry from: project ID → connection name → Spec. Same shape of
+// convenience as projectConfigsOf — a deployment with no project map, or a
+// project with no connections block, needs no special case at the call site.
+func connectionSpecsOf(s *projectSettings) map[string]map[string]connections.Spec {
+	if s == nil {
+		return nil
+	}
+	out := make(map[string]map[string]connections.Spec, len(s.projects))
+	for id, cfg := range s.projects {
+		if len(cfg.Connections) == 0 {
+			continue
+		}
+		out[id] = cfg.Connections
+	}
+	return out
 }

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/extension"
 	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
@@ -64,6 +65,12 @@ type projectConfig struct {
 	// applying that precedence — this file only validates and stores the
 	// map's own value.
 	GitHubTokenEnv string `json:"github_token_env"`
+	// Connections names the external MCP services this project has, keyed by
+	// connection name (design/2026-09-11-project-connections.md). The map
+	// names env vars only, never a secret — see connections.Auth. Which
+	// workers may *use* a connection is a database field (workers.connections,
+	// T6), granted by the architect; this is only what the project *has*.
+	Connections map[string]connections.Spec `json:"connections"`
 }
 
 // projectSettings is the whole parsed map file: who may log in, and per-project
@@ -161,6 +168,14 @@ func parseProjectSettingsObjectForm(probe map[string]json.RawMessage) (*projectS
 			for _, origin := range cfg.AllowedOrigins {
 				if err := validateOrigin(origin); err != nil {
 					return nil, fmt.Errorf("project map: project %q: allowed_origins: %w", id, err)
+				}
+			}
+			for name, spec := range cfg.Connections {
+				if err := connections.ValidateName(name); err != nil {
+					return nil, fmt.Errorf("project map: project %q: connections: %q: %w", id, name, err)
+				}
+				if err := spec.Validate(); err != nil {
+					return nil, fmt.Errorf("project map: project %q: connections: %q: %w", id, name, err)
 				}
 			}
 			out.projects[id] = cfg

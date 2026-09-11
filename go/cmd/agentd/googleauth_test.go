@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/extension/devclaims"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -130,6 +131,61 @@ func TestParseProjectMapObjectForm(t *testing.T) {
 	}
 }
 
+// A project's connections block parses into connections.Spec values and
+// connectionSpecsOf surfaces them keyed by project id — what T12's Registry
+// build consumes. A project with no connections block is simply absent from
+// the result, not present with an empty map, matching projectConfigsOf's
+// nil-tolerant style.
+func TestParseProjectMapConnections(t *testing.T) {
+	raw := `{
+	  "projects": {
+	    "wolf": {
+	      "connections": {
+	        "github": {
+	          "description": "badcodetv repos",
+	          "url": "https://api.githubcopilot.com/mcp/",
+	          "auth": {"type": "bearer", "token_env": "WOLF_GITHUB_PAT"}
+	        },
+	        "gmail": {
+	          "description": "Kai's inbox",
+	          "url": "https://gmailmcp.googleapis.com/mcp/v1",
+	          "auth": {
+	            "type": "google_oauth",
+	            "client_id_env": "GOOGLE_CLIENT_ID",
+	            "client_secret_env": "GOOGLE_CLIENT_SECRET",
+	            "refresh_token_env": "KAI_GOOGLE_REFRESH"
+	          }
+	        }
+	      }
+	    },
+	    "bare": {"api_key_env": "BARE_KEY"}
+	  }
+	}`
+	s, err := parseProjectSettings([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gh := s.projects["wolf"].Connections["github"]
+	if gh.URL != "https://api.githubcopilot.com/mcp/" || gh.Auth.Type != connections.AuthBearer || gh.Auth.TokenEnv != "WOLF_GITHUB_PAT" {
+		t.Fatalf("github spec = %+v", gh)
+	}
+	gmail := s.projects["wolf"].Connections["gmail"]
+	if gmail.Auth.Type != connections.AuthGoogleOAuth || gmail.Auth.RefreshTokenEnv != "KAI_GOOGLE_REFRESH" {
+		t.Fatalf("gmail spec = %+v", gmail)
+	}
+
+	specs := connectionSpecsOf(s)
+	if len(specs["wolf"]) != 2 {
+		t.Fatalf("connectionSpecsOf(wolf) = %v", specs["wolf"])
+	}
+	if _, ok := specs["bare"]; ok {
+		t.Fatal("a project with no connections block should be absent from connectionSpecsOf, not present empty")
+	}
+	if connectionSpecsOf(nil) != nil {
+		t.Fatal("connectionSpecsOf(nil) must be nil-tolerant")
+	}
+}
+
 // parseProjectMap keeps its old signature and old behaviour — it is what the
 // login handlers take — and simply reads the users half of whichever form
 // arrived.
@@ -165,6 +221,14 @@ func TestParseProjectMapObjectFormErrors(t *testing.T) {
 		{"bad project id", `{"projects": {"Wolf_Prod": {}}}`, "Wolf_Prod"},
 		{"nothing at all", `{"users": {}, "projects": {}}`, "empty"},
 		{"user with no projects", `{"users": {"a@b.c": []}}`, "a@b.c"},
+		{"connection reserved name", `{"projects": {"wolf": {"connections": {"core": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "core"},
+		{"connection bad name", `{"projects": {"wolf": {"connections": {"Bad Name": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "Bad Name"},
+		{"connection bad url", `{"projects": {"wolf": {"connections": {"github": {"url": "not-a-url", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "github"},
+		{"connection plain http non-localhost", `{"projects": {"wolf": {"connections": {"github": {"url": "http://example.com", "auth": {"type": "bearer", "token_env": "X"}}}}}}`, "github"},
+		{"connection missing token_env", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer"}}}}}}`, "github"},
+		{"connection bearer with google fields", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X", "client_id_env": "Y"}}}}}}`, "github"},
+		{"connection bad env var name", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "bad-name"}}}}}}`, "github"},
+		{"connection unknown auth type", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {"type": "oauth1"}}}}}}`, "github"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
