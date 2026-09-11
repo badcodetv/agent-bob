@@ -6,8 +6,9 @@
 > Activity rail), A3 (operator claim, budget guard, default budgets, `/agent/whoami`) and A6
 > (project-map reload) are merged**. After the A3+A6 merge `go build ./... && go vet ./...` passed;
 > **the full `go test ./...` has NOT been re-run on the merged tree** (each branch was green alone).
-> `docs/guide/` (16 pages + field notes + glossary + README) is committed as the writers left it;
-> the editorial pass **B8 was interrupted part-way** and must be re-run from scratch.
+> `docs/guide/` (16 pages + field notes + glossary + README) is committed **after the B8 editorial
+> pass** — the editor finished despite the stop signal and its edits landed in commit `b1af8b3`. The
+> one broken link in the folder is `for-operators/inviting-someone.md`, which A7 writes.
 >
 > **Five branches hold finished-but-unverified work, committed as `WIP (fleet paused …)`** by the
 > orchestrator when the agents were stopped one step before their own commit. Each agent had
@@ -32,8 +33,7 @@
 >    Merge each green branch into `main` (A4 first, then A2, C1, C3, C4), running the web gates
 >    after the web merges.
 > 3. Wave 2: A5 (budget panel; depends on A3+A4 merged), A7 (operator docs), C2 (About this
->    screen; depends on C1), C5 (Desk narrates firsts; depends on C1+C2), and **re-run B8** (editor)
->    over `docs/guide/` including DI 1.
+>    screen; depends on C1), C5 (Desk narrates firsts; depends on C1+C2), (B8 is done; no editor needed until B7 changes pages).
 > 4. Wave 3: D1, D2 (stack e2e — needs port 8080 free and Docker), B7 (Ellen fixture + screenshots).
 > 5. Append every agent's Notes to its ticket and every finding to the Discovered Issues Log below.
 >
@@ -508,7 +508,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - [ ] done
 - Notes:
 
-### B8: the editorial pass   [Status: interrupted, re-run from scratch | Model: sonnet]
+### B8: the editorial pass   [Status: done | Model: sonnet]
 - **Scope:** Read every page in `docs/guide/` in order. Enforce: the same word everywhere (build a
   list of the terms and their spellings; fix drift); every first paragraph stands alone with no
   links; every page has "What this will not do"; no marketing adjectives (grep for powerful,
@@ -521,8 +521,8 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   the ten spot-checks are listed with `file:line`.
 - **Validation:** the two greps; `wc -w docs/guide/*.md`.
 - **Depends on:** B1–B6
-- [ ] done
-- Notes: (2026-09-11) Editor stopped part-way by the pause; some pages may be half-reconciled. Re-run the whole ticket.
+- [x] done
+- Notes: (2026-09-11) Completed despite the pause; edits are in b1af8b3. All 16 pages on `##` headers (DI 1 closed); deep-link line on all 10 Part 1/2 pages; why-Bob hole moved above the closing sections; 2 prose em-dashes removed (3 remain, all inside verified verbatim quotes); glossary's revert entry no longer says "undoes"; field-notes Back link fixed; wall→boundary; what-bob-will-not-do trimmed 475→437; ten spot-checks against docs/18 (lines 70-71, 272-278, 772-773, 783-786, 843-851, 864-870, 880-894) with no contradiction. Only broken link: for-operators/inviting-someone.md (A7). 12 fixture/screenshot placeholders intact for B7.
 
 ### Stream C — console wiring
 
