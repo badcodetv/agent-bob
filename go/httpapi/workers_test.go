@@ -99,6 +99,22 @@ func workerHandlers(t *testing.T, store WorkersStore, identity IdentityFunc) *Ha
 	})
 }
 
+// workerHandlersWithConnections is workerHandlers plus a Config.ConnectionNames
+// and an arbitrary identity func, for the T7 connections tests.
+func workerHandlersWithConnections(t *testing.T, store WorkersStore, identity IdentityFunc, names func(string) []string) *Handlers {
+	t.Helper()
+	if identity == nil {
+		identity = okIdentity
+	}
+	return newHandlers(t, Config{
+		Runner:          stubRunner{},
+		Store:           stubStore{},
+		Identity:        identity,
+		Workers:         store,
+		ConnectionNames: names,
+	})
+}
+
 func workerReq(method, path, name, body string) *http.Request {
 	var r *http.Request
 	if body == "" {
@@ -783,4 +799,200 @@ func TestWorkersHTTP_PutKeepsOmittedControlFields(t *testing.T) {
 			t.Fatalf("a PUT whose read failed must not write; writes=%d", store.writes)
 		}
 	})
+}
+
+// T7 (design/2026-09-11-project-connections.md): PutWorker carries
+// `connections`. Same keep/clear rule as Briefing, plus an existence check
+// against Config.ConnectionNames and a 403 gate that only a logged-in person
+// (never an API key, an embed-scoped or a dataset-scoped credential) may
+// CHANGE the stored grants.
+
+func acmeIdentity(*http.Request) (Identity, error) {
+	return Identity{UserEmail: "kai@acme.com", Customer: "acme"}, nil
+}
+
+func apiKeyIdentity(*http.Request) (Identity, error) {
+	return Identity{UserEmail: "api-key:acme", Customer: "acme", APIKey: true}, nil
+}
+
+func TestWorkersHTTP_Connections_OmittedKeeps(t *testing.T) {
+	existing := agentdb.NewWorker("acme", "researcher")
+	existing.Connections = agentdb.ConnectionList{"github"}
+	store := newFakeWorkerStore(existing)
+	h := workerHandlersWithConnections(t, store, acmeIdentity, nil)
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"description":"researches things"}`))
+	if rec.Code != 200 {
+		t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+	}
+	got := store.rows["acme/researcher"]
+	if len(got.Connections) != 1 || got.Connections[0] != "github" {
+		t.Fatalf("connections not kept on an omitted field: %#v", got.Connections)
+	}
+}
+
+func TestWorkersHTTP_Connections_NullKeeps(t *testing.T) {
+	existing := agentdb.NewWorker("acme", "researcher")
+	existing.Connections = agentdb.ConnectionList{"github"}
+	store := newFakeWorkerStore(existing)
+	h := workerHandlersWithConnections(t, store, acmeIdentity, nil)
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":null}`))
+	if rec.Code != 200 {
+		t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+	}
+	got := store.rows["acme/researcher"]
+	if len(got.Connections) != 1 || got.Connections[0] != "github" {
+		t.Fatalf("connections not kept on an explicit null: %#v", got.Connections)
+	}
+}
+
+func TestWorkersHTTP_Connections_EmptyClears(t *testing.T) {
+	existing := agentdb.NewWorker("acme", "researcher")
+	existing.Connections = agentdb.ConnectionList{"github"}
+	store := newFakeWorkerStore(existing)
+	h := workerHandlersWithConnections(t, store, acmeIdentity, nil)
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":[]}`))
+	if rec.Code != 200 {
+		t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+	}
+	got := store.rows["acme/researcher"]
+	if got.Connections == nil || len(got.Connections) != 0 {
+		t.Fatalf("connections not cleared to []: %#v", got.Connections)
+	}
+}
+
+func TestWorkersHTTP_Connections_WildcardAccepted(t *testing.T) {
+	store := newFakeWorkerStore()
+	h := workerHandlersWithConnections(t, store, acmeIdentity, func(string) []string { return []string{"github"} })
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/architect", "architect", `{"connections":["*"]}`))
+	if rec.Code != 200 {
+		t.Fatalf("put status %d body=%s", rec.Code, rec.Body)
+	}
+	got := store.rows["acme/architect"]
+	if len(got.Connections) != 1 || got.Connections[0] != "*" {
+		t.Fatalf("wildcard not stored: %#v", got.Connections)
+	}
+}
+
+func TestWorkersHTTP_Connections_UnknownNameIs400(t *testing.T) {
+	store := newFakeWorkerStore()
+	h := workerHandlersWithConnections(t, store, acmeIdentity, func(string) []string { return []string{"github"} })
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":["gmial"]}`))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown connection: want 400, got %d (%s)", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "gmial") {
+		t.Fatalf("400 body should name the bad connection: %s", rec.Body)
+	}
+	if store.writes != 0 {
+		t.Fatalf("a refused connections write must not touch the store")
+	}
+}
+
+func TestWorkersHTTP_Connections_NilConnectionNamesSkipsExistenceCheck(t *testing.T) {
+	store := newFakeWorkerStore()
+	h := workerHandlersWithConnections(t, store, acmeIdentity, nil)
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":["anything-goes"]}`))
+	if rec.Code != 200 {
+		t.Fatalf("nil ConnectionNames should skip the existence check: %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestWorkersHTTP_Connections_APIKeyCannotChange(t *testing.T) {
+	existing := agentdb.NewWorker("acme", "researcher")
+	existing.Connections = agentdb.ConnectionList{"github"}
+	store := newFakeWorkerStore(existing)
+	h := workerHandlersWithConnections(t, store, apiKeyIdentity, func(string) []string { return []string{"github", "gmail"} })
+
+	// Changing connections: refused.
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":["github","gmail"]}`))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("API key changing connections: want 403, got %d (%s)", rec.Code, rec.Body)
+	}
+	if store.writes != 0 {
+		t.Fatalf("a refused connections write must not touch the store")
+	}
+	got := store.rows["acme/researcher"]
+	if len(got.Connections) != 1 || got.Connections[0] != "github" {
+		t.Fatalf("connections must not have changed: %#v", got.Connections)
+	}
+
+	// Same API key, but changing a different field: allowed.
+	rec = httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"description":"researches things, revised"}`))
+	if rec.Code != 200 {
+		t.Fatalf("API key changing description: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+
+	// Same API key, re-sending the stored connections UNCHANGED: allowed.
+	rec = httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":["github"]}`))
+	if rec.Code != 200 {
+		t.Fatalf("API key re-sending unchanged connections: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+}
+
+func TestWorkersHTTP_Connections_ScopedIdentityCannotChange(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		identity IdentityFunc
+	}{
+		{"session-scoped", func(*http.Request) (Identity, error) {
+			return Identity{UserEmail: "embed", Customer: "acme", SessionScope: "sess-1"}, nil
+		}},
+		{"dataset-scoped", func(*http.Request) (Identity, error) {
+			return Identity{UserEmail: "dataset-token:acme", Customer: "acme", DatasetScope: "acme/prices"}, nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			existing := agentdb.NewWorker("acme", "researcher")
+			existing.Connections = agentdb.ConnectionList{"github"}
+			store := newFakeWorkerStore(existing)
+			h := workerHandlersWithConnections(t, store, tc.identity, nil)
+			rec := httptest.NewRecorder()
+			h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+				`{"connections":["github","gmail"]}`))
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("%s changing connections: want 403, got %d (%s)", tc.name, rec.Code, rec.Body)
+			}
+		})
+	}
+}
+
+// A console-login (unscoped, non-API-key) identity may set connections
+// freely, including granting the wildcard to a worker that held nothing.
+func TestWorkersHTTP_Connections_LoggedInPersonCanChangeFreely(t *testing.T) {
+	store := newFakeWorkerStore(agentdb.NewWorker("acme", "researcher"))
+	h := workerHandlersWithConnections(t, store, acmeIdentity, func(string) []string { return []string{"github", "gmail"} })
+
+	rec := httptest.NewRecorder()
+	h.PutWorker(rec, workerReq("PUT", "/agent/workers/researcher", "researcher",
+		`{"connections":["*"]}`))
+	if rec.Code != 200 {
+		t.Fatalf("logged-in person granting wildcard: want 200, got %d (%s)", rec.Code, rec.Body)
+	}
+	got := store.rows["acme/researcher"]
+	if len(got.Connections) != 1 || got.Connections[0] != "*" {
+		t.Fatalf("wildcard grant did not stick: %#v", got.Connections)
+	}
 }
