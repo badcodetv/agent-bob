@@ -569,7 +569,7 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   with `AGENTKIT_TEST_POSTGRES_URL` (the `bob-conn-pg` container did not exist at merge time and
   was recreated from `pgvector/pgvector:pg16` on 127.0.0.1:55439).
 
-### T6: `Worker.Connections` column   [Status: pending | Model: sonnet]
+### T6: `Worker.Connections` column   [Status: done | Model: sonnet]
 - **Scope:** `agentdb.ConnectionList` (NULL-preserving Scan/Value, copy `SelectorList`'s pattern at
   `go/agentdb/workers.go:31-60`), `Worker.Connections` (tag `json:"connections"`, no omitempty),
   validation in `validateWorker` (`:152`), migration `050_worker_connections` appended after
@@ -593,8 +593,21 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   `AGENTKIT_TEST_POSTGRES_URL=<url> go test ./agentdb/... -run 'Worker|Migration|ConfigEvent'
   -count=1` → PASS (not skipped).
 - **Depends on:** T1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: Did not re-run web/ tests or a full-repo `go test ./...`: the fix touched only go/agentdb
+  and go/gitproj, web was untouched by this change, and a full-repo `go test ./...` includes
+  systemtest/e2e suites that spin up Docker-in-Docker — out of scope for these targeted fixes and
+  unnecessary alongside other agents' containers on this host. I started it once, judged it
+  unneeded against the literal instruction ('re-run every Validation command of T6 plus go
+  build/go vet'), and stopped it before completion rather than let it run. Committed as 3eda355 +
+  a770bfa (verifier fixes: live-PG round-trip test, gitproj allowlist entry) on conn/T6.
+  Merge step: merged cleanly (no conflicts) onto the T13 merge; `go build`/`go vet` green;
+  `go test ./agentdb/... -count=1` PASS; `go test ./gitproj/...` PASS; web `typecheck` + full
+  `vitest run` PASS (1545 tests); `go test ./httpapi/... ./cmd/agentd/ -run 'Git|Worker|...'`
+  PASS. Live Postgres (`bob_mt6`): `TestLivePG_WorkerConnectionsRoundTrip` and every other
+  Worker/Migration/ConfigEvent case PASS; the only failure is the pre-existing
+  `TestLivePG_QueryEventsMixedPreAndPostMigrationRows`, which also fails on the pre-merge base
+  (4aae41c) on a fresh database — see the (T6) log entry.
 
 ### T7: HTTP worker PUT carries `connections`   [Status: pending | Model: sonnet]
 - **Scope:** `workerBody.Connections agentdb.ConnectionList` (nil keep, `[]` clear) in
@@ -954,3 +967,6 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   protection. This was flagged by an earlier builder in the mcpserver.go sessionIsLive comment but
   the original docs/19-embedding.md H6 text stated the rule as fully working; this fix corrected
   the doc but did not fix the underlying sweep (out of T13's scope).
+- (T6) T6 alone (before T11 lands) leaves go/gitproj's TestAllowlistCoversEveryField/Worker red because Worker gained a field with no allowlist entry. Fixed here by pulling forward exactly the Render/NotImportable(true) decision T11's own ticket text already specifies for Connections, and updating the paired pinned-set test (TestNotImportableFieldsArePinned) to include it — done deliberately, with rationale, per the 'never weaken a test silently' rule. T11 will still own the full render+import wiring (gitimport.go) and can build on this entry rather than re-adding it.
+- (T6) TestLivePG_QueryEventsMixedPreAndPostMigrationRows (query_events_order_live_pg_test.go) did NOT fail in any live-Postgres run performed in this session, on a freshly created database (bob_t6) against the shared bob-conn-pg container. The verifier's finding #4 says it fails elsewhere ('backfill changed the replay order') and reproduces on a fresh bob_vt6_base database — a genuine pre-existing issue unrelated to T6's changes, just not one that reproduced here; still unresolved and worth someone checking for run-order/flakiness. (Merge step: it DID fail at merge time on fresh databases, both on the merged tree — got [new one old one old two] — and on the pre-merge base 4aae41c — got [old one new one old two]; the differing orders say the post-backfill tie-break is nondeterministic. Pre-existing, not caused by T6.)
+- (T6) The design doc's Discovered Issues Log was intentionally left untouched per instructions (a separate merge step owns design/2026-09-11-project-connections.md) — everything that would normally go there is recorded only in this structured result.
