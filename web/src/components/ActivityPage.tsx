@@ -16,6 +16,15 @@
 //      lens re-folds rather than re-fetches.
 //   2. **The glyph set is closed.** Every row's tick comes from the fold, which
 //      draws only from `spine.tsx`'s five. Nothing here invents a sixth.
+//
+// PR0 (design/2026-09-11-onboarding-and-the-guide.md §6): this is also the
+// page's changes lens's only route to "Revert to this version" — the console's
+// own copy (CharterPanel, RunArchitectControl, docs/18 §9a) promises the
+// button on every changelog entry, but `ChangelogView`, which owns it, is no
+// longer mounted anywhere in the shipped shell. Rather than fork a second copy
+// of the button, its dialog and its confirm wording, `RevertControl` is
+// imported from `ChangelogView.tsx` and mounted on the `changes` rows below —
+// one control, two rails.
 
 import { useState } from 'react'
 import { Alert, Box, Chip, Link, Stack, Typography } from '@mui/material'
@@ -27,7 +36,8 @@ import {
   type ActivityRecord,
 } from '../activity.js'
 import { SpineGap, SpineRail, SpineRow } from '../spine.js'
-import { formatConfigTimestamp } from '../configLog.js'
+import { formatConfigTimestamp, type RevertBlock } from '../configLog.js'
+import { RevertControl } from './ChangelogView.js'
 import { newItemsSummary, waterlineLabel } from '../watermark.js'
 import { highlightSx, highlightMarker, NEW_MARKER_LABEL, type HighlightTone } from '../feedhighlight.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
@@ -84,6 +94,11 @@ export default function ActivityPage({
   const [windowStartMs, setWindowStartMs] = useState(0)
   const [paused, setPaused] = useState(false)
   const reduced = usePrefersReducedMotion()
+  // Lives here, not on the row that was clicked, for the same reason
+  // ChangelogView keeps it at the page level: a successful revert reloads the
+  // rail, which remounts every row, so a notice held inside one would vanish
+  // at exactly the moment it was earned.
+  const [justReverted, setJustReverted] = useState(false)
 
   const {
     records,
@@ -94,6 +109,8 @@ export default function ActivityPage({
     lastSeenMs,
     markSeen,
     nowMs,
+    revertBlocks,
+    reload,
   } = useActivity({
     ...activityOptions,
     projectId,
@@ -149,6 +166,18 @@ export default function ActivityPage({
         ))}
       </Stack>
 
+      {justReverted && (
+        <Alert
+          severity="success"
+          sx={{ mb: 2 }}
+          data-testid="revert-done"
+          onClose={() => setJustReverted(false)}
+        >
+          Reverted. The change that put it back is the newest entry below — the entry you
+          reverted stays exactly where it is, because nothing here is ever erased.
+        </Alert>
+      )}
+
       {error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -194,6 +223,18 @@ export default function ActivityPage({
                 onOpenSession={onOpenSession}
                 arrived={feed.arrivals.has(record.id)}
                 reduced={reduced}
+                revert={
+                  record.kind === 'change' && record.entry !== null
+                    ? {
+                        block: revertBlocks.get(record.entry.id) ?? null,
+                        onReverted: () => {
+                          setJustReverted(true)
+                          void reload()
+                        },
+                      }
+                    : null
+                }
+                apiOptions={activityOptions}
               />
             ))}
           </SpineRail>
@@ -227,11 +268,16 @@ function ActivityRow({
   onOpenSession,
   arrived = false,
   reduced = false,
+  revert = null,
+  apiOptions = {},
 }: {
   record: ActivityRecord
   onOpenSession?: (sessionId: string) => void
   arrived?: boolean
   reduced?: boolean
+  /** Non-null only for `kind === 'change'` rows — never on an event or job. */
+  revert?: { block: RevertBlock | null; onReverted: () => void } | null
+  apiOptions?: Record<string, unknown>
 }) {
   const tone = toneFor(record)
   return (
@@ -281,6 +327,14 @@ function ActivityRow({
               {record.kind === 'ask' ? 'open thread' : 'open the session'}
             </Link>
           </Box>
+        )}
+        {revert !== null && record.entry !== null && (
+          <RevertControl
+            entry={record.entry}
+            block={revert.block}
+            onReverted={revert.onReverted}
+            {...apiOptions}
+          />
         )}
       </SpineRow>
     </>

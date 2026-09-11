@@ -325,6 +325,11 @@ function ChangelogEntryCard({
  * self-revising organisation (design §C6: there is no mechanical brake on the
  * architect; revert IS the control).
  *
+ * Exported so `ActivityPage` — the shell's actual changelog surface, since
+ * `ChangelogView` is no longer mounted there — can put the same control on its
+ * `changes` rows rather than growing a second copy (design
+ * 2026-09-11-onboarding-and-the-guide.md §6 PR0).
+ *
  * Three things about it are deliberate.
  *
  * NEVER THE WORD "UNDO". Nothing here is undone: reverting writes a NEW change
@@ -339,7 +344,7 @@ function ChangelogEntryCard({
  * THE REASON IS REQUIRED, like every other write in this console (K2). A
  * changelog whose entries say "(no reason given)" is a changelog nobody reads.
  */
-function RevertControl({
+export function RevertControl({
   entry,
   block,
   onReverted,
