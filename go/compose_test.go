@@ -289,11 +289,12 @@ func TestComposeJobPromptNilSettings(t *testing.T) {
 // wins name collisions with the project, core tools are non-overridable.
 func TestComposeJobMCPMerge(t *testing.T) {
 	tests := []struct {
-		name    string
-		project agentdb.MCPServers
-		worker  agentdb.MCPServers
-		core    agentdb.MCPServers
-		want    agentdb.MCPServers
+		name        string
+		project     agentdb.MCPServers
+		worker      agentdb.MCPServers
+		connections agentdb.MCPServers
+		core        agentdb.MCPServers
+		want        agentdb.MCPServers
 	}{
 		{
 			name: "nothing configured anywhere",
@@ -333,6 +334,35 @@ func TestComposeJobMCPMerge(t *testing.T) {
 			core:    agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
 			want:    agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
 		},
+		{
+			// T8, Decision 5: connections are operator-defined and outrank a
+			// worker's own mcp_config entry of the same name.
+			name:        "a connection wins a name collision with the worker's own mcp_config",
+			worker:      agentdb.MCPServers{"github": stdioServer("worker-fake-github")},
+			connections: agentdb.MCPServers{"github": httpServer("http://self/connect/github/")},
+			want:        agentdb.MCPServers{"github": httpServer("http://self/connect/github/")},
+		},
+		{
+			// Defensive: T1 forbids a connection named "core", but composeMCP
+			// must not rely on that — core still wins if one ever showed up.
+			name:        "core beats a connection named core, defensively",
+			connections: agentdb.MCPServers{"core": httpServer("http://fake/connect/core/")},
+			core:        agentdb.MCPServers{"core": httpServer("http://agentd:8080/mcp")},
+			want:        agentdb.MCPServers{"core": httpServer("http://agentd:8080/mcp")},
+		},
+		{
+			name:        "connections union project and worker",
+			project:     agentdb.MCPServers{"notion": httpServer("http://notion:8080/sse")},
+			worker:      agentdb.MCPServers{"gmail": stdioServer("gmail-mcp")},
+			connections: agentdb.MCPServers{"github": httpServer("http://self/connect/github/")},
+			core:        agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")},
+			want: agentdb.MCPServers{
+				"notion": httpServer("http://notion:8080/sse"),
+				"gmail":  stdioServer("gmail-mcp"),
+				"github": httpServer("http://self/connect/github/"),
+				"bob":    httpServer("http://agentd:8080/mcp"),
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -340,6 +370,7 @@ func TestComposeJobMCPMerge(t *testing.T) {
 			in := baseInput()
 			in.Settings = &agentdb.ProjectSettings{Project: "acme", MCPConfig: jsonMapOf(tc.project)}
 			in.Worker.MCPConfig = jsonMapOf(tc.worker)
+			in.Connections = tc.connections
 			in.CoreMCP = tc.core
 
 			got, err := ComposeJob(context.Background(), in)
@@ -358,7 +389,9 @@ func TestComposeJobMCPMerge(t *testing.T) {
 func TestComposeJobMCPMergeDoesNotMutateInputs(t *testing.T) {
 	in := baseInput()
 	core := agentdb.MCPServers{"bob": httpServer("http://agentd:8080/mcp")}
+	connections := agentdb.MCPServers{"github": httpServer("http://self/connect/github/")}
 	in.CoreMCP = core
+	in.Connections = connections
 	in.Worker.MCPConfig = jsonMapOf(agentdb.MCPServers{"gmail": stdioServer("gmail-mcp")})
 
 	got, err := ComposeJob(context.Background(), in)
@@ -368,11 +401,14 @@ func TestComposeJobMCPMergeDoesNotMutateInputs(t *testing.T) {
 	if len(core) != 1 {
 		t.Fatalf("CoreMCP was mutated: %#v", core)
 	}
+	if len(connections) != 1 {
+		t.Fatalf("Connections was mutated: %#v", connections)
+	}
 	if len(in.Worker.MCPConfig) != 1 {
 		t.Fatalf("worker mcp_config was mutated: %#v", in.Worker.MCPConfig)
 	}
-	if len(got.MCPServers) != 2 {
-		t.Fatalf("expected 2 merged servers, got %#v", got.MCPServers)
+	if len(got.MCPServers) != 3 {
+		t.Fatalf("expected 3 merged servers, got %#v", got.MCPServers)
 	}
 }
 
@@ -419,6 +455,14 @@ func TestComposeJobMCPInvalid(t *testing.T) {
 			},
 			wantErr:  "exactly one transport",
 			wantName: "core mcp servers",
+		},
+		{
+			name: "connections are validated too",
+			mutate: func(in *ComposeJobInput) {
+				in.Connections = agentdb.MCPServers{"github": {}}
+			},
+			wantErr:  "exactly one transport",
+			wantName: "connections",
 		},
 		{
 			name: "server name the sandbox could not turn into a tool name",

@@ -510,7 +510,7 @@ func (r *runnerImpl) resolveSessionContext(ctx context.Context, req CreateSessio
 		return nil, nil
 	}
 	scope := extension.ContextScope{
-		Customer: req.Customer, Job: req.Job, Persona: req.Persona, UserEmail: req.UserEmail,
+		Customer: req.Customer, Job: req.Job, Persona: req.Persona, Worker: req.Worker, UserEmail: req.UserEmail,
 	}
 	sc, err := r.deps.SessionContext.Resolve(ctx, scope)
 	if err != nil {

@@ -355,6 +355,134 @@ func TestSessionContextProvider_ImplementsSeam(t *testing.T) {
 	var _ projectConfigStore = (*agentdb.Store)(nil)
 }
 
+// TestSessionContextProvider_Connections pins Decision 6 of
+// design/2026-09-11-project-connections.md: connections are keyed on
+// scope.Worker, never scope.Persona — the /connect/ proxy authorises every
+// request against Session.Worker, so a connections layer keyed on Persona
+// would grant tools that 403 forever.
+func TestSessionContextProvider_Connections(t *testing.T) {
+	// A stub connectionServers that records what it was called with and
+	// returns one recognisable MCP entry per grant, so a test can tell
+	// whether it was invoked at all and with which grants.
+	calls := 0
+	var gotProject string
+	var gotGrants []string
+	stub := func(project string, grants []string) agentdb.MCPServers {
+		calls++
+		gotProject, gotGrants = project, grants
+		out := agentdb.MCPServers{}
+		for _, g := range grants {
+			out[g] = agentdb.MCPServerConfig{URL: "https://self.example/connect/" + g + "/"}
+		}
+		return out
+	}
+
+	store := &fakeConfigStore{
+		workers: map[string]*agentdb.Worker{
+			"acme/researcher": {Project: "acme", Name: "researcher", Enabled: true,
+				SystemPrompt: "you research", Connections: agentdb.ConnectionList{"github"}},
+			"acme/writer": {Project: "acme", Name: "writer", Enabled: true,
+				SystemPrompt: "you write", Connections: agentdb.ConnectionList{"gmail"}},
+			"acme/disabled": {Project: "acme", Name: "disabled", Enabled: false,
+				Connections: agentdb.ConnectionList{"github"}},
+		},
+	}
+
+	t.Run("persona-only chat gets no connections", func(t *testing.T) {
+		calls = 0
+		p := newSessionContextProvider(store, "base:dev").withConnectionServers(stub)
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Persona: "researcher"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if calls != 0 {
+			t.Errorf("connectionServers called %d times for a persona-only scope, want 0", calls)
+		}
+		if _, ok := sc.MCPServers["github"]; ok {
+			t.Errorf("a persona-only session got connections it holds no Worker identity to use: %v", sortedKeys(sc.MCPServers))
+		}
+	})
+
+	t.Run("persona == worker gets that worker's grants, from one store read", func(t *testing.T) {
+		calls = 0
+		p := newSessionContextProvider(store, "base:dev").withConnectionServers(stub)
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Persona: "researcher", Worker: "researcher"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("connectionServers called %d times, want 1", calls)
+		}
+		if gotProject != "acme" {
+			t.Errorf("project = %q, want acme", gotProject)
+		}
+		if !reflect.DeepEqual(gotGrants, []string{"github"}) {
+			t.Errorf("grants = %v, want [github]", gotGrants)
+		}
+		if _, ok := sc.MCPServers["github"]; !ok {
+			t.Errorf("connections entry missing from MCPServers: %v", sortedKeys(sc.MCPServers))
+		}
+	})
+
+	t.Run("persona X, worker Y gets Y's grants, not X's", func(t *testing.T) {
+		p := newSessionContextProvider(store, "base:dev").withConnectionServers(stub)
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Persona: "researcher", Worker: "writer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := sc.MCPServers["github"]; ok {
+			t.Errorf("got the PERSONA's (researcher) connection, not the WORKER's (writer): %v", sortedKeys(sc.MCPServers))
+		}
+		if _, ok := sc.MCPServers["gmail"]; !ok {
+			t.Errorf("missing the WORKER's (writer) connection: %v", sortedKeys(sc.MCPServers))
+		}
+		// The prompt/image layer, meanwhile, still follows Persona (researcher) —
+		// connections is the ONLY axis Decision 6 repoints at Worker.
+		if !strings.Contains(sc.SystemPrompt, "you research") {
+			t.Errorf("prompt layer should still follow Persona: %q", sc.SystemPrompt)
+		}
+	})
+
+	t.Run("a disabled worker's own connections are not resolved", func(t *testing.T) {
+		p := newSessionContextProvider(store, "base:dev").withConnectionServers(stub)
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Worker: "disabled"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sc.MCPServers) != 0 {
+			t.Errorf("a disabled worker's grants reached the session: %v", sortedKeys(sc.MCPServers))
+		}
+	})
+
+	t.Run("an unknown worker resolves no connections rather than erroring", func(t *testing.T) {
+		p := newSessionContextProvider(store, "base:dev").withConnectionServers(stub)
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Worker: "no-such-worker"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sc.MCPServers) != 0 {
+			t.Errorf("an unknown worker should contribute no connections: %v", sortedKeys(sc.MCPServers))
+		}
+	})
+
+	t.Run("nil connectionServers is the pre-T12 default: no connections layer at all", func(t *testing.T) {
+		p := newSessionContextProvider(store, "base:dev") // no withConnectionServers
+		sc, err := p.Resolve(context.Background(),
+			extension.ContextScope{Customer: "acme", Persona: "researcher", Worker: "researcher"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sc.MCPServers) != 0 {
+			t.Errorf("expected no MCP servers with no connectionServers wired, got %v", sortedKeys(sc.MCPServers))
+		}
+	})
+}
+
 func sortedKeys(m agentdb.MCPServers) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
