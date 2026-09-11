@@ -672,7 +672,10 @@ func main() {
 		mcpSrv.register(newMemoryTools(agentDB, embedder, permalinks).tools()...)
 		mcpSrv.register(newImageTools(agentDB, runner, permalinks).tools()...)
 		mcpSrv.register(newSkillTools(agentDB, runner, permalinks).tools()...)
-		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks).tools()...)
+		// The connection catalog is nil until agentd builds a Registry from
+		// the project map (project connections T12): until then every project
+		// has no connections and only "*" can be granted.
+		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks, nil).tools()...)
 		mcpSrv.register(newConfigLogTools(agentDB, permalinks).tools()...)
 		mcpSrv.register(newSessionTools(agentDB, permalinks).tools()...)
 		// charter_validate takes no store — validation is pure — but it is

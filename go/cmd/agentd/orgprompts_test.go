@@ -47,7 +47,7 @@ func coreToolsForPromptAssertions() []*mcpTool {
 	tools = append(tools, newMemoryTools(nil, nil, links).tools()...)
 	tools = append(tools, newImageTools(nil, nil, links).tools()...)
 	tools = append(tools, newSkillTools(nil, nil, links).tools()...)
-	tools = append(tools, newManagementTools(nil, nil, nil, links).tools()...)
+	tools = append(tools, newManagementTools(nil, nil, nil, links, nil).tools()...)
 	tools = append(tools, newConfigLogTools(nil, links).tools()...)
 	tools = append(tools, newSessionTools(nil, links).tools()...)
 	tools = append(tools, newDatasetTools(nil, nil, nil, nil, "", 0).tools()...)
