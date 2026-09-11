@@ -42,6 +42,7 @@ function worker(name: string, overrides: Partial<Worker> = {}): Worker {
     mcp_config: {},
     image: '',
     briefing: null,
+    connections: null,
     max_instances: 1,
     enabled: true,
     frozen: false,

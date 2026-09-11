@@ -1194,6 +1194,18 @@ var agentMigrations = []migration{
 				ON git_projection_notes (project, kind, noted_at DESC);
 		`,
 	},
+	{
+		// design/2026-09-11-project-connections.md T6. A worker's `connections`
+		// column holds the names it is granted (never a secret — those live only
+		// in agentd's environment, resolved by go/connections). Nullable, no
+		// default: nil ("connections field never set") and [] ("explicitly
+		// granted nothing") must stay distinct, exactly like `briefing` in
+		// migration 021.
+		Name: "050_worker_connections",
+		SQL: `
+			ALTER TABLE workers ADD COLUMN IF NOT EXISTS connections JSONB;
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

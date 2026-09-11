@@ -67,6 +67,52 @@ func (l *SelectorList) Scan(value any) error {
 	return nil
 }
 
+// ConnectionList is a list of connection names (or the wildcard "*") a worker
+// holds, stored as JSONB. NULL-preserving exactly like SelectorList (§6.1):
+// nil ("no connections field ever set") and [] ("explicitly holds nothing")
+// round-trip as distinct states, because a revert or a config-event payload
+// must be able to tell them apart. It carries no `omitempty` on Worker.
+// Connections precisely so a config-event payload records null vs [] instead
+// of collapsing both to an absent key (design §Interfaces/agentdb).
+type ConnectionList []string
+
+func (l ConnectionList) Value() (driver.Value, error) {
+	if l == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal([]string(l))
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+func (l *ConnectionList) Scan(value any) error {
+	if value == nil {
+		*l = nil
+		return nil
+	}
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("unsupported type %T for ConnectionList", value)
+	}
+	if len(bytes) == 0 || string(bytes) == "null" {
+		*l = nil
+		return nil
+	}
+	var decoded []string
+	if err := json.Unmarshal(bytes, &decoded); err != nil {
+		return fmt.Errorf("failed to unmarshal ConnectionList: %w", err)
+	}
+	*l = decoded
+	return nil
+}
+
 // Worker is a configured agent persona in a project (spec 02-workers §6.1).
 // Identity is (Project, Name) — the composite primary key; Project is the hard
 // tenancy namespace and matches the `customer` claim on the caller's token.
@@ -83,6 +129,13 @@ type Worker struct {
 	MCPConfig    JSONMap      `json:"mcp_config" gorm:"column:mcp_config;type:jsonb;default:'{}'"`
 	Image        string       `json:"image" gorm:"type:text;default:''"`    // '' | name (latest) | name:version (pinned)
 	Briefing     SelectorList `json:"briefing,omitempty" gorm:"type:jsonb"` // label selectors; nil = NULL
+	// Connections is a list of connection names (design/2026-09-11-project-
+	// connections.md) the worker is granted, "*" meaning every connection the
+	// project has. Deliberately no `omitempty`: the config-event payload must
+	// carry null vs [] so a revert restores exactly what was there — an
+	// omitted key would let a revert land on "field absent", which decodes as
+	// nil regardless of what was actually reverted.
+	Connections ConnectionList `json:"connections" gorm:"type:jsonb"`
 	// MaxInstances, Enabled and Frozen carry NO gorm `default` tag on purpose:
 	// GORM omits zero-valued fields from the INSERT when a default is declared,
 	// which would make `enabled: false` (or `frozen: false`) silently persist as
@@ -144,6 +197,12 @@ var connectionNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 // server-name rule it borrows.
 const maxConnectionNameLen = 64
 
+// connectionWildcard mirrors connections.Wildcard ("*", meaning every
+// connection the project has). Duplicated as a literal rather than imported:
+// go/connections resolves grants into agentdb.MCPServers, so agentdb importing
+// connections back would cycle.
+const connectionWildcard = "*"
+
 // ValidateConnectionName is the identity rule for a connection name — used by
 // both the project map (go/connections) and worker grants (workers.Connections)
 // so the two agree on what a name looks like without either importing the
@@ -197,6 +256,23 @@ func validateWorker(w *Worker) error {
 			return fmt.Errorf("%w: briefing selector %d is empty", ErrWorkerInvalid, i)
 		}
 	}
+	seen := make(map[string]bool, len(w.Connections))
+	for _, name := range w.Connections {
+		if name == connectionWildcard {
+			if seen[connectionWildcard] {
+				return fmt.Errorf("%w: connection %q is duplicated", ErrWorkerInvalid, connectionWildcard)
+			}
+			seen[connectionWildcard] = true
+			continue
+		}
+		if err := ValidateConnectionName(name); err != nil {
+			return err
+		}
+		if seen[name] {
+			return fmt.Errorf("%w: connection %q is duplicated", ErrWorkerInvalid, name)
+		}
+		seen[name] = true
+	}
 	return nil
 }
 
@@ -210,7 +286,8 @@ func workerConfigEqual(a, b *Worker) bool {
 		a.Image != b.Image || a.MaxInstances != b.MaxInstances {
 		return false
 	}
-	return jsonValueEqual(a.MCPConfig, b.MCPConfig) && jsonValueEqual(a.Briefing, b.Briefing)
+	return jsonValueEqual(a.MCPConfig, b.MCPConfig) && jsonValueEqual(a.Briefing, b.Briefing) &&
+		jsonValueEqual(a.Connections, b.Connections)
 }
 
 // jsonValueEqual compares two JSON-serialisable column values structurally.
@@ -282,6 +359,7 @@ func (s *Store) UpsertWorker(ctx context.Context, w *Worker, cw ConfigWrite) (*W
 		existing.Image = w.Image
 		existing.MaxInstances = w.MaxInstances
 		existing.Briefing = w.Briefing
+		existing.Connections = w.Connections
 		existing.Enabled = w.Enabled
 		existing.Frozen = w.Frozen
 		if _, err := s.WithConfigEvent(ctx, ConfigChange{
