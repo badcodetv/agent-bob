@@ -784,23 +784,41 @@ and the `<img>` renders *that* (`:265,:273`). Browsers do not attach bearer toke
 loads, so the blob-URL indirection is what makes authenticated images work at all — do not
 "simplify" it away.
 
-### H6 — the unauthenticated `/agent-proxy/` carries the real Anthropic key
+### H6 — **CLOSED 2026-09-11** (in API-key mode) — the unauthenticated `/agent-proxy/` carried the real Anthropic key
 
-`go/cmd/agentd/main.go:507` mounts it on the **root** mux, outside `apiAuthMiddleware` (which is
-registered on `"/"` at `:539` and therefore never sees the more specific prefix).
-`go/cmd/agentd/modelproxy.go:39-58` shows it forwards to `api.anthropic.com` when
-`ANTHROPIC_API_KEY` is set, and `go/modelproxy/modelproxy.go:146` stamps that key onto the upstream
-request — while `modelproxy.go:30`'s own doc comment says "Mount under your auth middleware", which
-`agentd` does not do. It is there because session containers reach `agentd` through
-`AGENTKIT_SELF_URL` and authenticate with a per-session token the proxy does not check. Anyone who
-can reach `agentd`'s port directly can spend the key. Pre-existing; more dangerous once the
-deployment is a shared singleton. **Do not expose `agentd`'s port beyond the container network.**
+`go/cmd/agentd/main.go:656` mounts it on the **root** mux, outside `apiAuthMiddleware` (which is
+registered on `"/"` and therefore never sees the more specific prefix).
+`go/cmd/agentd/modelproxy.go` shows it forwards to `api.anthropic.com` when `ANTHROPIC_API_KEY` is
+set, and `go/modelproxy/modelproxy.go:146` stamps that key onto the upstream request — while
+`modelproxy.go:30`'s own doc comment says "Mount under your auth middleware", which `agentd` did
+not do. It is there because session containers reach `agentd` through `AGENTKIT_SELF_URL` and
+authenticate with a per-session token the proxy did not check. Anyone who could reach `agentd`'s
+port directly could spend the key. **Do not expose `agentd`'s port beyond the container network** —
+this closes the hazard for anything reaching the port from *outside* that network's trust boundary,
+never a substitute for keeping the port off the public internet.
 
 Narrowed on 2026-08-13 by the credential-precedence inversion: `CLAUDE_CODE_OAUTH_TOKEN` now
 outranks `ANTHROPIC_API_KEY`, and in subscription mode sessions call `api.anthropic.com` directly,
 so nothing routes through the proxy. `newModelProxyHandler` therefore serves the **mock** whenever
 the OAuth token is set — a stack with both credentials no longer mounts an unauthenticated relay
-onto a real billing key that nothing uses. The hazard stands unchanged for API-key (proxy) mode.
+onto a real billing key that nothing uses. Mock mode was never at risk either (it mounts no
+billing key), so together those two modes never needed this ticket.
+
+**Closed for the remaining case — real API-key (proxy) mode — by T13
+(`design/2026-09-11-project-connections.md`).** `newModelProxyHandler`'s real-key branch is now
+wrapped by `requireSessionToken` (`go/cmd/agentd/modelproxy.go`), which demands a session JWT — read
+from `X-Api-Key` (what the Claude Agent SDK actually sends the configured key under; the Runner
+puts the per-session JWT there, `go/runner.go` `sessionEnv`), falling back to `Authorization` — and
+verifies it with `sessionTokenAuth.verifyToken(ctx, raw, requireLive=true)`, the same logic `/mcp`
+uses (`authenticate` there calls the same method with `requireLive=false`, so the two paths cannot
+drift). `requireLive=true` means: a valid, unexpired token is always honoured; an **expired** one is
+honoured only while its session is still live — not archived (`SnapshotState == "archived"`) and
+not in a terminal `Status` (today, that is just `"error"`; see `sessionIsLive` in
+`go/cmd/agentd/mcpserver.go`). A request that fails this is refused with a 401 JSON body and the
+upstream is never contacted. `/mcp` itself is unchanged (out of scope for T13; the same
+live-session gap for the core tools is still open — see the Discovered Issues Log entry T13 left in
+`design/2026-09-11-project-connections.md`). T12's `/connect/` proxy uses the same
+`requireLive=true` rule.
 
 ### H7 — sessions created **before** T15 never gain core tools
 
