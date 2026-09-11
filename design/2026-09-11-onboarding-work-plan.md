@@ -1,5 +1,48 @@
 # Onboarding, the Guide and the Budget — executable work plan
 
+> ## ⏸ RESUME HERE — fleet paused 2026-09-11 (Kai's call, mid wave 1)
+>
+> **State of `main`** (all local, nothing pushed): design + plan committed; **A1 (revert on the
+> Activity rail), A3 (operator claim, budget guard, default budgets, `/agent/whoami`) and A6
+> (project-map reload) are merged**. After the A3+A6 merge `go build ./... && go vet ./...` passed;
+> **the full `go test ./...` has NOT been re-run on the merged tree** (each branch was green alone).
+> `docs/guide/` (16 pages + field notes + glossary + README) is committed as the writers left it;
+> the editorial pass **B8 was interrupted part-way** and must be re-run from scratch.
+>
+> **Five branches hold finished-but-unverified work, committed as `WIP (fleet paused …)`** by the
+> orchestrator when the agents were stopped one step before their own commit. Each agent had
+> reported its tests passing and was typechecking/committing. Do not trust that; re-run each
+> ticket's Validation first, then merge:
+>
+> | Ticket | Branch | Last agent status |
+> |---|---|---|
+> | A2 interview survives navigation | `worktree-agent-aa205520f26ade00b` | 59 unit tests passing, re-running typecheck |
+> | A4 usage route | `worktree-agent-a31d868c69d559f1e` | waiting on full `go test` |
+> | C1 guide route + renderer | `worktree-agent-a336db1df724ecdb8` | Docker build of `deploy/web.Dockerfile` succeeded, finishing web gate |
+> | C3 chat empty state + copy fixes | `worktree-agent-a165e672dbaeb7334` | web build green, typechecking `examples/web` |
+> | C4 write a note from Memory | `worktree-agent-a8928fdf78ef2c1d3` | about to commit |
+>
+> The worktrees are under `.claude/worktrees/agent-<id>/`. A2 and C3 both touch `DeskPage.tsx`,
+> `Sidebar.tsx` and `App.tsx`; C1 also touches `App.tsx` — expect small merge conflicts there.
+>
+> **Resume procedure, in order:**
+> 1. `cd go && go test ./...` on `main` (≈8 min; `agentdb` alone is ~470 s). Fix before anything else.
+> 2. For each branch in the table: spawn one sonnet agent in that worktree with the instruction
+>    "finish ticket <id>: re-run its Validation, fix, amend the WIP commit into a real one, report".
+>    Merge each green branch into `main` (A4 first, then A2, C1, C3, C4), running the web gates
+>    after the web merges.
+> 3. Wave 2: A5 (budget panel; depends on A3+A4 merged), A7 (operator docs), C2 (About this
+>    screen; depends on C1), C5 (Desk narrates firsts; depends on C1+C2), and **re-run B8** (editor)
+>    over `docs/guide/` including DI 1.
+> 4. Wave 3: D1, D2 (stack e2e — needs port 8080 free and Docker), B7 (Ellen fixture + screenshots).
+> 5. Append every agent's Notes to its ticket and every finding to the Discovered Issues Log below.
+>
+> **Open decision for Kai:** the default daily token limit (env `AGENTKIT_DEFAULT_DAILY_TOKENS_HARD`;
+> hole marked `<!-- Kai: default daily limit -->` in `docs/guide/money.md`). Ships off until set.
+>
+> **First message to send on resume:** *"Resume the onboarding fleet: read the RESUME HERE block at
+> the top of design/2026-09-11-onboarding-work-plan.md and continue from step 1."*
+
 > **EXECUTION RULES (for agents):** Work ONE ticket at a time. Only the orchestrator changes a
 > ticket's Status or ticks its box; executors may only append to the ticket's **Notes** and to the
 > **Discovered Issues Log** at the end of this file. A ticket's box is ticked only after its
@@ -161,7 +204,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 
 ### Stream A — safe to invite
 
-### A1: revert is reachable from the Activity rail   [Status: todo | Model: sonnet]
+### A1: revert is reachable from the Activity rail   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Mount the existing `RevertControl` (`web/src/components/ChangelogView.tsx:324-395`)
   on the `changes` rows of `ActivityPage` (`web/src/components/ActivityPage.tsx`). The row already
   carries the config event; the control needs the entry and the revert block the API returns for
@@ -183,9 +226,9 @@ compile error, the same trick `navReveal.ts:48-53` uses.
   (`cd e2e && npx tsc --noEmit -p .` if a tsconfig exists, else `npx playwright test --list`).
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Commit 316ce03 merged to main. `RevertControl` exported from ChangelogView and mounted on `kind === 'change'` rows of ActivityPage; revert blocks computed from the seq-ordered config log (`useActivity.ts`), not the rail's time sort; 3 unit tests; new `e2e/features/revert.stack.spec.ts` (revert newest from Activity, then 409 on the superseded entry). web typecheck green; full `npm test` 1546/1548 with 2 unrelated timeout flakes (DI 2). Stack e2e pending D2.
 
-### A2: the interview survives navigation, and hides the seeds while it runs   [Status: todo | Model: sonnet]
+### A2: the interview survives navigation, and hides the seeds while it runs   [Status: WIP branch, unverified (paused) | Model: sonnet]
 - **Scope:** Replace the `localStorage`-only gate on the onboarding view (`examples/web/src/App.tsx:36`,
   `:56-62`, `:290-294`, `:393-396`, `:446`) with a server-derived state: a project is **in
   interview** when `GET /agent/sessions/by-name/onboard` returns a session **and** no charter has
@@ -211,9 +254,9 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts.
 
-### A3: operator claim, budget write guard, default budgets, whoami   [Status: todo | Model: sonnet]
+### A3: operator claim, budget write guard, default budgets, whoami   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Exactly §1.1, §1.2 and §1.3 above. The claim is added where project tokens are
   minted for wildcard holders and the test login; `principal` and `httpapi.Identity` gain
   `Operator`; `PutProjectSettings` (`go/httpapi/project_settings.go:66`) reads the stored row
@@ -238,9 +281,9 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test ./...`
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Commit 2d5ea9e merged to main. Claim name `operator` (devclaims.OperatorClaim, IssueOperator); 403 body `only the operator may change budgets and caps`; `/agent/whoami` mounted through httpapi.Endpoints (not main.go, see DI 4); defaults via package-level `agentdb.SetDefaultBudgets` because compose.go:389 calls DefaultProjectSettings outside any Store (DI 5); compose + .env.example updated. All Go gates green on the branch.
 
-### A4: the usage route   [Status: todo | Model: sonnet]
+### A4: the usage route   [Status: WIP branch, unverified (paused) | Model: sonnet]
 - **Scope:** Exactly §1.4. Add `usageCostSQL` beside the two token expressions in
   `go/agentdb/token_usage.go` and one store method `ProjectUsageSince(ctx, project, since) (Usage, error)`
   returning input, output, cost and query count for `created_at >= since`, reusing
@@ -260,7 +303,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
   a live database is available (say in Notes whether it was).
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go.
 
 ### A5: the budget panel in the console   [Status: todo | Model: sonnet]
 - **Scope:** A `BudgetPanel` component in `web/src/components/`: today's tokens against the hard
@@ -290,7 +333,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes:
 
-### A6: the project map reloads without a restart   [Status: todo | Model: sonnet]
+### A6: the project map reloads without a restart   [Status: merged, live check pending | Model: sonnet]
 - **Scope:** When `AGENTKIT_PROJECT_MAP_FILE` is set, re-read and re-parse it on `SIGHUP` **and**
   every `AGENTKIT_PROJECT_MAP_RELOAD` (duration, default `60s`, `0` disables the timer). A parse
   failure keeps the previous map and logs the error with the file path; a successful reload logs
@@ -309,7 +352,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test -race ./cmd/agentd/... && go test ./...`
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Commit 32b28cc merged to main (rebased on cd44582). `projectSettingsHolder` (atomic.Pointer; SIGHUP + `AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) and `projectKeysHolder`; login handlers take a `userDirectory`; git-token-env closure reads the holder per call; embed-CSP origin list still a boot snapshot (DI 6); docs/ops.md switched to a mounted `projects.json` (DI 7). Gates incl. `-race` green on the branch.
 
 ### A7: the operator's story, written down   [Status: todo | Model: sonnet]
 - **Scope:** Update `docs/ops.md` (§11d and wherever credentials are set) so the OVH box runs in
@@ -345,7 +388,7 @@ Never invent one. Every page ends with "What this will not do". The word for the
 spec's word (`docs/product/17-product-spec.md` §3). No marketing adjectives. Second person, present
 tense. No em-dashes in prose. Write only your own files; do not touch another ticket's pages.
 
-### B1: pages 0, 1, 2 — what Bob is, your first hour, the goal and the charter   [Status: todo | Model: sonnet]
+### B1: pages 0, 1, 2 — what Bob is, your first hour, the goal and the charter   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/what-bob-is.md`, `your-first-hour.md`, `the-goal-and-the-charter.md`,
   and `docs/guide/README.md` (page order, the skeleton, the voice rules, the front-matter contract
   — copy them from the design so a later writer needs only this folder).
@@ -358,9 +401,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** each file has front matter with the right slug; `wc -w` per page ≤ 450.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: what-bob-is (344w), your-first-hour (450w), the-goal-and-the-charter (449w), README.md (728w: order, skeleton, voice, front-matter contract). Quotes: interviewer.md:130-143 (charter goal/measure/background verbatim; label_rules deferred to the-rulebook), docs/18:772 verbatim, CharterPanel.tsx:88-136 caption (trimmed). The why-Bob hole is left. Flagged: heading convention differs between pages (see DI 1).
 
-### B2: pages 3, 4, 5 — a worker's instructions, the rulebook, clocks and wake-ups   [Status: todo | Model: sonnet]
+### B2: pages 3, 4, 5 — a worker's instructions, the rulebook, clocks and wake-ups   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/a-workers-instructions.md`, `the-rulebook.md`, `clocks-and-wake-ups.md`.
 - **Sources:** design §4.2 rows 3–5 and their citations; `web/src/components/WorkerEditor.tsx`
   helper text; `WorkerTriggers.tsx:216-222` (quote it); `web/src/nlAssist.ts:6-27` and its
@@ -374,9 +417,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** as B1.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: a-workers-instructions (433w), the-rulebook (437w), clocks-and-wake-ups (384w). Quotes verified against live files (interviewer.md §3 + worked charter label_rules; WorkerEditor.tsx:387-389; learning-stories.json + spec:308; docs/18:884-886; MemoryBrowserPage.tsx:179; WorkerTriggers.tsx:216-220; 17-product-spec.md:141-142; nlAssist.ts:6-14; router.go:420). Fixture placeholders left for: a newsletter-writer prompt (p3), Ellen adding a label (p4), a compile capture (p5). Two em-dashes remain inside verbatim quotes only. Page 4 describes write-a-note as post-C4, with a comment.
 
-### B3: pages 6, 7, 8 — talking to a worker, when a worker asks you, the Desk   [Status: todo | Model: sonnet]
+### B3: pages 6, 7, 8 — talking to a worker, when a worker asks you, the Desk   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/talking-to-a-worker.md`, `when-a-worker-asks-you.md`, `the-desk.md`.
 - **Sources:** design §4.2 rows 6–8; `docs/18-…` "Known limits" (chat gets no briefing);
   `docs/workflows.md` §6 (always pass `expires_in`); `web/src/components/DeskPage.tsx:514-547`
@@ -388,9 +431,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** as B1.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: talking-to-a-worker (377w), when-a-worker-asks-you (392w), the-desk (232w). "A chat is not a job" and "Silence is not consent" present. Sources: docs/18 Known limits; go/runner.go:2539-2557 (transcript emitted on idle, verified in source); docs/workflows.md:162-166; learning-stories.stack.spec.ts:550 (LS4 rationale verbatim); DeskPage.tsx:260 (quoted up to the clause that names dead pages); DeskPage legend ~514-565; spine.tsx:1-39. Fixture placeholder: the architect's first ask (p7). Kept a final "Next" section (Back/Forward) following B2's on-disk precedent.
 
-### B4: pages 9, 10, 11 — the rail and the changelog, memory, the chart   [Status: todo | Model: sonnet]
+### B4: pages 9, 10, 11 — the rail and the changelog, memory, the chart   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/the-rail-and-the-changelog.md`, `memory.md`, `the-chart.md`.
 - **Sources:** design §4.2 rows 9–11; `docs/product/15-operator-console-design.md` §3.6 (the
   spine, quote the sentence "everything hangs off a rail…"), §3.2 (authorship is a colour), §3.7
@@ -406,9 +449,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** as B1; `grep -ci undo docs/guide/the-rail-and-the-changelog.md` is 0.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: the-rail-and-the-changelog (442w), memory (441w), the-chart (405w). Quotes: ChangelogView.tsx:427-431; doc 15 §3.2/§3.6; MemoryBrowserPage.tsx:179; registry.md; compose.go preamble; interviewer.md label_rules; EmitEventControl.tsx:118; OrgChartPage.tsx + navReveal.test.ts:58-68. Post-A1 and post-C4 caveats present as comments. `grep -ci undo` = 0. Three Ellen examples left as B7 fixtures.
 
-### B5: pages 12, 13, 14 — the architect, what Bob will not do, money   [Status: todo | Model: sonnet]
+### B5: pages 12, 13, 14 — the architect, what Bob will not do, money   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/the-architect.md`, `what-bob-will-not-do.md`, `money.md`.
 - **Sources:** `docs/18-workers-memory-events.md` §9a in full (page 12 quotes the no-brake
   paragraph **verbatim, in a block quote, unsoftened**, and the loop's six steps in plain words);
@@ -426,9 +469,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** as B1.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: the-architect (352w), what-bob-will-not-do (439w), money (240w). No-brake paragraph quoted verbatim from docs/18:845-847; architect.md STEP 0 quoted; workflows.md:175-212 all six items + three known limits (docs/18:880-891); router.go:693-702 for the tiers. money.md marks post-A3/A4/A5 sentences with comments; default limit hole left for Kai; week's-spend example is a B7 fixture.
 
-### B6: field notes and the glossary   [Status: todo | Model: sonnet]
+### B6: field notes and the glossary   [Status: written, awaiting B8 | Model: sonnet]
 - **Files:** **new** `docs/guide/field-notes.md`, `docs/guide/glossary.md`.
 - **Sources:** the seven candidates in design §4.2 Part 4 plus "the forgotten sign-off"; each
   story's source is named there — read the source entry in `docs/product/06-work-plan.md`'s
@@ -444,7 +487,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** `grep -c '^\*\*' docs/guide/glossary.md` ≥ 22.
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Written: field-notes (899w, 8 stories, each ≤120w, each ending in the rule, sourced in comments: 06-work-plan.md:490-502, :722-725; 20-operations-doctrine.md:84,:87; 13-work-plan-self-improvement.md:471-473; 22-readiness.md:24-29; architect-probe README; 2026-09-08 DI4 :2007-2009; git-projection.md:36-72; learning-stories.json:87,105,124), glossary (633w, 31 entries; labels checked against navReveal.ts:161-167, ChangelogView.tsx:395, WorkerEditor.tsx:190-199).
 
 ### B7: Ellen's fixture project and the screenshots   [Status: todo | Model: sonnet]
 - **Scope:** With the stack up in mock mode (D2 brings it up; this ticket runs after D1 merges),
@@ -465,7 +508,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - [ ] done
 - Notes:
 
-### B8: the editorial pass   [Status: todo | Model: sonnet]
+### B8: the editorial pass   [Status: interrupted, re-run from scratch | Model: sonnet]
 - **Scope:** Read every page in `docs/guide/` in order. Enforce: the same word everywhere (build a
   list of the terms and their spellings; fix drift); every first paragraph stands alone with no
   links; every page has "What this will not do"; no marketing adjectives (grep for powerful,
@@ -479,11 +522,11 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** the two greps; `wc -w docs/guide/*.md`.
 - **Depends on:** B1–B6
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Editor stopped part-way by the pause; some pages may be half-reconciled. Re-run the whole ticket.
 
 ### Stream C — console wiring
 
-### C1: the guide route and renderer   [Status: todo | Model: sonnet]
+### C1: the guide route and renderer   [Status: WIP branch, unverified (paused) | Model: sonnet]
 - **Scope:** G7. `examples/web` gains a `guide` view reachable at `#/guide/<slug>` (the shell has
   no router; follow how views are selected in `App.tsx` and add a hash-based deep link that also
   survives reload — read `web/src/permalink.ts` first, it may already do this) and a sidebar
@@ -510,7 +553,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Depends on:** — (uses placeholder pages until B lands; write two throwaway pages in a temp dir
   for the unit test, not in `docs/guide/`)
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Paused after a successful `docker build -f deploy/web.Dockerfile`; WIP committed as ecdcc79 on worktree-agent-a336db1df724ecdb8. Files: examples/web/scripts/, GuidePage.tsx, web/src/guide/, App.tsx, package.json + yarn.lock, .gitignore(s), web/src/index.ts + pure.ts, deploy/web.Dockerfile.
 
 ### C2: "About this screen" on eleven surfaces   [Status: todo | Model: sonnet]
 - **Scope:** G2. `web/src/components/AboutThisScreen.tsx`: props `{surface: SurfaceId, projectId}`;
@@ -539,7 +582,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - [ ] done
 - Notes:
 
-### C3: chat empty state, create-form parity, the four copy defects   [Status: todo | Model: sonnet]
+### C3: chat empty state, create-form parity, the four copy defects   [Status: WIP branch, unverified (paused) | Model: sonnet]
 - **Scope:** G3, G6 and G9 from the design. **G3:** `AgentChat.tsx` renders, when the transcript is
   empty, one sentence of what this session is, the sentence *"A chat is not a job: it gets none of
   the project's briefing, and nothing it says is remembered unless a worker writes a memory."*, and
@@ -562,9 +605,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Paused while typechecking examples/web; WIP committed as b1a700c on worktree-agent-a165e672dbaeb7334. 19 files incl. AgentChat(+test), ProjectPicker, Sidebar, DeskPage, OrgChartPage(+test), ProjectSettingsPage, ScheduleEditor, SubscriptionEditor, console.stack.spec.ts.
 
-### C4: write a note from the Memory page   [Status: todo | Model: sonnet]
+### C4: write a note from the Memory page   [Status: WIP branch, unverified (paused) | Model: sonnet]
 - **Scope:** G8. On `MemoryBrowserPage.tsx`: a **Write a note** button opening a small form
   (content, multiline; labels as one `key=value` per line in the identifier face, validated with
   the same parser the selector field uses if one is exposed, else a strict regex with a helpful
@@ -585,7 +628,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test`
 - **Depends on:** —
 - [ ] done
-- Notes:
+- Notes: (2026-09-11) Paused at 'about to commit'; WIP committed as 3e5e92b on worktree-agent-a8928fdf78ef2c1d3. Files: MemoryBrowserPage(+test), memories.ts(+test), new e2e/features/memory-write.stack.spec.ts.
 
 ### C5: the Desk narrates firsts   [Status: todo | Model: sonnet]
 - **Scope:** G4. In `web/src/desk.ts`'s fold (pure, `now` passed in), tag each record with its
@@ -651,3 +694,17 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 ## Discovered Issues Log
 
 *(append-only; newest last; `**N. Title.** (ticket, date)` then the finding, with `file:line`.)*
+
+**1. Two heading conventions in the guide.** (B1, 2026-09-11) `a-workers-instructions.md` (B2) uses bold inline labels and a `→ #/guide/<slug>` deep-link line under "In the console"; `money.md` (B5) and the B1 pages use `##` headers and no deep-link line. `docs/guide/README.md` documents `##` headers as canonical. B8 reconciles every page to `##` headers and decides the deep-link line once (recommendation: keep it, it is what G2's "Read more" link resolves to, and C1 renders `#/guide/<slug>`).
+
+**2. `web/` full-suite vitest timeouts under load.** (A1, 2026-09-11) `npm test` (1548 tests) intermittently times out 2–4 tests at 5000ms among `AutomationPage.test.tsx`, `ProjectSettingsPage.test.tsx`, `WorkersPage.test.tsx`; never the same set, each file green in isolation. Resource contention with a dozen agents running suites at once, most likely. D1 re-runs the suite on a quiet machine before believing any web failure.
+
+**3. Stale comment on `e2e/helpers/api.ts` `WorkerBody`.** (A1, 2026-09-11) Says "PUT replaces"; the route is create-or-keep since T27/DI11 (`go/httpapi/workers.go:20-40`). Comment left as found; fix when next touching the file.
+
+**4. `whoami` registered through `httpapi.Endpoints`, not `main.go`.** (A3, 2026-09-11) Matches how charter/config-events/memories mount; no behavioural difference. Ticket text said main.go.
+
+**5. Default budgets are a package-level setter, not a Store field.** (A3, 2026-09-11) `DefaultProjectSettings` is also called as a free function at `go/compose.go:389`; a Store field would miss it. `agentdb` still reads no env.
+
+**6. Embed-CSP origin list is still a boot-time snapshot.** (A6, 2026-09-11) `embedcsp.go:79-88` documents "computed once, at wiring time" and `main.go` passes a `[]string`; making it live means a `func() []string` per request. Small, separate change; not done.
+
+**7. `docs/ops.md` §11d had no invite walkthrough and used the inline map.** (A6, 2026-09-11) Switched the OVH example to `AGENTKIT_PROJECT_MAP_FILE` at `/srv/apps/bob/secrets/projects.json` and added a one-paragraph "adding someone later"; A7 still owes the full invitation prose.
