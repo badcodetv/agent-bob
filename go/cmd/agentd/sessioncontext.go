@@ -51,11 +51,28 @@ type projectConfigStore interface {
 type sessionContextProvider struct {
 	store           projectConfigStore
 	globalBaseImage string
+	// connectionServers resolves the grants a worker holds into MCP server
+	// entries pointing at agentd's /connect/ proxy
+	// (design/2026-09-11-project-connections.md, T2's connections.Servers).
+	// nil means no connections layer — every provider built before T12 wires
+	// the real registry-backed closure, and the SQLite fallback, which has no
+	// project map to build a Registry from.
+	connectionServers func(project string, grants []string) agentdb.MCPServers
 }
 
 // newSessionContextProvider builds the provider. store must be non-nil.
 func newSessionContextProvider(store projectConfigStore, globalBaseImage string) *sessionContextProvider {
 	return &sessionContextProvider{store: store, globalBaseImage: globalBaseImage}
+}
+
+// withConnectionServers wires T12's registry-backed connections resolver
+// after construction, so every existing call to newSessionContextProvider
+// (main.go, and every test that does not care about connections) keeps
+// compiling unchanged. Returns the receiver for one-line construction in
+// tests.
+func (p *sessionContextProvider) withConnectionServers(f func(project string, grants []string) agentdb.MCPServers) *sessionContextProvider {
+	p.connectionServers = f
+	return p
 }
 
 // resolvedContext is the full §5 resolution: prompt, image, and the project ∪
@@ -146,6 +163,7 @@ func (p *sessionContextProvider) resolve(ctx context.Context, scope extension.Co
 	rc.MCPServers = MergeMCPServers(rc.MCPServers, projectMCP)
 
 	// ── Worker layer (wins on every axis) ────────────────────────────────────
+	var personaWorker *agentdb.Worker
 	if workerName := scope.Persona; workerName != "" {
 		w, err := p.store.GetWorker(ctx, project, workerName)
 		switch {
@@ -154,6 +172,7 @@ func (p *sessionContextProvider) resolve(ctx context.Context, scope extension.Co
 		case err != nil:
 			return nil, fmt.Errorf("session context: worker %q/%q: %w", project, workerName, err)
 		default:
+			personaWorker = w
 			workerMCP, decErr := decodeMCPConfig(w.MCPConfig)
 			if decErr != nil {
 				return nil, fmt.Errorf("session context: worker %q/%q mcp_config: %w", project, workerName, decErr)
@@ -175,6 +194,21 @@ func (p *sessionContextProvider) resolve(ctx context.Context, scope extension.Co
 		}
 	}
 
+	// ── Connections layer (design/2026-09-11-project-connections.md, T8) ────
+	// Deliberately keyed on scope.Worker, NEVER scope.Persona: the /connect/
+	// proxy authorises every request against Session.Worker (Decision 6), so
+	// an entry keyed on Persona would be granted here and 403 forever there.
+	// A plain chat (persona only, Worker empty) gets none; a session whose
+	// persona and worker differ gets the WORKER's grants, which may mean a
+	// second store read when they are not the same name.
+	if p.connectionServers != nil && scope.Worker != "" {
+		grants, err := p.connectionsHeldBy(ctx, project, scope.Worker, personaWorker)
+		if err != nil {
+			return nil, err
+		}
+		rc.MCPServers = MergeMCPServers(rc.MCPServers, p.connectionServers(project, grants))
+	}
+
 	rc.SystemPrompt = joinPrompts(prompts...)
 	// Fail loudly on config that cannot work rather than handing the sandbox a
 	// server it would mis-spawn with a literal "${VAR}" credential (§4.1).
@@ -182,6 +216,35 @@ func (p *sessionContextProvider) resolve(ctx context.Context, scope extension.Co
 		return nil, fmt.Errorf("session context: project %q mcp config: %w", project, err)
 	}
 	return rc, nil
+}
+
+// connectionsHeldBy returns the grants of the worker named workerName. When
+// workerName is the same worker already fetched for the persona layer
+// (personaWorker, which may be nil), it is reused rather than read twice —
+// the common case, since a worker-attached chat sets persona == worker. A
+// worker that does not exist, or is disabled, holds nothing: neither is an
+// error here, matching "an unknown persona contributes no worker layer"
+// above (the /connect/ proxy is what actually enforces "disabled holds
+// nothing" for live traffic — this seam only feeds a default MCP map at
+// create time).
+func (p *sessionContextProvider) connectionsHeldBy(ctx context.Context, project, workerName string, personaWorker *agentdb.Worker) ([]string, error) {
+	if personaWorker != nil && personaWorker.Name == workerName {
+		if !personaWorker.Enabled {
+			return nil, nil
+		}
+		return personaWorker.Connections, nil
+	}
+	w, err := p.store.GetWorker(ctx, project, workerName)
+	switch {
+	case errors.Is(err, agentdb.ErrWorkerNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("session context: worker %q/%q: %w", project, workerName, err)
+	}
+	if !w.Enabled {
+		return nil, nil
+	}
+	return w.Connections, nil
 }
 
 // joinPrompts concatenates the non-empty layers in precedence order, project

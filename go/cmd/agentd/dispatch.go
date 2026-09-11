@@ -146,6 +146,14 @@ type dispatcher struct {
 	images       agentkit.ImageResolver
 	memories     agentkit.BriefingMemorySource
 
+	// connectionServers resolves the grants a worker holds (worker.Connections)
+	// into MCP server entries pointing at agentd's /connect/ proxy
+	// (design/2026-09-11-project-connections.md, T2's connections.Servers).
+	// nil means no connections layer — T12 wires the real closure, built over
+	// the project's connections.Registry; every dispatch before then, and the
+	// SQLite fallback, gets none.
+	connectionServers func(project string, grants []string) agentdb.MCPServers
+
 	// budget is the §8.4 step 6 / §5 daily-token check. nil = unmetered.
 	budget budgetGate
 
@@ -173,7 +181,10 @@ type dispatcherConfig struct {
 	Images       agentkit.ImageResolver
 	Memories     agentkit.BriefingMemorySource
 	Budget       budgetGate
-	Logf         func(format string, v ...any)
+	// ConnectionServers is T12's registry-backed resolver — see the field
+	// comment on dispatcher. nil is the pre-T12 behaviour: no connections.
+	ConnectionServers func(project string, grants []string) agentdb.MCPServers
+	Logf              func(format string, v ...any)
 }
 
 func newDispatcher(cfg dispatcherConfig) *dispatcher {
@@ -182,15 +193,27 @@ func newDispatcher(cfg dispatcherConfig) *dispatcher {
 		logf = log.Printf
 	}
 	return &dispatcher{
-		store:        cfg.Store,
-		starter:      cfg.Starter,
-		coreMCP:      cfg.CoreMCP,
-		defaultImage: cfg.DefaultImage,
-		images:       cfg.Images,
-		memories:     cfg.Memories,
-		budget:       cfg.Budget,
-		logf:         logf,
+		store:             cfg.Store,
+		starter:           cfg.Starter,
+		coreMCP:           cfg.CoreMCP,
+		defaultImage:      cfg.DefaultImage,
+		images:            cfg.Images,
+		memories:          cfg.Memories,
+		budget:            cfg.Budget,
+		connectionServers: cfg.ConnectionServers,
+		logf:              logf,
 	}
+}
+
+// resolveConnections is the nil-safe wrapper around d.connectionServers: it
+// is only set once T12 wires the registry, and worker.Connections is nil for
+// almost every worker today (this ticket's own acceptance criteria pin the
+// no-connections default).
+func (d *dispatcher) resolveConnections(project string, grants []string) agentdb.MCPServers {
+	if d.connectionServers == nil {
+		return nil
+	}
+	return d.connectionServers(project, grants)
 }
 
 // Dispatch tries to start one pending delivery. It is the ONLY place either loop
@@ -327,6 +350,12 @@ func (d *dispatcher) DispatchWithReason(ctx context.Context, delivery *agentdb.E
 		Settings: settings,
 		Event:    event,
 		CoreMCP:  d.coreMCP,
+		// Operator-defined connections this worker holds, resolved to MCP
+		// entries pointing at /connect/ (design/2026-09-11-project-connections.md
+		// T8). Keyed on the dispatching worker's own grants — a dispatched job
+		// always runs AS a worker, so there is no persona/worker distinction
+		// here (that only matters for chat sessions, sessioncontext.go).
+		Connections: d.resolveConnections(delivery.Project, worker.Connections),
 		// §6.2 step 2.4 — the rolling summary and each `briefing` selector.
 		// BuildBriefingSections returns no error by design: a worker with a
 		// stale briefing works, one that cannot start does not (C4).
