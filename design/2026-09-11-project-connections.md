@@ -546,7 +546,7 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   (`-run Proxy -count=5`), mutation-tested three real breaks (same-origin check, inbound header
   pass-through, `%2F` refusal) and kept the files unchanged; its notes match the above.
 
-### T5: Project map `connections` key   [Status: pending | Model: sonnet]
+### T5: Project map `connections` key   [Status: done | Model: sonnet]
 - **Scope:** add `Connections map[string]connections.Spec `json:"connections"`` to `projectConfig`
   (`go/cmd/agentd/googleauth.go:40-67`); in `parseProjectSettingsObjectForm` (`:132-175`) validate
   each name with `connections.ValidateName` and each spec with `Spec.Validate`, errors prefixed
@@ -559,8 +559,15 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'ProjectMap|ProjectSettings' -count=1` → PASS.
 - **Depends on:** T1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: No live Postgres involved in T5 (unchanged from original ticket) — the
+  AGENTKIT_TEST_POSTGRES_URL setup in the task instructions was precautionary and not needed here,
+  since none of T5's validation commands touch agentdb. Committed as c5d5ead on conn/T5, on top of
+  the prior c760646.
+  Merge step: merged cleanly (no conflicts) onto the T4 merge; `go build`/`go vet` green, the T5
+  validation command PASS, and `go test ./cmd/agentd/... ./connections/...` PASS both without and
+  with `AGENTKIT_TEST_POSTGRES_URL` (the `bob-conn-pg` container did not exist at merge time and
+  was recreated from `pgvector/pgvector:pg16` on 127.0.0.1:55439).
 
 ### T6: `Worker.Connections` column   [Status: pending | Model: sonnet]
 - **Scope:** `agentdb.ConnectionList` (NULL-preserving Scan/Value, copy `SelectorList`'s pattern at
@@ -925,3 +932,6 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - (T4) Process: the T4 Notes and most T4 Discovered Issues entries were merged into this doc at
   730acee from an interrupted builder whose `proxy.go`/`proxy_test.go` were never committed; the
   code landed later as 421793d, reviewed and kept unchanged by a second builder.
+- (T5) None beyond what the verifier already found — this was purely a test-strength fix, no new
+  code-path bugs were discovered while adding the missing rows (all four new error cases already
+  behave correctly per connections/spec.go).
