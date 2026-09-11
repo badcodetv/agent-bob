@@ -460,6 +460,16 @@ func (im *gitImporter) planWorker(ctx context.Context, project string, ch gitpro
 	if err := applyWorkerFields(&next, ch.Fields); err != nil {
 		return nil, nil, err
 	}
+	// Belt and braces on top of gitproj's DroppedFields, matching
+	// planSettings's git_remote/git_branch restore: whatever happened above,
+	// connections keeps the value the console/architect granted. Commit
+	// access must never become the power to grant a worker "*" (Decision 3
+	// of design/2026-09-11-project-connections.md, T11).
+	if current != nil {
+		next.Connections = current.Connections
+	} else {
+		next.Connections = nil
+	}
 
 	body := gitproj.StorageBody(ch.Body)
 	promptChanged := ch.BodyChanged && strings.TrimSpace(body) != "" && (current == nil || !gitproj.BodyEqual(body, current.SystemPrompt))

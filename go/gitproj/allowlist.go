@@ -275,8 +275,8 @@ var workerRules = []Rule{
 	{Field: "Connections", Key: "connections", Decision: Render, NotImportable: true,
 		Reason: "connection names — the credential lives in agentd's environment and is never a field. " +
 			"Rendered so a reader sees who can reach what; NOT importable, because anyone with push access to " +
-			"the mirror could otherwise grant '*' (Decision 3). Full render/import wiring is T11; this entry " +
-			"only satisfies the allowlist guard so T6 does not turn `go test ./...` red."},
+			"the mirror could otherwise grant '*' (Decision 3). The importer drops the key rather than writing " +
+			"it (gitproj's notImportable map in parse.go, T11)."},
 	{Field: "CreatedAt", Decision: Never, Reason: "wall-clock timestamp; see ProjectSettings.UpdatedAt. Creation order is git's first commit of the file."},
 	{Field: "UpdatedAt", Decision: Never, Reason: "wall-clock timestamp; churns every commit. See ProjectSettings.UpdatedAt."},
 }
