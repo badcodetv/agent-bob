@@ -75,6 +75,7 @@ func goldenState() ProjectState {
 				MCPConfig:    agentdb.JSONMap{"core": map[string]any{"command": "core-mcp"}},
 				Image:        "wolf-base:7",
 				Briefing:     agentdb.SelectorList{"kind=charter"},
+				Connections:  agentdb.ConnectionList{"github"},
 				MaxInstances: 1,
 				Enabled:      true,
 				Frozen:       false,
@@ -339,6 +340,8 @@ Measure everything.
 const goldenWorkerArchitect = `---
 briefing:
   - kind=charter
+connections:
+  - github
 description: Designs the roster.
 enabled: true
 frozen: false
@@ -632,8 +635,11 @@ func TestRenderTreeRoundTripsThroughParse(t *testing.T) {
 			t.Errorf("%s: parsing a rendered file against itself reports a change (fields=%v bodyChanged=%v); the import→render loop would never terminate",
 				path, ch.Fields, ch.BodyChanged)
 		}
-		if len(ch.DroppedFields) > 0 && path != "bob/settings.md" {
-			t.Errorf("%s: only settings.md may carry not-importable keys, got %v", path, ch.DroppedFields)
+		// settings.md carries the five git_* keys; a worker file may now
+		// carry "connections" (project-connections T11) — nothing else
+		// renders any not-importable key.
+		if len(ch.DroppedFields) > 0 && path != "bob/settings.md" && !strings.HasPrefix(path, "bob/workers/") {
+			t.Errorf("%s: only settings.md and worker files may carry not-importable keys, got %v", path, ch.DroppedFields)
 		}
 	}
 }
@@ -734,8 +740,13 @@ func TestRenderTreeCreateParseSeesTheWholeFile(t *testing.T) {
 			t.Errorf("%s came back through the import door; it must be dropped", k)
 		}
 	}
-	if len(ch.DroppedFields) != len(NotImportableFields()) {
-		t.Errorf("settings.md should render all %d not-importable fields (got %v)", len(NotImportableFields()), ch.DroppedFields)
+	// Only the five git_* keys are ever present in settings.md — "connections"
+	// (added in project-connections T11) is a worker-only key, so
+	// NotImportableFields() as a whole is no longer the right yardstick for
+	// one file's DroppedFields; narrow to the subset settings.md can carry.
+	settingsNotImportable := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}
+	if len(ch.DroppedFields) != len(settingsNotImportable) {
+		t.Errorf("settings.md should render all %d not-importable settings fields (got %v)", len(settingsNotImportable), ch.DroppedFields)
 	}
 	if !ch.BodyChanged || !strings.HasPrefix(ch.Body, "You are the Wolf project.") {
 		t.Errorf("the project prompt must be the body, got %q", ch.Body)

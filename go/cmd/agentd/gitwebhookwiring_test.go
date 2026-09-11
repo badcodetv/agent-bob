@@ -301,7 +301,9 @@ func TestGitWebhookSecretEnvIsNotImportable(t *testing.T) {
 		t.Fatalf("a commit rewrote the webhook secret's variable name to %q — forged deliveries would now verify",
 			store.settings.GitWebhookSecretEnv)
 	}
-	if want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
+	// project-connections T11 added "connections" as a sixth, worker-only
+	// not-importable key.
+	if want := []string{"connections", "git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
 		t.Fatalf("NotImportableFields = %v, want %v", gitproj.NotImportableFields(), want)
 	}
 }

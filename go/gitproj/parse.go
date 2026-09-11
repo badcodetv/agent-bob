@@ -34,6 +34,15 @@ var notImportable = map[string]bool{
 	// reason as the four above and one sharper one — a commit that could
 	// rewrite it would decide which secret verifies inbound deliveries.
 	"git_webhook_secret_env": true,
+	// project-connections T11 (Decision 3 of design/2026-09-11-project-
+	// connections.md): a worker's connection grants. Rendered so a reader can
+	// see who can reach what, but dropped on the way back in — otherwise
+	// anyone with push access to the mirror could grant a worker "*" (every
+	// connection the project has) without going through CanGrant at all. Only
+	// worker files ever carry this key, but the map is keyed by frontmatter
+	// key across every kind (as the five git_* keys already are), so it is
+	// added here rather than threaded through per-kind.
+	"connections": true,
 }
 
 // NotImportableFields returns the frontmatter keys Parse always drops, in
