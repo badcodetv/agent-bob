@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/orgprompts"
 	"github.com/badcodetv/agent-bob/topology"
 )
@@ -96,6 +97,13 @@ func Resolve(c *Charter) (*topology.Bundle, error) {
 			// included; naming it here too means the architect keeps the
 			// rulebook even if the project-wide list is later cleared.
 			Briefing: agentdb.SelectorList{RegistrySelector},
+			// The architect is created holding every connection the project
+			// has, because it is the one worker that designs the rest of the
+			// roster: it cannot grant a connection to a researcher it creates
+			// unless it holds that connection itself (Decision 3). There is
+			// no architect-specific code for this — the same trust rule
+			// governs every worker; this is just the starting grant.
+			Connections: agentdb.ConnectionList{connections.Wildcard},
 		}},
 		Subscriptions: []agentdb.Subscription{{
 			EventType: EventArchitectRun,

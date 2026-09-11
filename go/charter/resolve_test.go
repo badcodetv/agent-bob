@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/badcodetv/agent-bob/agentdb"
+	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/orgprompts"
 )
 
@@ -49,6 +50,11 @@ func TestResolveProducesExactlyTheArchitect(t *testing.T) {
 	}
 	if len(w.Briefing) != 1 || w.Briefing[0] != RegistrySelector {
 		t.Errorf("architect briefing: want [%s], got %v", RegistrySelector, w.Briefing)
+	}
+	// The architect is created holding every connection the project has, so it
+	// can grant anything to the roster it designs (Decision 3, T10).
+	if len(w.Connections) != 1 || w.Connections[0] != connections.Wildcard {
+		t.Errorf("architect connections: want [%s], got %v", connections.Wildcard, w.Connections)
 	}
 	// Project, IDs and timestamps belong to apply, not to a pure resolve.
 	if w.Project != "" || w.CreatedAt != 0 || w.UpdatedAt != 0 {
