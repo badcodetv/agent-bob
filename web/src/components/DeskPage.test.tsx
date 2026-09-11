@@ -381,6 +381,42 @@ describe('degraded and empty', () => {
     expect(screen.queryByText(/nothing to show/i)).toBeNull()
   })
 
+  // A2 / design §3 G1: while a project is in interview, the first-run panel
+  // offers a way back into it instead of the two ordinary doors — and the
+  // topology seed, the architect's designed alternative, is withheld.
+  it('offers "Finish setting up this project" instead of the two doors while in interview', async () => {
+    workers = []
+    deliveries = []
+    events = []
+    schedules = []
+    configEvents = []
+    attentionRequests = []
+    const onStartFromTopology = vi.fn()
+    const onOpenChat = vi.fn()
+    const onOpenOnboarding = vi.fn()
+    renderDesk({ onStartFromTopology, onOpenChat, inInterview: true, onOpenOnboarding })
+    expect(await screen.findByText('This project is being set up')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Start from an org chart' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open chat' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Finish setting up this project' }))
+    expect(onOpenOnboarding).toHaveBeenCalled()
+  })
+
+  // The interviewer itself is a worker (`go/topology/onboarding.go`), so a
+  // real interview never has zero workers — `firstRun` alone would never fire
+  // and the row above would be unreachable for the flow it exists for.
+  it('offers the same row when the interview already has a worker (the interviewer)', async () => {
+    workers = [{ name: 'interviewer', project: 'acme', system_prompt: 'Interview.', enabled: true }]
+    deliveries = []
+    events = []
+    schedules = []
+    configEvents = []
+    attentionRequests = []
+    renderDesk({ inInterview: true, onOpenOnboarding: vi.fn() })
+    expect(await screen.findByText('This project is being set up')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Finish setting up this project' })).toBeInTheDocument()
+  })
+
   it('a quiet Desk in a working project says the fleet ran and nobody needed you', async () => {
     deliveries = []
     events = []

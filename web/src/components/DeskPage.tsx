@@ -49,6 +49,18 @@ export interface DeskPageProps extends UseDeskOptions {
   onStartFromTopology?: () => void
   /** Take the operator to chat — the other first-run door. */
   onOpenChat?: () => void
+  /**
+   * True while this project's onboarding interview is unresolved (design §3
+   * G1 / PR1): an `onboard` session exists and no charter has been applied
+   * yet. While true, the first-run panel offers "Finish setting up this
+   * project" instead of the two ordinary doors — the interview is the
+   * designed default, not one of several starting points, while it is still
+   * running (topology seeds are hidden by the same rule).
+   */
+  inInterview?: boolean
+  /** Opens the onboarding view. Renders the "Finish setting up this project"
+   *  row only when this is given. */
+  onOpenOnboarding?: () => void
   /** Heading. Pass '' for none. */
   title?: string
   /**
@@ -80,6 +92,8 @@ export default function DeskPage({
   onOpenSession,
   onStartFromTopology,
   onOpenChat,
+  inInterview,
+  onOpenOnboarding,
   title = 'Desk',
   showPauseToggle,
   onAsksCount,
@@ -124,6 +138,13 @@ export default function DeskPage({
   // replaced wholesale by "start from a topology" (RD28). The banner above says
   // what went wrong; the panel would say something confident and false.
   const firstRun = !loading && error === null && workerCount === 0
+  // A project mid-interview already has one worker — the interviewer itself
+  // (`go/topology/onboarding.go`'s `renderOnboarding`), so `firstRun` above is
+  // false for the WHOLE interview and never fires on its own here. The panel
+  // still has to show while `inInterview` is true, gated by the same failed-
+  // load protection `firstRun` uses (RD28): a broken fetch must never read as
+  // "still in interview".
+  const showFirstRunPanel = firstRun || (inInterview === true && !loading && error === null)
   // Same gate, same reason: "the fleet ran and nobody needed you" is a claim
   // about the fleet, and three empty lists from three failed fetches are not
   // evidence for it.
@@ -154,8 +175,13 @@ export default function DeskPage({
         </Alert>
       )}
 
-      {firstRun ? (
-        <FirstRun onStartFromTopology={onStartFromTopology} onOpenChat={onOpenChat} />
+      {showFirstRunPanel ? (
+        <FirstRun
+          onStartFromTopology={onStartFromTopology}
+          onOpenChat={onOpenChat}
+          inInterview={inInterview}
+          onOpenOnboarding={onOpenOnboarding}
+        />
       ) : (
         <Stack spacing={4}>
           <Section
@@ -514,28 +540,54 @@ function ThreadLink({
 function FirstRun({
   onStartFromTopology,
   onOpenChat,
+  inInterview,
+  onOpenOnboarding,
 }: {
   onStartFromTopology?: () => void
   onOpenChat?: () => void
+  inInterview?: boolean
+  onOpenOnboarding?: () => void
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 3, maxWidth: 620 }}>
       <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
-        This project has no workers yet
+        {inInterview ? 'This project is being set up' : 'This project has no workers yet'}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        The Desk answers three questions every morning — what wants you, what changed, what broke.
-        It stays quiet until something is running. Start from an org chart, which hires a set of
-        workers and wires them to each other in one step, or just talk to the agent.
-      </Typography>
-      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-        <Button size="small" variant="contained" onClick={onStartFromTopology} disabled={!onStartFromTopology}>
-          Start from an org chart
-        </Button>
-        <Button size="small" onClick={onOpenChat} disabled={!onOpenChat}>
-          Open chat
-        </Button>
-      </Stack>
+      {inInterview ? (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            An interview is setting this project up. Answer its questions and approve the charter
+            it writes, and the architect it creates will build the roster.
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={onOpenOnboarding}
+              disabled={!onOpenOnboarding}
+              data-testid="finish-onboarding"
+            >
+              Finish setting up this project
+            </Button>
+          </Stack>
+        </>
+      ) : (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            The Desk answers three questions every morning — what wants you, what changed, what broke.
+            It stays quiet until something is running. Start from an org chart, which hires a set of
+            workers and wires them to each other in one step, or just talk to the agent.
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Button size="small" variant="contained" onClick={onStartFromTopology} disabled={!onStartFromTopology}>
+              Start from an org chart
+            </Button>
+            <Button size="small" onClick={onOpenChat} disabled={!onOpenChat}>
+              Open chat
+            </Button>
+          </Stack>
+        </>
+      )}
       <Stack direction="row" spacing={2}>
         <Legend glyph="agent" text="a worker did it" />
         <Legend glyph="human" text="you did it" />
