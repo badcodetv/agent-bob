@@ -13,7 +13,9 @@ import {
   OrgChartPage,
   ProjectSettingsPage,
   WorkersPage,
+  buildGuideHash,
   navRevealSentence,
+  parseGuideHash,
   projectIdFromLocation,
   useAsksCount,
   useNavReveal,
@@ -22,6 +24,7 @@ import {
   type NavEntry,
 } from "@agentkit/chat-ui";
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
+import GuidePage from "./GuidePage";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
 import { useOnboardingSession } from "./onboarding";
@@ -287,11 +290,41 @@ function ProjectWorkspace({
   onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
-  // "onboarding" is a shell-owned TRANSIENT view, deliberately not a NavEntry:
-  // the nav is progressive and its entries are earned by what a project
-  // contains (K9), whereas onboarding is a thing you are doing right now and
-  // never come back to from a nav bar.
-  const [view, setView] = useState<View | "onboarding">(onboardingGoal !== null ? "onboarding" : "desk");
+  // "onboarding" and "guide" are shell-owned views, deliberately not
+  // NavEntries: the nav is progressive and its entries are earned by what a
+  // project contains (K9). Onboarding is a thing you are doing right now and
+  // never come back to from a nav bar; the guide is the opposite case — it is
+  // NOT content-driven (it is a book, always there, design §3 G7) and is
+  // rendered as a permanent extra button rather than folded into the earned
+  // set, so adding it never needed a reveal rule.
+  const [view, setView] = useState<View | "onboarding" | "guide">(() => {
+    if (onboardingGoal !== null) return "onboarding";
+    if (parseGuideHash(window.location.hash) !== null) return "guide";
+    return "desk";
+  });
+
+  // The guide's own deep link (`#/guide/<slug>`, §3 G7) — kept beside `view`
+  // rather than inside GuidePage so a reload or a pasted link lands on the
+  // right page before GuidePage ever mounts. `null` slug is "not on the guide
+  // right now"; `""` is the bare index (GuidePage redirects that to page one).
+  const [guideSlug, setGuideSlug] = useState<string | null>(() => parseGuideHash(window.location.hash));
+  useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseGuideHash(window.location.hash);
+      if (parsed !== null) {
+        setGuideSlug(parsed);
+        setView("guide");
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  const openGuide = useCallback(() => {
+    // Preserve whatever page the reader last had open; buildGuideHash(null)
+    // → the bare index only the very first time this project opens the guide.
+    window.location.hash = buildGuideHash(guideSlug);
+    setView("guide");
+  }, [guideSlug]);
 
   // Which nav entries this project has earned (K9). Day one is four; Memory
   // arrives with the first memory, Activity with the first event, and Chart
@@ -308,8 +341,10 @@ function ProjectWorkspace({
 
   // A view can stop being visible only by the project changing under us (a
   // reveal is sticky), but a stale `view` would render a hidden surface — so
-  // fall back to the Desk, which is always there.
-  const shownView = view === "onboarding" || visible.includes(view) ? view : "desk";
+  // fall back to the Desk, which is always there. "guide" is exempt from the
+  // reveal check the same way "onboarding" is: it is not one of the earned
+  // NavEntries (§3 G7 — "it is not content-driven, it is a book").
+  const shownView = view === "onboarding" || view === "guide" || visible.includes(view) ? view : "desk";
 
   // The only number in the chrome (design §3.5): how many things are asking for
   // you — through useAsksCount, which applies the very join the Asks stack
@@ -393,9 +428,17 @@ function ProjectWorkspace({
             // Leaving onboarding ends it: clearing the pending goal stops a
             // later remount from dropping the human back into the interview.
             if (view === "onboarding") onOnboardingDone();
+            // Leaving the guide clears its hash (a history REPLACE, so this
+            // does not cost a back-button step either): otherwise a reload
+            // on, say, Desk would find the guide's stale `#/guide/...` still
+            // in the address bar and jump straight back to it.
+            if (view === "guide") {
+              window.history.replaceState(null, "", window.location.pathname + window.location.search);
+            }
             setView(next);
           }}
           asks={openAsks}
+          onOpenGuide={openGuide}
         />
         <RevealNotice appeared={appeared} onDismiss={acknowledge} />
         {/* The sidebar stays mounted in every view: it carries the project
@@ -449,6 +492,7 @@ function ProjectWorkspace({
             refreshMs={4000}
           />
         )}
+        {shownView === "guide" && <GuidePage slug={guideSlug} />}
       </Box>
     </Box>
   );
@@ -501,14 +545,20 @@ function ViewNav({
   entries,
   onChange,
   asks,
+  onOpenGuide,
 }: {
-  // Widened for the shell's one transient view ("onboarding"), which is not a
-  // NavEntry and therefore highlights nothing here — correct: it is a thing
-  // you are doing, not a place you go back to.
-  view: View | "onboarding";
+  // Widened for the shell's two transient views ("onboarding", "guide"),
+  // neither of which is a NavEntry and so highlights nothing in the
+  // `entries.map` below — correct for onboarding (a thing you are doing, not
+  // a place you go back to) and for the guide for the opposite reason: it is
+  // drawn unconditionally, after this loop, because it is not earned by what
+  // the project contains (design §3 G7 — "it is not content-driven, it is a
+  // book").
+  view: View | "onboarding" | "guide";
   entries: NavEntry[];
   onChange: (v: View) => void;
   asks: number;
+  onOpenGuide: () => void;
 }) {
   return (
     <Box
@@ -530,6 +580,15 @@ function ViewNav({
           </Button>
         );
       })}
+      <Button
+        size="small"
+        variant={view === "guide" ? "contained" : "text"}
+        onClick={onOpenGuide}
+        data-testid="nav-guide"
+        sx={{ textTransform: "none", flexGrow: 1, minWidth: 0 }}
+      >
+        Guide
+      </Button>
     </Box>
   );
 }
