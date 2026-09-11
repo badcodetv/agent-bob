@@ -506,7 +506,7 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   warm; see Discovered Issues Log for how long a cold `-race` build took on this box, which is
   process/environment noise, not a code issue).
 
-### T4: The `/connect/` proxy handler   [Status: pending | Model: opus]
+### T4: The `/connect/` proxy handler   [Status: done | Model: opus]
 - **Scope:** `go/connections/proxy.go`: `Caller`, `ProxyConfig`, `NewProxy`, implementing the
   normative table, URL, redirect and header rules above with `httputil.ReverseProxy` (`Rewrite`
   hook using `SetURL`, `FlushInterval: -1`, `ModifyResponse` for 401/403 → 502, off-host 3xx →
@@ -527,7 +527,7 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 - **TDD:** yes
 - **Validation:** `cd go && go test ./connections/... -count=1 -race` → PASS.
 - **Depends on:** T1, T2, T3
-- [ ] done
+- [x] done
 - Notes: Implemented `go/connections/proxy.go` (`Caller`, `ProxyConfig`, `NewProxy`,
   `ErrWorkerGone`, plus **`ErrSessionExpired`** — see Discovered Issues) on a per-request
   `httputil.ReverseProxy` (`Rewrite` + `SetURL`, `FlushInterval: -1`, `ModifyResponse` for
@@ -542,6 +542,9 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   For T12: `Authenticate` must wrap `connections.ErrSessionExpired` for the "session token
   expired" 401 row (any other error → "session token rejected"); `Grants` returns
   `([]string{}, connections.ErrWorkerGone)` for a disabled/deleted worker.
+  Merge step: the final builder (commit 421793d) re-verified the proxy under `-race` five times
+  (`-run Proxy -count=5`), mutation-tested three real breaks (same-origin check, inbound header
+  pass-through, `%2F` refusal) and kept the files unchanged; its notes match the above.
 
 ### T5: Project map `connections` key   [Status: pending | Model: sonnet]
 - **Scope:** add `Connections map[string]connections.Spec `json:"connections"`` to `projectConfig`
@@ -914,3 +917,11 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
   (and never reaching an upstream). The proxy's own 400 is what the handler tests prove, since
   they call it directly; T12's handler test should not expect a 400 through the mux for `..`.
   `%2F` and `%2e%2e` are *not* cleaned by the mux and do reach the proxy's 400.
+- (T4) Minor, not acted on. An inbound `Connection: Upgrade`/`Upgrade` pair is re-added to the
+  outbound request by `ReverseProxy` itself, after `Rewrite` has run, so a WebSocket-style upgrade
+  could be passed to an upstream. The credential is still only the swapped Bearer token and MCP
+  does not use upgrades, so this is harmless; blocking upgrades would need an explicit refusal in
+  `ServeHTTP` if anyone wants it.
+- (T4) Process: the T4 Notes and most T4 Discovered Issues entries were merged into this doc at
+  730acee from an interrupted builder whose `proxy.go`/`proxy_test.go` were never committed; the
+  code landed later as 421793d, reviewed and kept unchanged by a second builder.
