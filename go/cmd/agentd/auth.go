@@ -26,6 +26,13 @@ type principal struct {
 	// and confines the credential to that one dataset. Enforcement lives in
 	// httpapi/datasets.go, on the download route alone.
 	datasetScope string
+	// apiKey is true when this principal came from the X-API-Key branch below,
+	// rather than a console login JWT. It surfaces as httpapi.Identity.APIKey,
+	// which PutWorker checks before allowing a `connections` change (T7 of
+	// design/2026-09-11-project-connections.md): an embedding application
+	// holding its project's key must not be able to grant its own workers
+	// reach they did not already have.
+	apiKey bool
 }
 
 type ctxKey struct{}
@@ -128,7 +135,7 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			// records the project's key rather than an empty string, which is
 			// how a human edit is spelled elsewhere.
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
-				r.Context(), principal{email: apiKeyEmail(project), customer: project})))
+				r.Context(), principal{email: apiKeyEmail(project), customer: project, apiKey: true})))
 			return
 		}
 		// The ?token= leg (O5 of design/2026-08-20-agent-wolf.md): the ONE place
@@ -253,5 +260,6 @@ func identityFromRequest(r *http.Request) (httpapi.Identity, error) {
 		Customer:     p.customer,
 		SessionScope: p.embedSession,
 		DatasetScope: p.datasetScope,
+		APIKey:       p.apiKey,
 	}, nil
 }
