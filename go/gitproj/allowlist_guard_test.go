@@ -151,7 +151,12 @@ func TestNotImportableFieldsArePinned(t *testing.T) {
 	// nowhere to live, DI11). That was exactly the deliberate security decision
 	// this test asks for: a commit that could rewrite it would choose which
 	// secret makes an inbound delivery verify.
-	want := []string{"GitBranch", "GitRemote", "GitSubfolder", "GitTokenEnv", "GitWebhookSecretEnv"}
+	//
+	// Worker.Connections joined the set in project-connections T6 (Decision 3
+	// of design/2026-09-11-project-connections.md): a commit that could rewrite
+	// it would let anyone with push access to the mirror grant a worker "*" —
+	// every connection the project has — without going through CanGrant at all.
+	want := []string{"Connections", "GitBranch", "GitRemote", "GitSubfolder", "GitTokenEnv", "GitWebhookSecretEnv"}
 
 	var got []string
 	for _, structName := range sortedKeys(guardedStructs) {
