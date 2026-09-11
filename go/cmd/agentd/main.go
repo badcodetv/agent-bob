@@ -427,8 +427,16 @@ func main() {
 	// the git projection needs its `github_token_env` half as the fallback for
 	// a project whose settings row names no push credential (DI3). Everything
 	// else it feeds — API keys, framing origins, login — is wired further down
-	// from the same value; it is read once, at boot, either way.
-	projectCfg, err := loadProjectSettingsOptional(os.Getenv)
+	// from the same value.
+	//
+	// It is held behind projectMapHolder rather than read once into a plain
+	// *projectSettings: when AGENTKIT_PROJECT_MAP_FILE is set, the map reloads
+	// on SIGHUP and on a timer (below), and every reader — resolve/allProjects
+	// for login, the API-key index, and the git-token-env fallback — goes
+	// through the holder so a reload reaches all of them without a restart
+	// (A6). An inline AGENTKIT_PROJECT_MAP has no file to watch, so it behaves
+	// exactly as before.
+	projectMapHolder, err := newProjectSettingsHolder(os.Getenv)
 	must(err)
 
 	if agentDB != nil {
@@ -452,8 +460,15 @@ func main() {
 		// runs synchronously on the mutating goroutine, which for a worker
 		// rewriting a prompt is a model's blocking tool call. See
 		// gitprojection.go rule 1.
+		// gitTokenEnvFromProjectMap takes a *projectSettings snapshot and
+		// returns a lookup closure; wrapping the call like this — rather than
+		// calling it once with projectMapHolder.Get() — means the closure
+		// below re-fetches the current settings on every invocation, so a
+		// reloaded map's github_token_env reaches the git projection too (A6).
 		gitHook, gitProj := installGitProjection(ctx, agentDB,
-			gitTokenEnvFromProjectMap(projectCfg), log.Printf)
+			func(project string) string {
+				return gitTokenEnvFromProjectMap(projectMapHolder.Get())(project)
+			}, log.Printf)
 		gitWebhook = newGitWebhookWiring(agentDB, gitProj, os.Getenv, log.Printf)
 		// The bootstrap door can now do its work: it takes the same lease and
 		// work-lock as the render loop and the webhook import, off the same
@@ -578,16 +593,38 @@ func main() {
 	//
 	// Resolving env → key values is a boot-time act: a short key or one value
 	// granting two projects fails the process rather than degrading quietly.
-	apiKeys, err := newProjectKeys(projectConfigsOf(projectCfg), os.Getenv, log.Printf)
+	// Held behind projectKeysHolder so a file-map reload (below) can recompute
+	// it without apiAuthMiddleware ever holding a stale index (A6).
+	apiKeys, err := newProjectKeysHolder(projectConfigsOf(projectMapHolder.Get()), os.Getenv, log.Printf)
 	must(err)
-	if projectCfg != nil {
+	if s := projectMapHolder.Get(); s != nil {
 		log.Printf("[agentd] project map: %d mapped account(s), %d configured project(s)",
-			len(projectCfg.users), len(projectCfg.projects))
+			len(s.users), len(s.projects))
 	}
+
+	// AGENTKIT_PROJECT_MAP_RELOAD: how often the file map (if any) is re-read
+	// on a timer, on top of SIGHUP always triggering a reload. 0 disables the
+	// timer; unset defaults to 60s. Meaningless for an inline map or no map at
+	// all — projectMapHolder.watch is a no-op in both cases (A6).
+	reloadInterval := 60 * time.Second
+	if v := strings.TrimSpace(os.Getenv("AGENTKIT_PROJECT_MAP_RELOAD")); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			log.Fatalf("[agentd] AGENTKIT_PROJECT_MAP_RELOAD=%q is not a valid duration", v)
+		}
+		reloadInterval = d
+	}
+	// api_key_env and allowed_origins live in the same file's "projects"
+	// section as the users half, so every successful map reload also
+	// recomputes the API-key index from the fresh config.
+	go projectMapHolder.watch(ctx, reloadInterval, func() {
+		apiKeys.reload(projectConfigsOf(projectMapHolder.Get()), os.Getenv, log.Printf)
+	}, log.Printf)
 
 	// GET /embed/csp — the frame-ancestors value nginx copies onto the embed
 	// page it serves statically (deploy/web.nginx.conf). Unauthenticated and one
-	// answer for every project; embedcsp.go explains both.
+	// answer for every project; embedcsp.go explains both. This value is a
+	// boot-time snapshot, not re-read on reload — see Discovered Issue A6-DI1.
 	registerEmbedCSP(root, apiKeys.allowedOrigins())
 	log.Printf("[agentd] embed framing: %s", frameAncestors(apiKeys.allowedOrigins()))
 
@@ -595,20 +632,22 @@ func main() {
 		if len(jwtSecret) == 0 {
 			log.Fatal("[agentd] login modes require AGENTKIT_JWT_SECRET (dev-open auth would ignore the minted tokens)")
 		}
-		if projectCfg == nil {
+		if projectMapHolder.Get() == nil {
 			log.Fatal("[agentd] login modes require a project map: set AGENTKIT_PROJECT_MAP or AGENTKIT_PROJECT_MAP_FILE")
 		}
-		pm := projectCfg.users
+		// projectMapHolder itself is passed as the userDirectory, not a
+		// snapshot of its users half, so a reload reaches these handlers
+		// without re-registering them (A6).
 		loginIssuer := devclaims.NewWithTTL(jwtSecret, 12*time.Hour)
 		if googleClientID != "" {
 			root.HandleFunc("POST /auth/google", authGoogleHandler(
-				&googleVerifier{clientID: googleClientID}, pm, loginIssuer))
-			log.Printf("[agentd] google login enabled (%d mapped account(s))", len(pm))
+				&googleVerifier{clientID: googleClientID}, projectMapHolder, loginIssuer))
+			log.Printf("[agentd] google login enabled (%d mapped account(s))", len(projectMapHolder.users()))
 		}
 		if testLogin != "" {
 			email, password, err := parseTestLogin(testLogin)
 			must(err)
-			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, pm, loginIssuer))
+			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] WARNING: password test login enabled for %s — all projects granted; test/dev only", email)
 		}
 		// Wildcard-login exchange: mints tokens for new project IDs.
