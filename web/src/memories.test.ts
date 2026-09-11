@@ -6,9 +6,13 @@ import {
   coerceMemory,
   DEFAULT_BRIEFING_HEADING,
   foldNamedMemories,
+  formatLabelLines,
   formatRequirement,
   labelKeyError,
   labelValueError,
+  LABEL_REGISTRY_NAME,
+  memoryWriteBody,
+  parseLabelLines,
   parseMemorySelector,
   rollingSummarySelector,
   semanticLegLooksOff,
@@ -272,5 +276,90 @@ describe('capBriefingContent', () => {
 
   it('a zero cap means unset, not "no briefing"', () => {
     expect(capBriefingContent('anything', 0).truncated).toBe(false)
+  })
+})
+
+describe('parseLabelLines', () => {
+  it('parses one key=value per line, ignoring blank lines', () => {
+    expect(parseLabelLines('kind=lesson\n\nname=label-registry\n')).toEqual({
+      labels: { kind: 'lesson', name: 'label-registry' },
+      error: null,
+    })
+  })
+
+  it('trims whitespace around the key and the value', () => {
+    expect(parseLabelLines(' kind = lesson ')).toEqual({
+      labels: { kind: 'lesson' },
+      error: null,
+    })
+  })
+
+  it('the empty string parses to no labels', () => {
+    expect(parseLabelLines('')).toEqual({ labels: {}, error: null })
+    expect(parseLabelLines('   \n  \n').error).toBeNull()
+  })
+
+  it('a line with no "=" is named by number, not silently dropped', () => {
+    expect(parseLabelLines('kind=lesson\nbroken').error).toBe(
+      'line 2 "broken": expected key=value',
+    )
+  })
+
+  it('an invalid key is reported with the engine\'s own message, by line', () => {
+    const { error } = parseLabelLines('kind=lesson\n-bad=x')
+    expect(error).toBe(
+      `line 2: label key "-bad" is invalid: must be alphanumeric, optionally containing '-', '_' or '.', and start and end alphanumeric`,
+    )
+  })
+
+  it('an invalid value is reported the same way', () => {
+    const { error } = parseLabelLines('kind=no spaces')
+    expect(error).toMatch(/^line 1: label value "no spaces" is invalid/)
+  })
+
+  it('holds what parsed before the bad line, like parseMemorySelector', () => {
+    const { labels, error } = parseLabelLines('kind=lesson\nbroken\nworker=w')
+    expect(labels).toEqual({ kind: 'lesson' })
+    expect(error).not.toBeNull()
+  })
+})
+
+describe('formatLabelLines', () => {
+  it('is the inverse of parseLabelLines, sorted by key', () => {
+    const text = formatLabelLines({ worker: 'w', kind: 'lesson' })
+    expect(text).toBe('kind=lesson\nworker=w')
+    expect(parseLabelLines(text)).toEqual({
+      labels: { kind: 'lesson', worker: 'w' },
+      error: null,
+    })
+  })
+
+  it('the empty map formats to the empty string', () => {
+    expect(formatLabelLines({})).toBe('')
+  })
+})
+
+describe('memoryWriteBody', () => {
+  it('is exactly {labels, content} — no provenance field, ever', () => {
+    const body = memoryWriteBody({ kind: 'note' }, 'hello')
+    expect(body).toEqual({ labels: { kind: 'note' }, content: 'hello' })
+    // The guarantee C4 exists to make: pin the exact key set, so a future edit
+    // that starts threading `created_by_worker`/`created_by_session` through
+    // this builder fails a test instead of silently reaching the server —
+    // which refuses any body carrying either key, even as "" or null.
+    expect(Object.keys(body).sort()).toEqual(['content', 'labels'])
+    expect('created_by_worker' in body).toBe(false)
+    expect('created_by_session' in body).toBe(false)
+  })
+
+  it('round-trips through JSON with only those two keys', () => {
+    const wire = JSON.parse(JSON.stringify(memoryWriteBody({}, 'x'))) as Record<string, unknown>
+    expect(Object.keys(wire).sort()).toEqual(['content', 'labels'])
+  })
+})
+
+describe('LABEL_REGISTRY_NAME', () => {
+  it('is the name= convention\'s rulebook value', () => {
+    expect(LABEL_REGISTRY_NAME).toBe('label-registry')
   })
 })
