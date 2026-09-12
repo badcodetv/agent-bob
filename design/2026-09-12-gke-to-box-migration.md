@@ -210,12 +210,36 @@ outage; at 22.7 GiB it does not. Recommendation is Kai's to give.
    Krystal (`185.194.90.31`) with valid certificates to 2026-10-24, and `nocode.works` itself
    returns HTTP 200 on a valid Let's Encrypt certificate to 2026-10-24. **Nothing user-facing is
    broken.** Most of it disappears when NoCode is switched off. Downgraded from 🔴 to housekeeping.
-2. **Artifact Registry needs a cleanup policy on the `agent-bob` repo.** Once `docs/ops.md` Step 11d
-   sets `AGENTKIT_REGISTRY_BACKEND=ociregistry` (needed so session base images can be pulled at
-   all), archived idle sessions are pushed to Artifact Registry — and `ociregistry`'s `Remove` is a
-   no-op (`go/imageregistry/ociregistry/ociregistry.go:268`), so Bob's snapshot reaper frees
-   nothing. Layer dedup keeps each push small, so it is a slow leak rather than a cliff, but it is
-   unbounded. Raised by thread 04 (Wolf) 2026-09-12; verified in code here.
+2. 🟡 **Idle-session archives are never reclaimed — on any backend, and they never were.** Raised by
+   thread 04 (Wolf) 2026-09-12 (`design/2026-09-12-wolf-deployment.md`, agent-bob main `c21c4ff`);
+   re-verified in code here. **This is not caused by the registry setting in Step 11d, and switching
+   back to `blobarchive` would not fix it.**
+
+   `SnapshotReaper`'s only driver query is `ListCustomImageVersions` over the **named-image
+   catalogue** (`go/snapshot_reaper.go`, `ReapProject`), and it retires rows by
+   `MarkCustomImageReaped`. Catalogue rows are written only by `CreateCustomImage`, reached only
+   from the `image_burn` MCP tool (`go/cmd/agentd/mcp_images.go:249`). The archive path is a
+   different path: it calls `Registry.Persist` and then `Store.SetSnapshotHandle`
+   (`go/runner.go:878-885`) — a field on the session row, not a catalogue row. **So no sweep ever
+   visits an idle-session archive, and `project_settings.snapshot_ttl_days` has never applied to
+   one.** The leak predates the box and predates this plan.
+
+   What the registry setting *does* change is where the unreclaimed bytes sit, and therefore which
+   operator-side tool could bound them:
+
+   | | archive bytes land in | `Remove` | operator-side cap available |
+   | --- | --- | --- | --- |
+   | `blobarchive` | a GCS object (gzipped `docker save`) | really deletes, but is never called for archives | a GCS lifecycle rule |
+   | `ociregistry` (what Step 11d now sets) | one Artifact Registry repo per session, `<registry>/<session-id>:latest`, plus one untagged leftover per archive cycle | a **no-op** (`ociregistry.go:268`) | an Artifact Registry cleanup policy |
+
+   Layer dedup keeps each push small, so it is a slow leak rather than a cliff — but it is unbounded
+   either way.
+
+   **Kai has declined to design the fix now.** It is parked as *"a session archiving policy with a
+   stated restore window"*, with three decisions attached, in thread 04's document. Until that is
+   decided, the only thing to consider on the box is an Artifact Registry cleanup policy on the
+   `agent-bob` repo as a blunt cap — which is itself a decision about how far back a session can be
+   restored, so it is Kai's, not this plan's.
 3. **9,147 disk snapshots, 378.6 GB, oldest 2017-04-04** (`gcloud compute snapshots list
    --project=webkit-servers`). The 14-day policy was added later and never touches them. Costs a
    little monthly and clutters every restore search. Deleting them is destructive and needs Kai's

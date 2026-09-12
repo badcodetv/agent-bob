@@ -804,14 +804,19 @@ nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
   the pull when the image is already in DinD, so the sandbox and `core` images that `init-sandbox`
   builds are untouched. Do **not** set `AGENTKIT_REGISTRY_ALWAYS_PULL=true` on the box: it forces a
   pull even for those, and they are not in any registry.
-- 🔴 **Archived sessions stop being reclaimable automatically.** The registry backend also decides
-  where an idle session's snapshot goes. On `blobarchive` it is a gzipped `docker save` in GCS and
-  `Remove` really deletes it. On `ociregistry` it is a layer push to Artifact Registry, and
-  `Remove` is a **no-op** — "actual deletion from the remote registry is out of band"
-  (`go/imageregistry/ociregistry/ociregistry.go:268`). So `AGENTKIT_SNAPSHOT_REAP_INTERVAL` stops
-  freeing anything, and archived sessions accumulate in Artifact Registry forever. **Set an
-  Artifact Registry cleanup policy on the `agent-bob` repo before this runs for long.** Layer
-  dedup keeps each push small, so this is a slow leak, not a cliff — but it is unbounded.
+- 🟡 **It decides where unreclaimed session archives pile up.** Idle-session archives are never
+  reclaimed automatically — on **either** backend, and they never were: the snapshot reaper only
+  sweeps the named-image catalogue, and an archive is not a catalogue row
+  (`go/snapshot_reaper.go`; `go/runner.go:878-885` writes `SetSnapshotHandle`, not
+  `CreateCustomImage`), so `snapshot_ttl_days` has never applied to one. This setting does not
+  cause that and reverting it would not fix it. What it changes is the destination: `blobarchive`
+  leaves a gzipped `docker save` per archive in GCS (cappable with a bucket lifecycle rule);
+  `ociregistry` leaves one repo per session at `<registry>/<session-id>:latest` plus an untagged
+  leftover per cycle (cappable with an Artifact Registry cleanup policy on `agent-bob`). Layer
+  dedup keeps each push small, so it is a slow leak, not a cliff — but it is unbounded. **The real
+  fix is parked** as "a session archiving policy with a stated restore window"
+  (`design/2026-09-12-wolf-deployment.md`); Kai has declined to design it yet. Setting a cleanup
+  policy is itself a decision about how far back a session can be restored, so ask first.
 
 **Three rules for this file:**
 - **Keep a login mode set.** With no `GOOGLE_CLIENT_ID` (and no test login), Bob runs with **no
