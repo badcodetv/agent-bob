@@ -72,9 +72,21 @@ test.describe('memory: write a note (G8)', () => {
     expect(listResp.ok()).toBe(true)
     const { memories } = (await listResp.json()) as { memories: Array<Record<string, unknown>> }
     expect(memories).toHaveLength(1)
-    expect(memories[0]!.content).toBe(NOTE_TEXT)
+    // The LIST route returns `agentdb.MemorySearchResult` — which carries
+    // `snippet`, NOT `content` (go/agentdb/memories.go:180-197). This spec
+    // asserted `content` and so compared undefined against the note until D2
+    // ran it. Full content has its own route, and asserting through it proves
+    // the note really landed rather than trusting a search snippet.
+    const id = memories[0]!.id as string
     expect(memories[0]!.created_by_worker).toBe('')
     expect(memories[0]!.created_by_session).toBe('')
+
+    const fullResp = await client.raw('GET', `/agent/memories/${id}`)
+    expect(fullResp.ok()).toBe(true)
+    const full = (await fullResp.json()) as Record<string, unknown>
+    expect(full.content).toBe(NOTE_TEXT)
+    expect(full.created_by_worker).toBe('')
+    expect(full.created_by_session).toBe('')
   })
 
   test('publishing a new registry version becomes the current one', async ({ page, request }) => {
@@ -108,10 +120,28 @@ test.describe('memory: write a note (G8)', () => {
 
     // memory_current semantics: the NEWEST row with this name is now current,
     // over the same route an embedder reads the rulebook through.
+    //
+    // Polled, not read once. The visibility assertion above cannot stand as
+    // proof that the row landed: `NEW_RULES` is also the text sitting in the
+    // form's own textarea, so it matches whether or not the POST has
+    // completed. D2 caught that as a flake — this test failed reading the
+    // seed's content back, and passed in isolation, because the race is with
+    // the publish request, not with the database. Polling the route asserts
+    // the same fact without depending on which won. See DI27.
+    await expect
+      .poll(
+        async () => {
+          const resp = await client.raw('GET', '/agent/memories/current?name=label-registry')
+          if (!resp.ok()) return null
+          return ((await resp.json()) as Record<string, unknown>).content
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(NEW_RULES)
+
     const currentResp = await client.raw('GET', '/agent/memories/current?name=label-registry')
     expect(currentResp.ok()).toBe(true)
     const current = (await currentResp.json()) as Record<string, unknown>
-    expect(current.content).toBe(NEW_RULES)
     expect(current.created_by_worker).toBe('')
     expect(current.created_by_session).toBe('')
   })

@@ -166,12 +166,6 @@ test.describe('onboarding', () => {
     await page.getByTestId('charter-approve').click()
     await expect(page.getByTestId('charter-applied')).toBeVisible({ timeout: 60_000 })
 
-    // The seed is back once the interview is over (the architect worker now
-    // exists — see `useInterviewState`'s comment on why that is the signal).
-    await page.getByTestId('nav-workers').click()
-    await expect(page.getByRole('button', { name: /start from a topology/i })).toBeVisible({
-      timeout: 30_000,
-    })
 
     // ── what approving actually did ─────────────────────────────────────────
     const workers = await client.listWorkers()
@@ -201,8 +195,23 @@ test.describe('onboarding', () => {
     expect(await labelled(client, 'kind=registry'), 'the label registry seed').not.toHaveLength(0)
     expect(await labelled(client, 'kind=project-goal'), 'the goal seed').not.toHaveLength(0)
 
-    // The button that wakes it — an event, never a chat.
+    // The button that wakes it — an event, never a chat. It lives on the
+    // onboarding view (`OnboardingPage.tsx:166`), so this assertion requires
+    // the page to still BE there. A2's navigation checks used to be spliced in
+    // above and ended on Workers, which left this looking for a control that
+    // is not mounted on that view — the pre-existing assertion failed because
+    // of where the new one had walked the browser to, not because anything was
+    // broken. Hence the order here: view-dependent assertions last, each one
+    // on the view that owns it. See DI30.
     await expect(page.getByTestId('run-architect')).toBeVisible()
+
+    // A2, post-approval: the topology seed is offered again once the interview
+    // is over (the architect worker now exists — see `useInterviewState`'s
+    // comment on why that is the signal). Last, because it navigates away.
+    await page.getByTestId('nav-workers').click()
+    await expect(page.getByRole('button', { name: /start from a topology/i })).toBeVisible({
+      timeout: 30_000,
+    })
   })
 })
 

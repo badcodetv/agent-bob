@@ -489,13 +489,18 @@ describe('the budget panel shares this page’s settings instance (regression)',
     // just typed above.
     await openAdvanced()
     await userEvent.type(screen.getByLabelText(/base image/i), '2')
-    // Two "Why?" fields exist on this screen — the panel's own and the main
-    // form's — with the identical accessible name by design (both are the
-    // console's one "reason" convention). The main form's is the LAST one in
-    // the tree: the panel sits in tier 1, this page's own rationale field
-    // sits at the very bottom, after Advanced.
+    // Exactly ONE "Why?" on this screen. There were two until D2: the panel
+    // rendered its own alongside the page's, and because the fix above made
+    // them share one instance they were two visible inputs bound to the SAME
+    // `rationale` — mirroring each other's keystrokes, and both answering to
+    // the accessible name "Why?", which is ambiguous to a screen reader and
+    // to Playwright alike (`getByLabel('Why?')` was a strict-mode violation).
+    // Inside this page the panel now delegates the reason and the save; on the
+    // Desk, where it is the only settings consumer, it still owns both.
     const whyFields = screen.getAllByLabelText('Why?')
-    await userEvent.type(whyFields[whyFields.length - 1]!, 'unrelated advanced edit')
+    expect(whyFields).toHaveLength(1)
+    expect(screen.queryByRole('button', { name: /save limits/i })).toBeNull()
+    await userEvent.type(whyFields[0]!, 'unrelated advanced edit')
     await userEvent.click(screen.getByRole('button', { name: /^save settings$/i }))
 
     await waitFor(() => expect(puts()).toHaveLength(1))

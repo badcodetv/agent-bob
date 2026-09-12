@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { cleanupOpenedProjects, gotoView, openFreshProject } from '../helpers/ui'
-import { newProjectClient, type ProjectClient } from '../helpers/api'
+import { projectClient, type ProjectClient } from '../helpers/api'
 
 // Browser e2e for A5 — the budget panel
 // (design/2026-09-11-onboarding-work-plan.md §1.1-1.4, A5).
@@ -32,7 +32,12 @@ test.describe('the budget panel (A5)', () => {
     request,
   }) => {
     const project = await openFreshProject(page, 'e2e-budget')
-    client = await newProjectClient(request, project)
+    // `projectClient(request, project)` binds to THIS project. Not
+    // `newProjectClient(request, project)`, which takes a PREFIX and mints a
+    // brand-new project of its own — this spec used it and so polled a
+    // different, empty project, where `GET /agent/project-settings` returns
+    // `DefaultProjectSettings` (0/0) forever. See DI26.
+    client = await projectClient(request, project)
 
     // A fresh project's budget is the env default applied at
     // DefaultProjectSettings — 0/0 ("off") unless the stack sets
@@ -47,13 +52,31 @@ test.describe('the budget panel (A5)', () => {
     const limitsForm = page.getByTestId('budget-limits-form')
     await expect(limitsForm, 'the test login is a wildcard login — always the operator').toBeVisible()
 
-    const hardField = page.getByLabel('Hard limit')
+    // Role-scoped, not `getByLabel('Hard limit')`: getByLabel matches a
+    // SUBSTRING, and this panel's bar is labelled "Today's tokens against the
+    // hard limit", so the plain label locator resolves to two elements once
+    // usage has loaded. Two clear, distinct labels is correct for a screen
+    // reader — this is a locator artefact, not an accessibility defect, so the
+    // spec is what changes. See DI28.
+    const hardField = page.getByRole('spinbutton', { name: 'Hard limit' })
     await expect(hardField).toHaveValue(String(before.daily_tokens_hard))
 
     const nextHard = before.daily_tokens_hard + 5000
     await hardField.fill(String(nextHard))
+
+    // Inside Settings the panel does NOT own the reason or the save: the page
+    // holds one draft, one "Why?" and one Save settings, and the panel's limit
+    // fields are part of that draft. It rendered its own pair until D2 caught
+    // the consequence — two visible inputs bound to the SAME `rationale`,
+    // mirroring each other's keystrokes and both answering to the accessible
+    // name "Why?" (which is what `getByLabel('Why?')` tripped over here). On
+    // the Desk, where the panel is the only settings consumer, it still owns
+    // both — covered by BudgetPanel.test.tsx.
+    await expect(page.getByRole('button', { name: /save limits/i })).toHaveCount(0)
+    await expect(limitsForm.getByText(/the page's own/i)).toBeVisible()
+
     await page.getByLabel('Why?').fill('e2e: raising the hard limit')
-    await page.getByRole('button', { name: /save limits/i }).click()
+    await page.getByRole('button', { name: /save settings/i }).click()
     await expect(page.getByText(/no unsaved changes/i)).toBeVisible({ timeout: 15_000 })
 
     // Round-tripped on the server, not just in the form's own state.
@@ -66,7 +89,7 @@ test.describe('the budget panel (A5)', () => {
     await page.reload()
     await gotoView(page, 'settings')
     await expect(page.getByTestId('budget-panel')).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByLabel('Hard limit')).toHaveValue(String(nextHard))
+    await expect(page.getByRole('spinbutton', { name: 'Hard limit' })).toHaveValue(String(nextHard))
   })
 
   test('a non-operator sees the numbers and the fixed sentence, never the form', async ({ page, request }) => {
@@ -80,7 +103,7 @@ test.describe('the budget panel (A5)', () => {
     })
 
     const project = await openFreshProject(page, 'e2e-budget-noop')
-    client = await newProjectClient(request, project)
+    client = await projectClient(request, project)
 
     await gotoView(page, 'settings')
     await expect(page.getByTestId('budget-panel')).toBeVisible({ timeout: 30_000 })

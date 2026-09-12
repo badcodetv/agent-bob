@@ -67,7 +67,10 @@ export interface BudgetPanelProps extends UseUsageOptions {
 
 export default function BudgetPanel({ settings, ...rest }: BudgetPanelProps) {
   if (settings) {
-    return <BudgetPanelBody {...rest} settings={settings} />
+    // A parent supplied the instance, so the parent also owns the reason and
+    // the save button. See `ownsSave` on BudgetLimitsForm for why that is not
+    // just tidiness.
+    return <BudgetPanelBody {...rest} settings={settings} ownsSave={false} />
   }
   return <BudgetPanelOwnSettings {...rest} />
 }
@@ -76,15 +79,19 @@ export default function BudgetPanel({ settings, ...rest }: BudgetPanelProps) {
  *  consumer of one on the page and owning it is correct. */
 function BudgetPanelOwnSettings(props: Omit<BudgetPanelProps, 'settings'>) {
   const settings = useProjectSettings(props)
-  return <BudgetPanelBody {...props} settings={settings} />
+  return <BudgetPanelBody {...props} settings={settings} ownsSave />
 }
 
-type BudgetPanelBodyProps = Omit<BudgetPanelProps, 'settings'> & { settings: ProjectSettingsApi }
+type BudgetPanelBodyProps = Omit<BudgetPanelProps, 'settings'> & {
+  settings: ProjectSettingsApi
+  ownsSave: boolean
+}
 
 function BudgetPanelBody({
   title = 'Budget',
   collapsible = false,
   settings,
+  ownsSave,
   ...options
 }: BudgetPanelBodyProps) {
   const { usage, loading: usageLoading, error: usageError, reload: reloadUsage } = useUsage(options)
@@ -189,7 +196,7 @@ function BudgetPanelBody({
           settings.loading ? (
             <CircularProgress size={16} aria-label="Loading limits" />
           ) : (
-            <BudgetLimitsForm settings={settings} />
+            <BudgetLimitsForm settings={settings} ownsSave={ownsSave} />
           )
         ) : (
           <Stack spacing={0.5}>
@@ -257,7 +264,13 @@ function BudgetBar({
  *  the row unchanged. `BudgetPanelBody` watches `settings.saving` to reload
  *  the numbers above once a save actually completes — this component only
  *  triggers the save. */
-function BudgetLimitsForm({ settings }: { settings: ProjectSettingsApi }) {
+function BudgetLimitsForm({
+  settings,
+  ownsSave,
+}: {
+  settings: ProjectSettingsApi
+  ownsSave: boolean
+}) {
   const soft = settings.draft.daily_tokens_soft
   const hard = settings.draft.daily_tokens_hard
 
@@ -304,29 +317,38 @@ function BudgetLimitsForm({ settings }: { settings: ProjectSettingsApi }) {
           inputProps={{ min: 0, 'aria-label': 'Hard limit' }}
         />
       </Stack>
-      <TextField
-        label="Why?"
-        size="small"
-        value={settings.rationale}
-        placeholder="raising the daily hard limit for the launch"
-        onChange={(e) => settings.setRationale(e.target.value)}
-        inputProps={{ 'aria-label': 'Why?' }}
-      />
-      <Stack direction="row" spacing={2} alignItems="center">
-        <Button
-          variant="contained"
-          size="small"
-          disabled={!settings.canSave || !settings.dirty}
-          onClick={() => void settings.save()}
-        >
-          {settings.saving ? 'Saving…' : 'Save limits'}
-        </Button>
-        {!settings.dirty && (
-          <Typography variant="caption" color="text.secondary">
-            No unsaved changes
-          </Typography>
-        )}
-      </Stack>
+      {ownsSave ? (
+        <>
+          <TextField
+            label="Why?"
+            size="small"
+            value={settings.rationale}
+            placeholder="raising the daily hard limit for the launch"
+            onChange={(e) => settings.setRationale(e.target.value)}
+            inputProps={{ 'aria-label': 'Why?' }}
+          />
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Button
+              variant="contained"
+              size="small"
+              disabled={!settings.canSave || !settings.dirty}
+              onClick={() => void settings.save()}
+            >
+              {settings.saving ? 'Saving…' : 'Save limits'}
+            </Button>
+            {!settings.dirty && (
+              <Typography variant="caption" color="text.secondary">
+                No unsaved changes
+              </Typography>
+            )}
+          </Stack>
+        </>
+      ) : (
+        <Typography variant="caption" color="text.secondary">
+          Saving these is the page's own “Why?” and Save settings, below — the
+          limits above are part of this page's one draft.
+        </Typography>
+      )}
     </Stack>
   )
 }

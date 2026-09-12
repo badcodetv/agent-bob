@@ -284,8 +284,18 @@ export function useInterviewState(opts: {
     onboardSessionId: null,
     resolved: false,
   });
-  // Stops polling once the interview is confirmedly over: nothing un-applies
-  // a charter, so there is nothing left to watch for.
+  // Stops polling once the interview is provably OVER — which means the
+  // architect exists, and nothing un-applies a charter.
+  //
+  // It must not mean "inInterview is false". Those are different states and
+  // conflating them is what made this hook unable to do its job: the FIRST
+  // check runs at mount, typically before the `onboard` session exists, so
+  // `inInterview` is false for the ordinary reason that the interview has not
+  // started yet. Latching there stopped the interval permanently and the Desk
+  // could never learn that an interview had begun — the exact failure A2 was
+  // written to prevent. Caught by D2 (the stack e2e), not by a unit test:
+  // `examples/web` has no test runner, and A2's 59 tests all fed `inInterview`
+  // in as a prop rather than computing it. See DI29.
   const settled = useRef(false);
 
   useEffect(() => {
@@ -318,7 +328,12 @@ export function useInterviewState(opts: {
         const inInterview = onboardSessionId !== null && !hasArchitect;
         if (cancelled) return;
         setState({ inInterview, onboardSessionId, resolved: true });
-        if (!inInterview) settled.current = true;
+        // Only the architect's existence ends the watch. A project that never
+        // onboards therefore keeps polling two cheap GETs every
+        // INTERVIEW_POLL_MS for as long as its console tab is open — the same
+        // order as the Desk's own live refresh, and the price of not being
+        // wrong in the direction that strands a human mid-interview.
+        if (hasArchitect) settled.current = true;
       } catch {
         // A transient failure leaves the previous state — the same posture as
         // useCharter's "a 404 is the empty state, not an error": a shell-level
