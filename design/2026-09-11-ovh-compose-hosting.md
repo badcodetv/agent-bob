@@ -1,6 +1,18 @@
 # OVH Compose Hosting — one box, many stacks, block-level backups to Google
 
 Status: **DESIGN — nothing provisioned, nothing bought.** Written 2026-09-11.
+
+> 🔴 **§3 and §4 are SUPERSEDED (2026-09-12).** The LVM thin pool, the per-app logical volume and
+> the hourly snapshot-to-restic design described there **are not what we are building.** Kai put an
+> adversarial filter on them — the block layering existed only to make a live database
+> file-copyable — and they were replaced by **one Postgres with pgBackRest archiving the write-ahead
+> log to Google Cloud Storage**: worst-case data loss ~60 seconds instead of an hour, restore to any
+> moment, and five bespoke scripts plus the thin pool deleted. **Read
+> `design/2026-09-12-postgres-native-backups.md`, and follow `docs/ops.md`.** §2's "used bytes are
+> unknown" is also out of date: the whole estate measures **23.8 GB**
+> (`design/2026-09-12-gke-to-box-migration.md` §1). The rest of this document — the box choice,
+> Caddy, the host, and Appendix A's cluster inventory — still stands, and §9–§11 carry their own
+> dated corrections.
 Supersedes: `design/2026-09-09-kubernetes-deployment-playbook.md` (GKE was never applied; see §1).
 Research: a 13-agent workflow (six Sonnet researchers, one adversarial verifier each, one
 completeness critic), plus a read-only inventory of `prodcluster` and direct price checks. The
