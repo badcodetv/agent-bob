@@ -449,9 +449,13 @@ would be noticed when replacing Elasticsearch.
 2. **`pg_search` 0.25+ hard-requires pgvector** (it uses the `vector` type; `CREATE EXTENSION
    pg_search CASCADE` pulls it in). Convenient for hybrid search, but it couples pgvector upgrades
    to pg_search's expectations — and **Agent Bob already depends on pgvector.**
-3. **Four extensions need `shared_preload_libraries`, i.e. a restart of the one instance every app
-   depends on**: `pg_cron`, `pg_search`, plus `timescaledb` (list first, if taken) and
-   `pg_textsearch` (if taken). **Plan the whole list up front.** ⚠️ Sources contradict each other
+3. **Five extensions need `shared_preload_libraries`, i.e. a restart of the one instance every app
+   depends on**: `pg_cron`, **`pgaudit`**, `pg_search`, plus `timescaledb` (list first, if taken)
+   and `pg_textsearch` (if taken). **Plan the whole list up front.**
+   ⚠️ **`pgaudit` is a correction to the research, found by running it 2026-09-12:** it was listed
+   as *not* needing preloading, and in fact `CREATE EXTENSION pgaudit` fails outright with
+   *"pgaudit must be loaded via shared_preload_libraries"*. It also fails the whole transaction, so
+   creating several extensions in one statement takes the others down with it. ⚠️ Sources contradict each other
    on whether `pg_search` truly requires it — the current README says yes unconditionally, older
    0.17-era docs said unnecessary on PG17+. Assume required; the documented failure mode is a
    connection crash or a hang during index creation.
@@ -686,6 +690,22 @@ grows phrase queries.
 was 34 days behind PG18; pgvector was *ahead* of it. Every non-PGDG extension widens that window.
 *Mitigation:* keep the list permissive and PGDG-packaged — which is precisely why the partitioning
 route for time series earns its keep.
+
+### 9.6a Verified by building it, 2026-09-12
+
+The §9.1 Dockerfile was built and run on a throwaway container before any of this reached the box:
+
+- **`postgres:18-bookworm` reports `PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2)`** — independent
+  confirmation of §8.2's claim that the official image carries the PGDG package build.
+- **Every PGDG package in §9.1 installs cleanly on it**, and `pgbackrest` 2.59.1 comes from the same
+  apt line rather than needing a separate build.
+- **Every version matches what the research predicted**: pgvector 0.8.6, PostGIS 3.6.4,
+  pg_partman 5.5.0, pg_cron 1.6, pg_repack 1.5.3, pgaudit 18.0.
+- **One correction found**: `pgaudit` requires `shared_preload_libraries` (§8.5 item 3).
+
+- **The `pg_search` download URL in §9.1 resolves** (HTTP 200, and the release asset comes back named
+  `postgresql-18-pg-search_0.25.9-1PARADEDB-bookworm_amd64.deb`), so the version/distro/arch
+  pattern in the Dockerfile is right. Installing and loading it is not yet tried.
 
 ### 9.7 Stated plainly: what is not confirmed
 

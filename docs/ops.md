@@ -577,7 +577,10 @@ wal_compression = zstd
 summarize_wal = off              # drives pg_basebackup's incremental, which pgBackRest does not use
 
 # ── Extensions needing preload. Adding to this list is a RESTART of every app. ──
-shared_preload_libraries = 'pg_cron,pg_search'
+# pgaudit is in this list because it MUST be: `CREATE EXTENSION pgaudit` fails outright
+# with "pgaudit must be loaded via shared_preload_libraries". Verified by running it
+# 2026-09-12 — the research had not listed it as a preload extension.
+shared_preload_libraries = 'pg_cron,pgaudit,pg_search'
 cron.database_name = 'postgres'  # pg_cron lives in exactly ONE database per cluster
 
 # ── Logging: name the offender before it becomes an incident ──
@@ -722,7 +725,23 @@ ALTER ROLE app_internal SET lock_timeout = '5s';
 ```
 
 Then, per database that needs them: `CREATE EXTENSION vector;`, `postgis;`, `pg_partman;`,
-`pg_search;`. Two notes that bite later:
+`pg_search;`. **Verified on a throwaway PG18 on 2026-09-12** — every version is the one the
+research predicted:
+
+| Extension | Version installed | Needs preloading? |
+| --- | --- | --- |
+| `vector` (pgvector) | **0.8.6** | no |
+| `postgis` | **3.6.4** | no |
+| `pg_partman` | **5.5.0** | no |
+| `pg_cron` | **1.6** | **yes** |
+| `pg_repack` | **1.5.3** | no |
+| `pgaudit` | **18.0** | **yes** — fails outright without it |
+| `pgbackrest` (the binary, not an extension) | **2.59.1** | — |
+
+And `postgres:18-bookworm` reports `PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2)`, which confirms the
+official image is carrying the PGDG package build.
+
+Two notes that bite later:
 
 - **`pg_cron` installs in exactly one database per cluster** (`cron.database_name`, set to
   `postgres` above). Schedule work in other databases with `cron.schedule_in_database()`.
