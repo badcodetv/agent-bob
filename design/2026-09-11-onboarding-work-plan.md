@@ -525,7 +525,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - [ ] done
 - Notes: (2026-09-11) Written: field-notes (899w, 8 stories, each ≤120w, each ending in the rule, sourced in comments: 06-work-plan.md:490-502, :722-725; 20-operations-doctrine.md:84,:87; 13-work-plan-self-improvement.md:471-473; 22-readiness.md:24-29; architect-probe README; 2026-09-08 DI4 :2007-2009; git-projection.md:36-72; learning-stories.json:87,105,124), glossary (633w, 31 entries; labels checked against navReveal.ts:161-167, ChangelogView.tsx:395, WorkerEditor.tsx:190-199).
 
-### B7: Ellen's fixture project and the screenshots   [Status: todo | Model: sonnet]
+### B7: Ellen's fixture project and the screenshots   [Status: done | Model: sonnet]
 - **Scope:** With the stack up in mock mode (D2 brings it up; this ticket runs after D1 merges),
   write a Playwright script under `e2e/guide/` that creates a project `ellens-bookshop`, drives
   the interview with the bookshop answers, approves the charter, runs the architect via a mock
@@ -537,12 +537,34 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   memory, a changelog entry), verbatim.
 - **Files:** **new** `e2e/guide/capture-fixture.spec.ts`, `e2e/mock-scripts/guide-fixture.json`,
   `docs/guide/img/*.png`; modify the guide pages' placeholders.
-- **Acceptance criteria:** `grep -rn 'fixture: to be captured\|screenshot:' docs/guide/` is empty;
-  every image is under 400 KB; the script is re-runnable (`./e2e/run-stack-e2e.sh clean` first).
-- **Validation:** the grep above; `ls docs/guide/img | wc -l` ≥ 10.
+- **Acceptance criteria:** `grep -rn 'fixture: to be captured\|screenshot:' docs/guide/
+  --exclude=README.md` is empty; every image is under 400 KB; the script is re-runnable
+  (`./e2e/run-stack-e2e.sh clean` first).
+- **Validation:** the grep above; `ls docs/guide/img | wc -l` equals the number of
+  `<!-- screenshot: … -->` placeholders the pages actually carry (**3**).
+  *Both lines corrected by the orchestrator on 2026-09-12 — see DI33 and DI34 for why the
+  originals ("is empty", "≥ 10") could not be satisfied by any correct implementation.*
 - **Depends on:** D1, D2, B1–B6
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Built and run. `e2e/mock-scripts/guide-fixture.json` (three rules:
+  interviewer reused verbatim from `onboarding.json`, an architect that builds
+  `newsletter-writer` + `newsletter-archivist` with a schedule and a subscription, and the writer
+  itself so the roster demonstrably runs) plus `e2e/guide/capture-fixture.spec.ts`, added to
+  `playwright.stack.config.ts`'s `testMatch` — without which the file would never have been
+  discovered. Ran 7 times while the agent fixed timing races and cropped captures, then an 8th
+  with no changes to prove re-runnability: passed, and needed no `clean`, because its own reset
+  step handles the fixed `ellens-bookshop` id.
+  **All 9 `fixture:` and all 3 `screenshot:` placeholders in real pages are filled, every one from
+  the running stack.** Orchestrator verified: the corrected grep is empty; 3 images, largest 117 KB
+  (cap 400 KB); `e2e/guide/captured-fixtures.json` holds the evidence trail for 8 captured strings,
+  and the ask fixture in `when-a-worker-asks-you.md` is the architect's real
+  `request_human_attention` body quoted whole — message text, not row chrome. The charter's
+  `label_rules` are lifted from `go/orgprompts/interviewer.md:138`, the worked example already
+  shipped in the prompt, so even the seed is not invented. `captured-fixtures.json` is kept
+  deliberately: it is what makes the "captured, never authored" rule auditable later.
+  Residue: 4 of the pages it touched now exceed README's 450-word hard cap (461/457/452/475) —
+  DI35, not fixed, because the only ways under were to truncate a verbatim quote or delete B3's
+  prior sidebar.
 
 ### B8: the editorial pass   [Status: done | Model: sonnet]
 - **Scope:** Read every page in `docs/guide/` in order. Enforce: the same word everywhere (build a
@@ -871,3 +893,13 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **31. A UI reorganisation must grep the specs that select the fields it moves.** (D2, 2026-09-12) A5's G5 split moved `base_image` into the collapsed "Advanced" tier. `product-ui.stack.spec.ts:42` has filled that field since long before, and spent **four minutes** timing out on a field that is now one click away. Neither A5's Files list nor the orchestrator's review checked which existing specs select the moved fields. Fixed by opening Advanced first; a grep of `e2e/features` for the other moved fields found no further UI locators, the remaining hits being API-level.
 
 **32. The full stack suite has its own load flake, distinct from the web unit suite's.** (D2, 2026-09-12) `product-ui.stack.spec.ts:114` ("a session permalink opens that session directly") waited out its 120s for an assistant turn during the full run and **passes in isolation in 9.8s**. No `port pool is exhausted` line appears anywhere in the run, so this is not the documented port ceiling; it is a full suite standing up many session containers in DinD on a machine also running several other threads' work. Same shape as DI8 (the web suite's `user-event` timeouts) and the same remedy: judge a stack failure by an isolated re-run before believing it.
+
+**33. B7's acceptance grep could never be empty, because the convention document has to quote the convention.** (B7, 2026-09-12) The criterion was `grep -rn 'fixture: to be captured\|screenshot:' docs/guide/` is empty. But `docs/guide/README.md:63` explains the fixture rule *using* the literal marker (`` `<!-- fixture: to be captured by B7 -->` rather than inventing one ``) and `:112` does the same for screenshots — so the grep matches the documentation of the rule, for ever, no matter what any implementation fills in. The agent reported it rather than mangling README to satisfy a grep, which was right. Fixed by adding `--exclude=README.md` to the criterion: a convention document must be able to state its own convention, and the acceptance check is what was wrong. Same family as **DI14** (a Validation line that cannot pass as written) and **DI22** (a ticket asserting the design contained something it did not).
+
+**34. "≥ 10 images" was a number nobody could hit honestly.** (B7, 2026-09-12) The Validation asked for at least ten files in `docs/guide/img/`, while the pages carry exactly **3** `<!-- screenshot: … -->` placeholders — all in `your-first-hour.md`, none anywhere else including `for-operators/`. §1.5 ties images one-to-one to those comments, so the count was fixed by B1–B6 long before B7 could run, and reaching ten meant either inventing seven decorative images nothing asked for or pushing pages further past their word budget for pictures with no narrative role. The agent declined to redefine the criterion on its own authority and asked. **Criterion corrected to "equals the number of placeholders the pages carry".** The general point: an acceptance number written in one ticket about another ticket's output is a guess wearing the clothes of a requirement.
+
+**35. The 450-word cap assumed placeholders cost nothing.** (B7, 2026-09-12) `docs/guide/README.md` sets 150–400 words target, 450 hard. Four pages now exceed it: `when-a-worker-asks-you.md` (475), `a-workers-instructions.md` (461), `memory.md` (457), `the-rulebook.md` (452). All four were already at 413–448 **before** B7, so the budget was set against pages whose fixtures were one-line HTML comments; a real captured prompt, memory or ask message costs 30–60 words. The worst case is instructive: `when-a-worker-asks-you.md` is over because the architect's real message runs four sentences and the page already carried B3's "unasked question" sidebar, so getting under 450 meant truncating a verbatim quote — which README itself forbids ("shown in mono, whole, never truncated with …") — or deleting another ticket's work. Left real and over rather than fake and compliant. Kai's call whether the cap moves or those pages lose a paragraph.
+
+**36. `DELETE /agent/session/{id}` does not clear an outstanding ask.** (B7, 2026-09-12) Found while making a fixed-id fixture project re-runnable. `DeskPage.tsx`'s own words — "an ask leaves the Desk's Asks stack when it is answered or times out" — turn out to be exhaustive: deleting the session sitting under an `awaiting_human` ask does **not** answer it, so repeated runs accumulated duplicate "architect" ask rows (2, then 3, then 4) even after every session had been deleted. Worked around in the capture spec by photographing the single real ask row rather than the whole Desk, commented in place. The underlying gap matters anywhere `DELETE /agent/session` is relied on to retire an open ask — it will not.
+
+**37. Another session committed this thread's in-flight files as `wip`.** (orchestrator, 2026-09-12) Commit `88ae096` ("wip", no body) landed on `main` at 14:20:53 carrying exactly B7's then-current working set — the three screenshots, `capture-fixture.spec.ts`, `guide-fixture.json`, `captured-fixtures.json` and the `playwright.stack.config.ts` edit. Neither the orchestrator nor B7 made it, and every session in this repo commits as the same git identity, so authorship cannot be told apart from the log. It is almost certainly a broad `git add` from another thread working in the shared checkout — the precise hazard the launch rules name ("stage **only your own files**, never `git add -A`"). Harm here was nil: the files were this thread's, nothing was lost, and the later versions were still in the tree. The lesson is that it could as easily have swept up a half-finished edit of someone else's, committed under a message describing something unrelated. History left as found rather than rewritten — never rewrite a commit you did not author, even a local one — and the content recommitted properly on top.

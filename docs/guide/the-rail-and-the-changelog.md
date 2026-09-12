@@ -28,13 +28,11 @@ entry you want to put back, and press **Revert to this version**. Type why, and 
 
 ## Ellen's example
 
-<!-- fixture: to be captured by B7 -->
-
-The confirmation names exactly what is about to change:
-
-> This puts *\<what>* back to the state it was in after *\<the change>*, made *\<when>* by
-> *\<who>*. Nothing is erased. Reverting writes a new change that puts the old state back, and
-> both stay in this log — so you can revert the revert.
+Ellen's own prompt edit (see [A worker's instructions](a-workers-instructions.md)) turned out
+worse, not better, so she reverted it. The confirmation, word for word: "This puts
+**newsletter-writer** back to the state it was in **after updated worker "newsletter-writer"**,
+made 14:27 by a human." She typed "the added sentence made the prompt worse, not better" and
+confirmed.
 
 (`web/src/components/ChangelogView.tsx:427-431`.)
 

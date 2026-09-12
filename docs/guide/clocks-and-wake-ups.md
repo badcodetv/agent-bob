@@ -28,7 +28,9 @@ She types "every Monday at 08:00" and "draft this week's newsletter". The
 assist reads the day and the clock time and proposes the five-field cron `0 8 * * 1`, which she
 then applies. Nothing fires until she does.
 
-<!-- fixture: to be captured by B7 -->
+That is exactly the trigger the architect itself saved on `newsletter-writer`'s Triggers tab when
+it built the roster: cron `0 8 * * 1` → input "Draft this week's newsletter." — the same shape,
+because that is what "every Monday at 08:00" compiles to.
 
 ## The trap
 

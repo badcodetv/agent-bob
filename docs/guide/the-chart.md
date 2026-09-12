@@ -24,10 +24,11 @@ why, and submit.
 
 ## Ellen's example
 
-<!-- fixture: to be captured by B7 -->
-
-When the fixture project is captured, this shows the wiring the architect built on its first run:
-which worker wakes which, and over what event.
+The wiring the architect actually built on its first run, read back from the project: two plates,
+`newsletter-writer` and `newsletter-archivist`. A clock wakes `newsletter-writer` on `0 8 * * 1`
+(every Monday at 08:00) with "Draft this week's newsletter." A wire from `worker.finished` wakes
+`newsletter-archivist`, filtered to `{"worker":"newsletter-writer"}` so it only wakes on that one
+worker's completion, not its own.
 
 ## The trap
 

@@ -22,10 +22,13 @@ answer it in plain words in that thread. The worker continues from your reply.
 
 ## Ellen's example
 
-<!-- fixture: to be captured by B7 -->
+The architect's first message, once it has built the roster, is itself an ask, word for word:
 
-The architect's first message, once it has built the roster, is itself an ask: it tells Ellen what
-it created and why, and waits for her to read it.
+> I built two workers. newsletter-writer wakes every Monday at 08:00 and drafts that week's
+> newsletter from recent facts and decisions. newsletter-archivist wakes when newsletter-writer
+> finishes and writes down what it produced, so there is evidence for me to steer by next run.
+> Both are new — nothing existed before this. Every change here is in the changelog and can be
+> reverted.
 
 Sidebar: **the unasked question.** A booking worker once guessed at an ambiguous request and let
 the job finish as though the guess were an answer. Its mentor rewrote its prompt with the reason

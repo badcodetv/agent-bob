@@ -32,10 +32,10 @@ Her charter's label rules, written down during her interview, word for word:
 > list, name=<what-it-is> so the current value can be read back; subscriber-count lives here.
 > kind=draft - a newsletter that has been written but not sent; name=<issue-slug>.
 
-(`go/orgprompts/interviewer.md`, the worked example.) Later, if Ellen decides complaints need
-their own trail, she publishes a new version with a line added:
-
-<!-- fixture: to be captured by B7 -->
+(`go/orgprompts/interviewer.md`, the worked example.) Later, if complaints need their own trail,
+Ellen publishes a new version with one line added: "kind=complaint - something a customer
+complained about, and what was done; name=<slug>." Reason: "they were getting lost inside
+kind=decision".
 
 ## The trap
 

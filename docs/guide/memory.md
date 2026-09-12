@@ -39,7 +39,11 @@ word:
 (`go/orgprompts/interviewer.md`, the worked example.) A real note from Ellen's project, as
 written:
 
-<!-- fixture: to be captured by B7 -->
+```
+kind=fact name=subscriber-count
+
+Subscriber count as of today: 447, up from the 430 the charter started at.
+```
 
 ## The trap
 

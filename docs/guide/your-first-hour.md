@@ -17,13 +17,13 @@ an outcome, not a category. That sentence starts the interview.
 
 ## Ellen's example
 
-<!-- screenshot: the new-project dialog -->
+![The new-project dialog](img/your-first-hour-1.png)
 Ellen gets a link from Kai, with one line of warning: this costs money, and what she is about to
 approve acts without asking her. She signs in with Google, lands in her project, and types her
 goal in one box. That starts the interview: three to five questions, one at a time, about the
 goal, how she would know it worked in a month, and what is worth writing down.
 
-<!-- screenshot: the charter panel, unapproved -->
+![The charter panel, unapproved](img/your-first-hour-2.png)
 A charter appears as soon as there is enough to show. She reads it, recognises her own answers,
 and presses Approve. The panel says plainly what that does: "Approving this creates the architect
 and nothing else, it decides what workers this project needs, and creates them itself." She
@@ -32,7 +32,7 @@ presses "Run the architect now."
 **This is the wait.** No progress bar, and it can take several minutes. Nothing is stuck, so she
 goes and makes tea, and the [Desk](the-desk.md) tells her when something happens.
 
-<!-- screenshot: the Desk, first ask -->
+![The Desk's first ask](img/your-first-hour-3.png)
 Then it lands: a rose diamond on the Desk says the architect is waiting for her. She opens it and
 reads what it built and why. This is the moment she understands the product. She opens one worker,
 changes one sentence in its instructions, gives a reason, and saves. The

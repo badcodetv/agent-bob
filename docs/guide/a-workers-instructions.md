@@ -24,7 +24,8 @@ sentence that fixes something you noticed it doing wrong. Type a reason in **Why
 
 ## Ellen's example
 
-<!-- fixture: to be captured by B7 -->
+Ellen added one sentence to `newsletter-writer`'s prompt: "Mention the signing or event of the
+week first if there is one." Why?: "the first draft buried the signing at the bottom".
 
 ## The trap
 

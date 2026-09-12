@@ -102,8 +102,17 @@ test.describe('guide fixture capture (B7)', () => {
     await page.getByLabel('What is this project for?').fill(GOAL)
     // Screenshot BEFORE submit: this is the dialog Ellen actually sees and
     // fills in, per your-first-hour.md's own telling ("types her goal in one
-    // box").
-    await page.screenshot({ path: path.join(IMG_DIR, 'your-first-hour-1.png') })
+    // box"). The picker Paper is taller than the viewport and the multiline
+    // goal field's autofocus scrolls it, so screenshot the element itself
+    // rather than the page — a full-page shot cropped to the viewport had
+    // been landing mid-scroll, showing the bottom of the card with its top
+    // (the "Choose a project" heading) cut off.
+    const pickerCard = page.getByTestId('project-picker')
+    // The Paper itself scrolled (goal field's autofocus), so an element
+    // screenshot alone still started mid-card — reset its scroll first.
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await pickerCard.evaluate((el) => el.scrollTo(0, 0))
+    await pickerCard.screenshot({ path: path.join(IMG_DIR, 'your-first-hour-1.png') })
     await page.getByTestId('new-project-create').click()
     await expect(page.getByTestId('onboarding-rail')).toBeVisible({ timeout: 60_000 })
 

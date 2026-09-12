@@ -18,7 +18,9 @@ Check today's spend on the Settings page before you leave a schedule running ove
 
 ## Ellen's example
 
-<!-- fixture: to be captured by B7 --> A real week of the newsletter loop's spend, shown against the limit.
+What her Settings page actually showed after the interview and the architect's first run: 15,120
+input tokens and 804 output tokens today, cost not reported (a mock model captured this fixture;
+a real API key reports a dollar figure). Budget: 0 soft / 0 hard — unset, see below.
 
 ## The trap
 
