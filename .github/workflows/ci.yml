@@ -174,7 +174,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
       # web/'s dependencies AND its build, both before examples/web's own
       # install. Since O12 this app consumes the EMITTED package — its Vite
       # alias resolves `@agentkit/chat-ui` to ../../web/dist/index.js and its

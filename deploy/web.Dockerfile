@@ -1,5 +1,5 @@
 # Build context: agent-library  (root) — needs web/, examples/web/ and docs/.
-FROM node:20-slim AS build
+FROM node:22-slim AS build
 WORKDIR /src
 COPY web ./web
 COPY examples/web ./examples/web
