@@ -412,3 +412,53 @@ one check `docker compose config` cannot make, and the one an nginx bug survived
 - **An Artifact Registry cleanup policy** (§ 4, § 9) — thread 01 is holding it for Kai's yes.
   Without it Wolf's daily researcher grows registry storage without bound.
 - **§ 8 step 3, the Google console** — Kai only.
+
+## 16. Open question, parked by Kai on 2026-09-12 — session storage has no retirement policy
+
+Not for this thread to solve. Recorded here because § 4 and § 9 are where the bill shows up, and
+because the shape is sharper than "the delete is a stub on one backend".
+
+**The persistence guarantee today is the strongest possible one, and nothing weaker is offered.**
+An archived session is a `ContainerCommit` of the whole container
+(`go/execenv/docker/dind.go:354`), pushed as one image. Any file written anywhere in the
+filesystem comes back on thaw. There is no scratch tier, no "this path survives, that one
+doesn't", and no way for a session to declare it needs none of it.
+
+**Each session owns a registry repository.** `Persist` pushes to
+`<registry>/<session-id>:latest` (`go/imageregistry/ociregistry/ociregistry.go`, `remoteRef`).
+Shared base layers dedup; the top layer is that session's diff. Re-archiving the same session
+**overwrites the same tag**, so a session holds one tagged image — plus one untagged leftover
+digest per archive/restore cycle.
+
+**The retirement policy Kai reached for already exists — for the wrong objects.**
+`project_settings.snapshot_ttl_days` (default 30, `0` = never) is real, is enforced, defers while
+an image is in use, and tombstones rather than erasing history. But `SnapshotReaper` drives off
+`ListCustomImageVersions`/`MarkCustomImageReaped` — the **named image catalogue** that agents burn
+versions into. **Idle-session archive snapshots are not in that catalogue and no sweep visits
+them.** `Registry.Remove` has exactly one non-test caller in the whole module,
+`go/snapshot_reaper.go:272`, and it is that sweep.
+
+So the accurate statement is narrower and worse than "one backend's delete is a stub":
+
+> **Nothing in Agent Bob ever deletes an idle-session snapshot, on any registry backend.** On
+> `blobarchive` they accumulate as local blobs; on `ociregistry` they accumulate in Artifact
+> Registry. The 30-day promise does not cover them because they were never catalogue rows.
+
+Kai's framing, worth keeping for whoever picks this up: *"how long do session layers exist for?
+There needs to be a policy. And when we tidy up, how do we not lose context someone really
+needed?"* — i.e. the wanted thing is a **session archiving policy** with a stated restore window
+(he suggested 90 days), not just a storage sweep. He also raised whether commit-layers are the
+right state mechanism at all, versus object storage or a stateless session configured purely by
+its image, and then explicitly declined to design it now.
+
+Three things that would have to be decided, none of them here:
+
+1. **The window.** Restore-in-full for N days, then what — gone, or degraded to transcript-only?
+   The conversation and its events live in Postgres, not the image, so a tombstoned session is
+   still readable; what is lost is the filesystem.
+2. **Whether every session needs the guarantee.** Wolf's daily researcher writes CSV caches it
+   would happily refetch. A per-project or per-worker "no snapshot" mode would remove most of
+   the volume at source.
+3. **The stopgap.** An Artifact Registry cleanup rule on untagged digests and on
+   `session-*` repositories older than the window — which is a settings page, not code, and is
+   what thread 01 is holding for Kai's yes (§ 4).
