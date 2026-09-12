@@ -228,7 +228,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 316ce03 merged to main. `RevertControl` exported from ChangelogView and mounted on `kind === 'change'` rows of ActivityPage; revert blocks computed from the seq-ordered config log (`useActivity.ts`), not the rail's time sort; 3 unit tests; new `e2e/features/revert.stack.spec.ts` (revert newest from Activity, then 409 on the superseded entry). web typecheck green; full `npm test` 1546/1548 with 2 unrelated timeout flakes (DI 2). Stack e2e pending D2.
 
-### A2: the interview survives navigation, and hides the seeds while it runs   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### A2: the interview survives navigation, and hides the seeds while it runs   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Replace the `localStorage`-only gate on the onboarding view (`examples/web/src/App.tsx:36`,
   `:56-62`, `:290-294`, `:393-396`, `:446`) with a server-derived state: a project is **in
   interview** when `GET /agent/sessions/by-name/onboard` returns a session **and** no charter has
@@ -253,8 +253,8 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts. (2026-09-12) Resumed: the WIP diff needed no fixes; amended to 6dcbcbf "A2: the interview survives navigation, and the seeds stay hidden until a charter lands" and merged as 05a41f1. Orchestrator re-ran the Validation on the merged tree: `npm run typecheck` clean, `npx vitest run --testTimeout=20000` 1552/1552 pass in 81 files, `npm run build` clean, `examples/web` `yarn typecheck` clean (the timeout flag is the DI8 flake, not the ticket). 'No onboard session behaves as today' and 'charter applied hides the row' are code traces, not tests — the e2e scenario at e2e/features/onboarding.stack.spec.ts:147-172 is written and waits on D2. Known gap logged as DI10.
 
 ### A3: operator claim, budget write guard, default budgets, whoami   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Exactly §1.1, §1.2 and §1.3 above. The claim is added where project tokens are
@@ -708,3 +708,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **6. Embed-CSP origin list is still a boot-time snapshot.** (A6, 2026-09-11) `embedcsp.go:79-88` documents "computed once, at wiring time" and `main.go` passes a `[]string`; making it live means a `func() []string` per request. Small, separate change; not done.
 
 **7. `docs/ops.md` §11d had no invite walkthrough and used the inline map.** (A6, 2026-09-11) Switched the OVH example to `AGENTKIT_PROJECT_MAP_FILE` at `/srv/apps/bob/secrets/projects.json` and added a one-paragraph "adding someone later"; A7 still owes the full invitation prose.
+
+**8. The `web/` suite's 5000ms flake is a timeout, not a race — and it has a one-flag proof.** (orchestrator, 2026-09-12) Confirms **2** with the measurement that file was missing. On untouched `main`, `cd web && npm test` → 6 failed / 1542 passed across `AutomationPage.test.tsx`, `ProjectSettingsPage.test.tsx`, `WorkersPage.test.tsx`; re-running exactly those three files alone on the same tree → **71 passed, 0 failed**. A2's agent went further on its branch: the *whole* suite with `npx vitest run --testTimeout=20000` → **1549/1549 pass**. So every one of these is `@testing-library/user-event` typing past a wall-clock deadline under CPU contention, and the fleet's own parallelism is what causes it. Two consequences: (a) no agent should judge a web ticket by the full suite while siblings are running — re-run the ticket's own files in isolation; (b) raising `testTimeout` in `web/vitest.config.ts` would make the gate honest, but it is a shared file five tickets were editing, so it is **not** done here and wants its own ticket. D1 still re-runs the suite on a quiet machine.
+
+**9. A brand-new project has no UI path to its own first memory.** (C4, 2026-09-12) The Memory nav entry only reveals once the project has ≥1 memory (K9, `examples/web/src/App.tsx:296-298`), so the "Write a note" button C4 adds is unreachable on a project that has never had one — `e2e/features/memory-write.stack.spec.ts:20-26` routes around it by seeding a memory over the API. Harmless today because onboarding seeds two memories at charter approval, but it makes the zero-memory case a dead end. Wants its own ticket if the first note ever matters before a charter.
+
+**10. "Charter applied" is inferred from a worker's name, not reported by the API.** (A2, 2026-09-12) `useInterviewState` in `examples/web/src/onboarding.ts` decides an interview is over when `GET /agent/workers` contains a worker named `architect` (`ARCHITECT_WORKER_NAME`). The ticket text sanctioned this and the code documents it, but a charter that sets a custom `architect_name` defeats it and the project stays "in interview" forever. The real fix is an `applied` flag on the charter-current response; out of scope here.
