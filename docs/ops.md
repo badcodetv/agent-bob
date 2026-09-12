@@ -10,13 +10,14 @@ disagree, this file is newer.
 
 > **Status: nothing is built yet.** Every command below is still to be run.
 >
-> ⚠️ **Parts 1.5 and Step 4 and Step 9 are under review (2026-09-12).** Kai has proposed replacing
-> the LVM-thin-snapshot backup design with **Postgres-native backups** (pgBackRest, WAL archiving to
-> GCS, point-in-time recovery), on the grounds that the only local state worth protecting is a
-> Postgres data directory. The evaluation agrees and recommends it: see
-> **`design/2026-09-12-postgres-native-backups.md`**, whose §6 lists exactly what it deletes and
-> whose §7 holds the five decisions it needs. **Do not run Step 4 or Step 9 until that is settled** —
-> Steps 0–3 and 5–8 are unaffected.
+> **Backups changed on 2026-09-12.** The LVM-thin-snapshot design was replaced with
+> **Postgres-native backups**: one Postgres, pgBackRest, write-ahead-log archiving to Google Cloud
+> Storage, point-in-time recovery. Kai's reasoning was that the only local state worth protecting is
+> a Postgres data directory, and the evaluation agreed — the block layering existed *only* to make a
+> live database file-copyable, so removing the database from that problem deleted the thin pool and
+> five bespoke scripts. **§1.5, Step 4, Step 9 and Step 13 are rewritten.** The argument, the
+> version and extension choices, and every configuration number are in
+> **`design/2026-09-12-postgres-native-backups.md`**.
 > Commands on the box run as root (`sudo -i`). Commands marked **💻 laptop** run on your own
 > machine, where `gcloud` is logged in.
 
@@ -32,8 +33,9 @@ Kai made these on 2026-09-11.
 | --- | --- |
 | Where apps run | **One OVH dedicated server, model RISE-L**, in France |
 | How apps run | **One Docker Compose stack per app**, each on its own port, behind **Caddy** for HTTPS |
-| Where backups go | **Google Cloud Storage**, every hour. No second server |
-| How much data we can lose | **At most 1 hour**, the same as GKE today |
+| Where backups go | **Google Cloud Storage**, continuously, via pgBackRest. No second server |
+| How much data we can lose | **At most ~1 minute** (`archive_timeout`), and any moment can be restored to. Better than GKE today |
+| Databases | **One Postgres 18 for every app**, one database and one role each |
 | Bob's address | **`bob.badcode.tv`**. Kai sets the DNS A record |
 | Disk | **~890 GB (mirrored) is enough** |
 | Scope of this first round | **Set up the box and run Agent Bob.** The other GKE apps move later, one at a time |
@@ -77,98 +79,100 @@ a reinstall.
 
 ## 1.5 How the backups work — in plain words
 
-**Every app keeps all of its data in its own "virtual disk". Once an hour, the server takes an
-instant photo of each virtual disk and copies the photo to Google. Only the parts that changed
-are uploaded, and they are encrypted first.** It doesn't matter what's inside, whether Postgres,
-Redis or plain files: the whole disk is photographed. The tool that does this is LVM (Logical
-Volume Manager), standard Linux for 20 years. No ZFS, no Btrfs.
+**Every database change is written twice: once into the database's own files, and once into a
+running log of changes. We keep that log. So the backup is "the database as it was on Sunday, plus
+every change since" — which means we can put it back as it was at any moment, to the second.**
 
-### The layers
+The tool that does this is **pgBackRest**, the standard Postgres backup tool. The changes go to
+Google Cloud Storage, encrypted before they leave the box.
 
-```
- 2 × NVMe disks
-      │  mirrored (RAID1)
-      ▼
- one ~890 GB area handed to LVM
-      ▼
- "thin pool": space handed out in small chunks, on demand
-      ▼
- ┌──────────┬───────────┬──────────┬────────────┐
- │ bob      │ caddy     │ ops      │ docker     │   one virtual disk ("LV") per app
- │ backed up│ backed up │ backed up│ NOT backed │   each mounted at /srv/apps/<app>
- └──────────┴───────────┴──────────┴────────────┘
-```
+> **Why not hourly disk photographs?** That was the plan until 2026-09-12, and it was replaced.
+> Photographing a disk requires layers of block virtualisation — a thin pool, copy-on-write
+> snapshots, a per-app virtual disk — *for one reason only:* you cannot safely file-copy a database
+> that is being written to. Take the database out of the file-copy problem and that whole apparatus
+> has no job left. The reasoning, and the list of what it deleted, is in
+> `design/2026-09-12-postgres-native-backups.md`.
 
-`docker` holds images and caches that can be rebuilt, so it is left out of the backups on
-purpose.
+### The write-ahead log, which is the whole trick
 
-### Why the photo is instant: copy-on-write
+Postgres never writes a change straight into its data files. It writes it first to the
+**write-ahead log**, and applies it to the real files later. That is why Postgres survives a power
+cut: on restart it replays the log.
 
-The thin pool keeps the data in ~64 KB chunks, plus a **map** for each virtual disk ("Bob's
-block 1234 is in chunk 88"). **A snapshot copies the map, not the data**, so it takes
-milliseconds even for a 500 GB disk. After that, a new write goes into a **fresh** chunk and only
-the live disk's map is updated. The snapshot still points at the old chunk.
+Keeping that log instead of discarding it gives us this:
 
 ```
-after snapshot:   bob ──────────► chunk 88      (shared, so it is never overwritten)
-                  bob-snapshot ─► chunk 88
-
-Postgres writes:  bob ──────────► chunk 501     (new data goes into a new chunk)
-                  bob-snapshot ─► chunk 88      (the old moment, untouched)
+ full backup ─────────────────────────────────────────────────▶ time
+ (Sunday 03:30)  ├─ log ─┼─ log ─┼─ log ─┼─ log ─┼─ log ─┤
+                                      ▲
+                    restore the backup, replay the log to HERE
+                    = the database exactly as it was at 14:32:07
 ```
 
-At the instant of the snapshot, LVM pauses writes for a few milliseconds, so nothing is
-half-written. The result is exactly like **pulling the power cord** at that moment. Databases
-are built to recover from that, and it is the same guarantee Google's disk snapshots give us
-today.
+Restoring to a chosen instant is called **point-in-time recovery**. It is the thing that matters
+for the failure we are actually likely to have — not a dead disk, but something writing nonsense
+into a table.
 
-### The hourly job
+### The schedule
 
-1. **Snapshot** each app's disk (instant).
-2. **Mount** the snapshot read-only. It is a frozen picture of, say, 14:05.
-3. **restic** (the backup tool) uploads the changes since last hour to Google, encrypted. The app
-   keeps running the whole time.
-4. **Delete** the snapshot.
+| When | What |
+| --- | --- |
+| **continuously** | each closed log segment is pushed to Google. `archive_timeout = 60s` forces one every minute even on an idle database |
+| **hourly** | an incremental backup (only the blocks that changed) |
+| **daily** | a differential backup (everything changed since the last full) |
+| **weekly** | a full backup, and `pgbackrest verify` on the repository |
+| **weekly** | **a real restore, to a moment between two backups** — step 13 |
+| **nightly** | a small `restic` copy of the things that are not databases: Caddy's certificates, each app's `.env` and compose file |
 
-The history (14 days of hours, then 90 days of days, then a year of months) lives in Google,
-not on the server.
+Retention: four full backups, fourteen days of differentials, and the log needed to reach them.
 
 ### What comes back, and what doesn't
 
 | Thing | After a restore |
 | --- | --- |
-| Postgres (any version, including pgvector and ParadeDB), Redis, SQLite, plain files | **Yes.** Recovers like after a power cut. Condition: the database's files all live on the same virtual disk, which "one disk per app" guarantees |
-| Caddy's certificates | Yes (the `caddy` disk) |
-| Each app's `.env` secrets | Yes (they live on the app's disk; restic encrypts them) |
-| Bob's **archived** sessions | Yes (Bob saves idle sessions to GCS after 30 minutes; the Postgres row pointing at each one is backed up) |
-| Bob's sessions **running at that moment** | Up to 30 minutes of in-container work is lost; the conversation history survives |
-| Elasticsearch (not used by Bob; franchisecloud and nocode later) | **Not supported by Elastic** from a disk snapshot. Those apps need Elastic's own snapshot tool (Part 4) |
+| **Any Postgres database** — including pgvector, PostGIS and full-text indexes | **Yes, to any moment in the retention window.** This is the point |
+| Caddy's certificates | Yes (nightly restic) — and they are re-issuable from Let's Encrypt anyway |
+| Each app's `.env` secrets | Yes (nightly restic, encrypted) — but the password manager is their real home |
+| Bob's **archived** sessions, artifacts, datasets | Yes — they live in Google Cloud Storage already |
+| Bob's sessions **running at that moment** | Up to 30 minutes of in-container work is lost; the conversation history is in Postgres and survives |
+| Docker images and caches | **No, on purpose.** Rebuildable |
+| Redis | **No, on purpose.** Nothing uses it as a system of record |
 
 ### How much it costs, and how long a restore takes
 
-- **Storage in Google:** a few dollars a month for Bob. Only changes are stored, and they're
-  deduplicated.
+- **Storage in Google:** a few dollars a month. Backups are compressed with zstd, deduplicated by
+  block, and the total data is ~24 GB.
 - **Uploading to Google:** free.
-- **Downloading (restoring) from Google:** about **$0.12 per GB**, so 100 GB costs ~$12.
-- **Restore speed:** about **100 GB in 20–35 minutes** over the 1 Gbps link. Step 13 measures the
-  real number.
+- **Downloading (restoring):** about **$0.12 per GB**, so a full 25 GB restore is ~$3.
+- **Restore speed:** `restore --delta` fetches only the blocks that differ, so a rollback is far
+  faster than a first restore. **Step 13 measures the real number.**
 
 ### How sure are we?
 
-- **LVM thin snapshots are mainstream.** They've been in Linux since about 2012. Red Hat supports
-  them, Proxmox (a popular hypervisor) uses them by default for virtual machine disks, and
-  "snapshot, back up the frozen copy, delete the snapshot" is a textbook sysadmin pattern.
-- **restic is widely used**, and it backs up to Google directly.
-- **The unproven part is our own ~25-line script.** That's why step 13 does a real, timed restore
-  before anything important depends on it, and why a restore test runs automatically every week.
+- **pgBackRest is the standard tool**, used in production at large scale, and it backs up to Google
+  Cloud Storage natively.
+- **It verifies itself.** `pgbackrest check` answers "is archiving reaching Google right now?" and
+  `pgbackrest verify` answers "is the repository intact?" — neither requires a full restore. The old
+  plan's weakest sentence was *"the unproven part is our own ~25-line script"*. **There is no longer
+  a bespoke script to be unproven.**
+- **The genuinely unproven part is now our own configuration**, which is why step 13 does a real,
+  timed, point-in-time restore before anything important depends on it, and why that drill runs
+  every week.
 
-### The one danger: the thin pool filling up
+### The one danger: one Postgres means one blast radius
 
-Space is handed out on demand, so the pool can run out. At 100%, **every** app's disk can go
-read-only at once. The guards:
-- an alert at 80% full, checked every 5 minutes;
-- the pool grows itself while spare space remains;
-- the backup script always deletes its snapshots, even after a crash.
+The thin pool filling up and taking every app read-only at once is gone. The risk that replaces it
+is **consolidation**: one memory pool, one write-ahead log, one restart, and four apps behind them.
+
+*A forum reindex evicts the booking system's hot pages. `work_mem` applies per sort operation
+rather than per query, so one runaway agent query can exhaust memory on the machine that processes
+payments.*
+
+The guards are configuration, set on the first day rather than after the first incident: **one
+database and one role per app, with tight query-time and memory limits on the payment path and
+loose ones on the agent** (step 9d), plus pgbouncer pools so no app can eat the whole connection
+budget.
+
 
 ### A cheap second copy: OVH's Backup Agent — priced 2026-09-12, recommend yes
 
@@ -253,12 +257,18 @@ substitute for either of the two above.**
 ## 1.8 Not yet verified
 
 These get checked during setup:
-- **OVH's installer:** that it lets us leave a partition for LVM (step 2).
-- **The "LVM freezes the filesystem" detail:** believed true, but not yet confirmed from a primary
-  source. Step 13's restore test is the proof.
-- **OVH Backup Agent:** its price and availability in Europe.
+- **OVH's installer:** that it gives us a large `/srv` partition on RAID1 (step 2). Simpler than the
+  old requirement, which needed a partition to hand to LVM.
+- **Our pgBackRest configuration**, which is now the only unproven part. Step 13 is the proof, and
+  it runs weekly thereafter.
+- ~~**OVH Backup Agent:** its price and availability in Europe.~~ **Answered 2026-09-12** — £0 agent
+  + £0.0061/GB/month, live on the UK and FR sites. Eco/Rise eligibility is the one open question;
+  check the control panel after delivery.
 - **Google's download price:** check it on the GCP pricing page.
-- **Real restore speed:** measured in step 13.
+- **Real restore speed, and that a point-in-time target is honoured:** measured in step 13.
+- **The tuning figures in step 9b**, which are assembled from several sources rather than quoted
+  from one. Benchmark them.
+- ~~The "LVM freezes the filesystem" detail~~ — **moot.** Nothing depends on it any more.
 
 ---
 
@@ -279,13 +289,14 @@ when** check. Don't move on until it passes.
    public key (`cat ~/.ssh/id_ed25519.pub`).
 3. **healthchecks.io:** sign up (free) and create **five checks**:
 
-   | Check name | Period | Grace |
-   | --- | --- | --- |
-   | box-backup | 1 hour | 30 minutes |
-   | box-prune | 1 day | 2 hours |
-   | box-check | 1 week | 1 day |
-   | box-drill | 1 week | 1 day |
-   | box-pool | 5 minutes | 10 minutes |
+   | Check name | Period | Grace | What it watches |
+   | --- | --- | --- | --- |
+   | pg-incr | 1 hour | 30 minutes | the hourly incremental backup |
+   | pg-diff | 1 day | 2 hours | the daily differential |
+   | pg-full | 1 week | 1 day | the weekly full backup |
+   | pg-check | 6 hours | 1 hour | `pgbackrest check` — is archiving reaching Google? |
+   | pg-drill | 1 week | 1 day | the real timed restore |
+   | box-files | 1 day | 2 hours | the nightly restic copy of config files |
 
    Copy each check's ping URL into the password manager.
 4. **Tailscale:** sign up (the free plan covers two people) and install it on your laptop.
@@ -315,9 +326,9 @@ In the OVH control panel, open the server and choose **Reinstall** (or **Install
 | swap | swap | — | 8 GB |
 | `/srv` | ext4 | RAID1 | **all remaining space** |
 
-`/srv` is a placeholder: step 4 wipes it and hands it to LVM. If the installer offers an **LVM**
-option directly, you can use that instead, but the placeholder route always works. Select your
-SSH key.
+`/srv` is where everything lives: the one Postgres, each app's compose file and `.env`, and
+Docker's image store. **Plain ext4 on RAID1 — no LVM, no thin pool.** Step 4 only creates
+directories in it. Select your SSH key.
 
 ✅ **Done when:** `ssh debian@<IP>` logs you in. (On Debian images OVH's default user is
 `debian`.)
@@ -336,64 +347,40 @@ reboot
 ✅ **Done when:** you can log back in and `cat /proc/mdstat` shows every `md` device as `[UU]`
 (both disks healthy).
 
-## Step 4 — Build the LVM thin pool (20 min)
+## Step 4 — Lay out the disk (5 min)
+
+> **This step used to build an LVM thin pool with a virtual disk per app, so that a live database
+> could be safely snapshotted and file-copied. pgBackRest removes that need** — see
+> `design/2026-09-12-postgres-native-backups.md` §6. What is left is a directory per app.
 
 ```bash
 sudo -i
-findmnt /srv                 # note the device, e.g. /dev/md3 — used below as $DEV
-DEV=/dev/md3                 # ← change if findmnt said something else
-umount /srv
-sed -i '\#[[:space:]]/srv[[:space:]]#d' /etc/fstab   # remove the placeholder's line
-wipefs -a "$DEV"
-
-pvcreate "$DEV"
-vgcreate vg0 "$DEV"
-# Use 90% for the pool; the last 10% is room for the pool to grow itself.
-lvcreate --type thin-pool -l 90%FREE --poolmetadatasize 2G -n pool vg0
+findmnt /srv                 # the installer's partition; keep it, it just needs subdirectories
+mkdir -p /srv/apps/{caddy,postgres,bob,ops}
+mkdir -p /srv/backup/spool   # pgBackRest's async spool (step 9c)
 ```
 
-Let the pool grow itself when it's 70% full. Edit `/etc/lvm/lvm.conf`: find these two lines in
-the `activation { … }` section, uncomment them, and set:
-
-```
-thin_pool_autoextend_threshold = 70
-thin_pool_autoextend_percent = 20
-```
-
-Next, a helper that creates one backed-up disk per app. You'll use it for every new app:
+Docker's image store is the one thing worth putting out of the way, because it is large and
+rebuildable, and on a small root partition it will fill it:
 
 ```bash
-cat > /usr/local/sbin/new-app-volume <<'EOF'
-#!/usr/bin/env bash
-# new-app-volume <app> <size>   e.g.  new-app-volume bob 100G
-# Creates a thin virtual disk for one app, tags it for hourly backup, mounts it at /srv/apps/<app>.
-set -euo pipefail
-app=$1; size=$2
-lvcreate -qq -V "$size" -T vg0/pool -n "$app" --addtag backup
-mkfs.ext4 -q -L "$app" "/dev/vg0/$app"
-mkdir -p "/srv/apps/$app"
-echo "/dev/vg0/$app /srv/apps/$app ext4 defaults,noatime 0 2" >> /etc/fstab
-mount "/srv/apps/$app"
-echo "ready: /srv/apps/$app (backed up hourly)"
-EOF
-chmod +x /usr/local/sbin/new-app-volume
-
-new-app-volume bob 100G
-new-app-volume caddy 2G
-new-app-volume ops 10G
-
-# Docker's own storage: a disk with NO backup tag (images and caches are rebuildable).
-lvcreate -qq -V 300G -T vg0/pool -n docker
-mkfs.ext4 -q -L docker /dev/vg0/docker
-mkdir -p /var/lib/docker
-echo "/dev/vg0/docker /var/lib/docker ext4 defaults,noatime 0 2" >> /etc/fstab
-mount /var/lib/docker
+# If /srv is a separate, large partition (the usual OVH layout), move Docker onto it.
+systemctl is-active --quiet docker && systemctl stop docker
+mkdir -p /srv/docker
+# Point Docker at it via /etc/docker/daemon.json in step 7 ("data-root").
 ```
 
-✅ **Done when:**
-- `lvs vg0` lists `pool`, `bob`, `caddy`, `ops` and `docker`;
-- `lvs -o lv_name,lv_tags vg0` shows `backup` on bob, caddy and ops only;
-- `df -h /srv/apps/bob` shows it mounted.
+✅ **Done when:** `df -h /srv` shows the large partition, and `ls /srv/apps` lists the four
+directories.
+
+**Where state lives now:**
+
+| What | Where | Backed up by |
+| --- | --- | --- |
+| Every app's database | one Postgres, `/srv/apps/postgres/data` | **pgBackRest → GCS, continuously** (step 9) |
+| Caddy's certificates, each app's `.env`, compose files | `/srv/apps/<app>/` | the nightly restic pass (step 9e) |
+| Docker images and caches | `/srv/docker` | **nothing, on purpose** — rebuildable |
+| Bob's session snapshots, artifacts, datasets | Google Cloud Storage | Google |
 
 ## Step 5 — Tailscale and SSH lock-down (15 min)
 
@@ -469,6 +456,7 @@ apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-compos
 
 cat > /etc/docker/daemon.json <<'EOF'
 {
+  "data-root": "/srv/docker",
   "log-driver": "local",
   "log-opts": { "max-size": "10m", "max-file": "3" },
   "live-restore": true,
@@ -480,8 +468,8 @@ usermod -aG docker debian
 docker run --rm hello-world
 ```
 
-✅ **Done when:** `hello-world` prints its message, and `df -h /var/lib/docker` shows the
-`docker` LV, not the root disk.
+✅ **Done when:** `hello-world` prints its message, and `docker info | grep 'Docker Root Dir'`
+shows `/srv/docker`, not the small root disk.
 
 ## Step 8 — Google side: the backup bucket and key (15 min, 💻 laptop)
 
@@ -511,149 +499,291 @@ this one service account.
 ✅ **Done when:** `gcloud storage buckets describe gs://webkit-servers-ovh-backups` shows
 `softDeletePolicy` at 14 days, and the key is in `/tmp` on the box.
 
-## Step 9 — Backups: restic, the scripts and the timers (1–2 h)
+## Step 9 — The one Postgres, and pgBackRest backups (2–3 h)
 
-### 9a. Install restic and set up its settings
+> Rewritten 2026-09-12. The design, the version choice, the extension list and every configuration
+> number below are argued in **`design/2026-09-12-postgres-native-backups.md`** — read §9 before
+> changing any of them. ⚠️ The tuning figures are assembled from several sources rather than quoted
+> from one; they are a sound starting point, not a benchmark result.
+
+### 9a. Build the Postgres image
+
+**PostgreSQL 18** (supported to 2030-11-14). The official image *is* the PostgreSQL project's own
+Debian packages, so this adds extensions without putting anyone else's release cadence between us
+and a security patch.
 
 ```bash
-# The newest restic from its releases page (Debian's package is older and can't self-update)
+mkdir -p /srv/apps/postgres && cd /srv/apps/postgres
+cat > Dockerfile <<'EOF'
+FROM postgres:18-bookworm
+# The PGDG apt repo is already configured in the official image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      postgresql-18-pgvector \
+      postgresql-18-postgis-3 postgresql-18-postgis-3-scripts \
+      postgresql-18-cron \
+      postgresql-18-partman \
+      postgresql-18-pgaudit \
+      postgresql-18-repack \
+      pgbackrest \
+      curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+# Full-text search: ParadeDB's pg_search is the one component not in PGDG (AGPL-3.0).
+# Pin the version; check https://github.com/paradedb/paradedb/releases for the current one.
+ARG PG_SEARCH_VER=0.25.9
+RUN curl -fsSL -o /tmp/pg_search.deb \
+      "https://github.com/paradedb/paradedb/releases/download/v${PG_SEARCH_VER}/postgresql-18-pg-search_${PG_SEARCH_VER}-1PARADEDB-bookworm_amd64.deb" \
+ && apt-get update && apt-get install -y /tmp/pg_search.deb \
+ && rm -f /tmp/pg_search.deb && rm -rf /var/lib/apt/lists/*
+EOF
+```
+
+### 9b. Configuration
+
+```bash
+mkdir -p /srv/apps/postgres/{data,conf,backup-conf}
+cat > /srv/apps/postgres/conf/99-box.conf <<'EOF'
+# ── Memory. 128 GB box. At ~24 GB of total data this caches everything. ──
+shared_buffers = 32GB
+effective_cache_size = 96GB
+work_mem = 32MB                  # PER sort/hash NODE, not per query. See 9d.
+maintenance_work_mem = 2GB
+autovacuum_work_mem = 1GB
+wal_buffers = 64MB
+
+# ── Parallelism. 32 threads, but four tenants need headroom. ──
+max_worker_processes = 32
+max_parallel_workers = 16
+max_parallel_workers_per_gather = 4
+max_parallel_maintenance_workers = 4
+
+# ── Local NVMe, not a spinning disk. ──
+random_page_cost = 1.1
+effective_io_concurrency = 200
+io_method = worker               # PG18. Benchmark io_uring later; liburing IS available.
+io_workers = 8
+huge_pages = on                  # refuses to start without them — see the warning below
+
+# ── Autovacuum ──
+autovacuum_max_workers = 6
+autovacuum_vacuum_cost_limit = 2000
+
+# ── WAL archiving for pgBackRest. archive_timeout is what bounds data loss. ──
+wal_level = replica
+archive_mode = on                # NOT "always" — pgBackRest refuses archive_mode=always
+archive_timeout = 60s            # PG docs: "a minute or so is usually reasonable"
+archive_command = 'pgbackrest --stanza=main archive-push %p'
+max_wal_size = 32GB
+wal_compression = zstd
+summarize_wal = off              # drives pg_basebackup's incremental, which pgBackRest does not use
+
+# ── Extensions needing preload. Adding to this list is a RESTART of every app. ──
+shared_preload_libraries = 'pg_cron,pg_search'
+cron.database_name = 'postgres'  # pg_cron lives in exactly ONE database per cluster
+
+# ── Logging: name the offender before it becomes an incident ──
+log_min_duration_statement = '1s'
+log_temp_files = 0
+log_checkpoints = on
+log_autovacuum_min_duration = '1s'
+EOF
+```
+
+🔴 **`huge_pages = on` means Postgres refuses to start without them.** That is deliberate — it
+fails loudly rather than silently losing the benefit — but it turns *"bumped `shared_buffers`,
+forgot the huge pages"* into a **boot failure on the machine taking bookings.** Never change
+`shared_buffers` without redoing this:
+
+```bash
+docker compose -f /srv/apps/postgres/compose.yml run --rm --entrypoint \
+  postgres postgres -C shared_memory_size_in_huge_pages      # prints the number needed
+# add ~5%, then:
+echo 'vm.nr_hugepages = 16800' > /etc/sysctl.d/60-hugepages.conf   # ← use the real number
+sysctl --system
+echo never > /sys/kernel/mm/transparent_hugepage/enabled           # THP off; make it persistent
+```
+
+Also set the NVMe scheduler to `none` (persist it in a udev rule):
+
+```bash
+for d in /sys/block/nvme*/queue/scheduler; do echo none > "$d"; done
+```
+
+### 9c. pgBackRest → Google Cloud Storage
+
+The bucket and service-account key come from **step 8**. `restic` is no longer the database's
+backup tool, so step 8's bucket is now pgBackRest's repository.
+
+```bash
+install -d -m 700 /etc/pgbackrest
+mv /tmp/ovh-backup-key.json /etc/pgbackrest/gcs-sa.json
+chmod 600 /etc/pgbackrest/gcs-sa.json
+openssl rand -base64 48 > /etc/pgbackrest/repo-passphrase
+chmod 600 /etc/pgbackrest/repo-passphrase
+cat /etc/pgbackrest/repo-passphrase   # ← PASSWORD MANAGER, NOW. Lose it = lose every backup.
+
+cat > /etc/pgbackrest/pgbackrest.conf <<EOF
+[global]
+repo1-type=gcs
+repo1-gcs-bucket=webkit-servers-ovh-backups
+repo1-gcs-key=/etc/pgbackrest/gcs-sa.json
+repo1-path=/pgbackrest
+repo1-cipher-type=aes-256-cbc
+repo1-cipher-pass=$(cat /etc/pgbackrest/repo-passphrase)
+repo1-retention-full=4
+repo1-retention-diff=14
+repo1-bundle=y
+repo1-block=y
+compress-type=zst
+process-max=8
+start-fast=y
+delta=y
+log-level-console=warn
+log-level-file=info
+
+[global:archive-push]
+archive-async=y
+spool-path=/srv/backup/spool
+process-max=4
+
+[main]
+pg1-path=/srv/apps/postgres/data
+EOF
+chmod 600 /etc/pgbackrest/pgbackrest.conf
+```
+
+> ⚠️ **We are not on Google Compute Engine**, so pgBackRest cannot pick up credentials from
+> instance metadata (`repo1-gcs-key-type=auto`). The service-account key must be a file on disk.
+> Treat it as a credential: mode 600, and a copy only in the password manager.
+>
+> **`repo1-cipher-pass` is in a config file.** That is why the file is 600 and why the passphrase
+> is in the password manager. Without it the repository is unreadable — including by us.
+
+Bring Postgres up, then create the repository:
+
+```bash
+cat > /srv/apps/postgres/compose.yml <<'EOF'
+services:
+  postgres:
+    build: .
+    restart: unless-stopped
+    shm_size: 1g
+    command: >
+      postgres -c config_file=/etc/postgresql/postgresql.conf
+    ports: ["127.0.0.1:5432:5432"]
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg-superuser
+    volumes:
+      - /srv/apps/postgres/data:/var/lib/postgresql/data
+      - /srv/apps/postgres/conf:/etc/postgresql/conf.d:ro
+      - /srv/backup/spool:/srv/backup/spool
+      - /etc/pgbackrest:/etc/pgbackrest:ro
+    secrets: [pg-superuser]
+secrets:
+  pg-superuser:
+    file: /srv/apps/postgres/secrets/superuser
+EOF
+mkdir -p /srv/apps/postgres/secrets
+openssl rand -hex 24 > /srv/apps/postgres/secrets/superuser
+chmod 600 /srv/apps/postgres/secrets/superuser   # ← password manager too
+
+cd /srv/apps/postgres && docker compose up -d --build
+docker compose exec -u postgres postgres pgbackrest --stanza=main stanza-create
+docker compose exec -u postgres postgres pgbackrest --stanza=main check
+docker compose exec -u postgres postgres pgbackrest --stanza=main backup --type=full
+docker compose exec -u postgres postgres pgbackrest --stanza=main info
+```
+
+✅ **Done when:** `check` passes (which proves WAL is reaching Google) and `info` lists one full
+backup.
+
+### 9d. One database and one role per app — the guardrails
+
+🔴 **This is the price of one Postgres, and it is paid here.** One memory pool, one WAL, one
+restart. *A forum reindex evicts the booking system's hot pages; `work_mem` applies per sort node
+rather than per query, so one runaway agent query can exhaust memory on the machine that processes
+payments.* Set the limits on day one, not after the first incident.
+
+```sql
+-- Repeat per app. No app gets superuser.
+CREATE ROLE app_booking LOGIN PASSWORD '…';
+CREATE DATABASE booking OWNER app_booking;
+REVOKE CONNECT ON DATABASE booking FROM PUBLIC;     -- apps cannot reach each other's data
+GRANT  CONNECT ON DATABASE booking TO app_booking;
+
+-- Tight for the payment path, loose for the agent. This asymmetry IS the mitigation.
+ALTER ROLE app_booking  SET statement_timeout = '15s';
+ALTER ROLE app_forum    SET statement_timeout = '30s';
+ALTER ROLE app_internal SET statement_timeout = '120s';
+ALTER ROLE app_bob      SET statement_timeout = '300s';
+ALTER ROLE app_booking  SET work_mem = '16MB';
+ALTER ROLE app_internal SET work_mem = '128MB';
+ALTER ROLE app_booking  SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE app_internal SET lock_timeout = '5s';
+```
+
+Then, per database that needs them: `CREATE EXTENSION vector;`, `postgis;`, `pg_partman;`,
+`pg_search;`. Two notes that bite later:
+
+- **`pg_cron` installs in exactly one database per cluster** (`cron.database_name`, set to
+  `postgres` above). Schedule work in other databases with `cron.schedule_in_database()`.
+- **`ALTER EXTENSION … UPDATE` must be run in every database separately.** Easy to miss one.
+
+**Also add pgbouncer** with one pool per database and `max_db_connections` per pool, so no app can
+eat the whole connection budget, plus `reserved_connections` so an operator can always get in while
+something is saturating the server.
+
+### 9e. Config files: a small nightly restic pass
+
+Everything that is not a database is now a handful of near-static files — Caddy's certificates and
+each app's `.env` and compose file. No snapshot is needed, because nothing is writing to them.
+
+```bash
 curl -fsSL https://github.com/restic/restic/releases/download/v0.18.0/restic_0.18.0_linux_amd64.bz2 \
   | bunzip2 > /usr/local/bin/restic && chmod +x /usr/local/bin/restic
-restic self-update               # moves to the latest release
 
-install -d -m 700 /etc/box-backup
-mv /tmp/ovh-backup-key.json /etc/box-backup/ && chmod 600 /etc/box-backup/ovh-backup-key.json
-openssl rand -base64 32 > /etc/box-backup/restic-password && chmod 600 /etc/box-backup/restic-password
-cat /etc/box-backup/restic-password   # ← PUT THIS IN THE PASSWORD MANAGER NOW. Lose it = lose every backup.
+install -d -m 700 /etc/box-files
+cp /etc/pgbackrest/gcs-sa.json /etc/box-files/
+openssl rand -base64 32 > /etc/box-files/restic-password && chmod 600 /etc/box-files/restic-password
+cat /etc/box-files/restic-password   # ← PASSWORD MANAGER
 
-cat > /etc/box-backup.env <<'EOF'
-RESTIC_REPOSITORY=gs:webkit-servers-ovh-backups:/restic
-RESTIC_PASSWORD_FILE=/etc/box-backup/restic-password
+cat > /etc/box-files.env <<'EOF'
+RESTIC_REPOSITORY=gs:webkit-servers-ovh-backups:/files
+RESTIC_PASSWORD_FILE=/etc/box-files/restic-password
 GOOGLE_PROJECT_ID=webkit-servers
-GOOGLE_APPLICATION_CREDENTIALS=/etc/box-backup/ovh-backup-key.json
-HC_BACKUP=https://hc-ping.com/REPLACE-ME
-HC_PRUNE=https://hc-ping.com/REPLACE-ME
-HC_CHECK=https://hc-ping.com/REPLACE-ME
-HC_DRILL=https://hc-ping.com/REPLACE-ME
-HC_POOL=https://hc-ping.com/REPLACE-ME
+GOOGLE_APPLICATION_CREDENTIALS=/etc/box-files/gcs-sa.json
+HC_FILES=https://hc-ping.com/REPLACE-ME
 EOF
-chmod 600 /etc/box-backup.env
-nano /etc/box-backup.env         # paste the five ping URLs from step 0
-
-set -a; . /etc/box-backup.env; set +a
-restic init
+chmod 600 /etc/box-files.env
+set -a; . /etc/box-files.env; set +a; restic init
 ```
 
-### 9b. The five scripts
-
 ```bash
-cat > /usr/local/sbin/box-backup <<'EOF'
+cat > /usr/local/sbin/box-files <<'EOF'
 #!/usr/bin/env bash
-# HOURLY. For every LV tagged "backup": thin snapshot → mount read-only → restic → GCS → remove snapshot.
+# NIGHTLY. Config files, secrets and compose files only. Databases are pgBackRest's job.
 set -euo pipefail
-set -a; . /etc/box-backup.env; set +a
-exec 9>/run/box-backup.lock
-flock -w 3000 9 || { curl -fsS -m 10 "$HC_BACKUP/fail" >/dev/null || true; exit 1; }
-
-snapshots() { lvs --noheadings -o lv_name vg0 | awk '/-snap-/ {print $1}'; }
-cleanup() {
-  for m in /mnt/snap/*/; do
-    if mountpoint -q "$m"; then umount "$m"; fi
-  done
-  for s in $(snapshots); do lvremove -qy "vg0/$s"; done
-}
-trap cleanup EXIT
-trap 'curl -fsS -m 10 "$HC_BACKUP/fail" >/dev/null || true' ERR
-
-curl -fsS -m 10 "$HC_BACKUP/start" >/dev/null || true
-cleanup                                # a crashed earlier run must never leave a snapshot behind
-stamp=$(date -u +%Y%m%dT%H%M)
-for lv in $(lvs --noheadings -o lv_name @backup | awk '!/-snap-/ {print $1}'); do
-  snap="${lv}-snap-${stamp}"
-  lvcreate -qq --snapshot --setactivationskip n --name "$snap" "vg0/$lv"   # instant; LVM freezes the fs for the moment
-  mkdir -p "/mnt/snap/$lv"
-  mount -o ro,noload "/dev/vg0/$snap" "/mnt/snap/$lv"
-  restic backup --quiet --host box1 --tag "app=$lv" "/mnt/snap/$lv"
-done
-curl -fsS -m 10 "$HC_BACKUP" >/dev/null
+set -a; . /etc/box-files.env; set +a
+trap 'curl -fsS -m 10 "$HC_FILES/fail" >/dev/null || true' ERR
+restic backup --quiet --host box1 \
+  --exclude /srv/apps/postgres/data \
+  --exclude /srv/apps/bob/pg-data \
+  /srv/apps /etc/pgbackrest /etc/box-files.env
+restic forget --quiet --keep-daily 30 --keep-monthly 12 --prune
+curl -fsS -m 10 "$HC_FILES" >/dev/null
 EOF
-
-cat > /usr/local/sbin/box-prune <<'EOF'
-#!/usr/bin/env bash
-# DAILY. Keep 14 days of hourly, 90 days of daily, 1 year of monthly; delete the rest.
-set -euo pipefail
-set -a; . /etc/box-backup.env; set +a
-exec 9>/run/box-backup.lock; flock -w 3000 9
-trap 'curl -fsS -m 10 "$HC_PRUNE/fail" >/dev/null || true' ERR
-restic forget --quiet --keep-within-hourly 14d --keep-within-daily 90d --keep-within-monthly 1y --prune
-curl -fsS -m 10 "$HC_PRUNE" >/dev/null
-EOF
-
-cat > /usr/local/sbin/box-check <<'EOF'
-#!/usr/bin/env bash
-# WEEKLY. Re-reads 5% of the backup data from Google to catch damage early.
-set -euo pipefail
-set -a; . /etc/box-backup.env; set +a
-exec 9>/run/box-backup.lock; flock -w 3000 9
-trap 'curl -fsS -m 10 "$HC_CHECK/fail" >/dev/null || true' ERR
-restic check --read-data-subset=5%
-curl -fsS -m 10 "$HC_CHECK" >/dev/null
-EOF
-
-cat > /usr/local/sbin/box-pool-check <<'EOF'
-#!/usr/bin/env bash
-# EVERY 5 MIN. Alerts when the thin pool is 80% full (data or metadata). Full = every app read-only.
-set -euo pipefail
-set -a; . /etc/box-backup.env; set +a
-read -r data meta < <(lvs --noheadings -o data_percent,metadata_percent vg0/pool)
-if awk -v d="$data" -v m="$meta" 'BEGIN { exit !(d < 80 && m < 80) }'; then
-  curl -fsS -m 10 "$HC_POOL" >/dev/null
-else
-  curl -fsS -m 10 --data-raw "thin pool data ${data}% metadata ${meta}%" "$HC_POOL/fail" >/dev/null
-fi
-EOF
-
-cat > /usr/local/sbin/box-drill <<'EOF'
-#!/usr/bin/env bash
-# WEEKLY. Proves Bob's newest backup really comes back: restore it into a scratch disk,
-# start Postgres on it, count the sessions, report the time taken, clean up.
-set -euo pipefail
-set -a; . /etc/box-backup.env; set +a
-exec 9>/run/box-backup.lock; flock -w 3000 9
-trap 'curl -fsS -m 10 "$HC_DRILL/fail" >/dev/null || true' ERR
-cleanup() {
-  docker rm -f drill-pg >/dev/null 2>&1 || true
-  if mountpoint -q /mnt/drill; then umount /mnt/drill; fi
-  if lvs vg0/drill >/dev/null 2>&1; then lvremove -qy vg0/drill; fi
-}
-trap cleanup EXIT
-cleanup
-lvcreate -qq -V 150G -T vg0/pool -n drill
-mkfs.ext4 -q /dev/vg0/drill
-mkdir -p /mnt/drill && mount /dev/vg0/drill /mnt/drill
-start=$(date +%s)
-restic restore --quiet latest --tag app=bob --target /mnt/drill
-secs=$(( $(date +%s) - start ))
-docker run -d --name drill-pg -v /mnt/drill/mnt/snap/bob/pg-data:/var/lib/postgresql/data \
-  pgvector/pgvector:pg16 >/dev/null
-for _ in $(seq 60); do docker exec drill-pg pg_isready -q -U agentbob && break; sleep 2; done
-rows=$(docker exec drill-pg psql -U agentbob -d agentbob -Atc 'select count(*) from agent_sessions')
-curl -fsS -m 10 --data-raw "restored bob in ${secs}s; agent_sessions=${rows}" "$HC_DRILL" >/dev/null
-EOF
-
-chmod +x /usr/local/sbin/box-*
+chmod +x /usr/local/sbin/box-files
 ```
 
-### 9c. The timers (so the scripts run by themselves)
+### 9f. The timers
 
 ```bash
-timer() {   # timer <name> <when, systemd OnCalendar format>
+timer() {   # timer <name> <OnCalendar> <command…>
   cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]
 Description=$1
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/$1
+ExecStart=$3
 EOF
   cat > "/etc/systemd/system/$1.timer" <<EOF
 [Unit]
@@ -661,36 +791,44 @@ Description=$1 schedule
 [Timer]
 OnCalendar=$2
 Persistent=true
+RandomizedDelaySec=60
 [Install]
 WantedBy=timers.target
 EOF
 }
-timer box-backup     '*-*-* *:05:00'       # every hour at :05
-timer box-prune      '*-*-* 03:30:00'      # daily
-timer box-check      'Sun *-*-* 04:30:00'  # weekly
-timer box-drill      'Sun *-*-* 05:30:00'  # weekly (not until Bob exists — step 13)
-timer box-pool-check '*:0/5'               # every 5 minutes
+PGB="/usr/local/sbin/pgb"
+cat > "$PGB" <<'EOF'
+#!/usr/bin/env bash
+# pgb <hc-url> <pgbackrest args…>   — run a pgBackRest command and report to healthchecks.io
+set -euo pipefail
+hc=$1; shift
+trap 'curl -fsS -m 10 "$hc/fail" >/dev/null || true' ERR
+curl -fsS -m 10 "$hc/start" >/dev/null || true
+docker compose -f /srv/apps/postgres/compose.yml exec -T -u postgres postgres \
+  pgbackrest --stanza=main "$@"
+curl -fsS -m 10 "$hc" >/dev/null
+EOF
+chmod +x "$PGB"
+
+timer pg-incr  '*-*-* *:10:00'      "$PGB https://hc-ping.com/PG-INCR  backup --type=incr"
+timer pg-diff  '*-*-* 02:30:00'     "$PGB https://hc-ping.com/PG-DIFF  backup --type=diff"
+timer pg-full  'Sun *-*-* 03:30:00' "$PGB https://hc-ping.com/PG-FULL  backup --type=full"
+timer pg-check '*-*-* 00/6:45:00'   "$PGB https://hc-ping.com/PG-CHECK check"
+timer box-files '*-*-* 04:30:00'    "/usr/local/sbin/box-files"
 systemctl daemon-reload
-systemctl enable --now box-backup.timer box-prune.timer box-check.timer box-pool-check.timer
-systemctl list-timers 'box-*'
+systemctl enable --now pg-incr.timer pg-diff.timer pg-full.timer pg-check.timer box-files.timer
+systemctl list-timers 'pg-*' 'box-*'
 ```
 
-### 9d. Test it by hand
-
-```bash
-echo "hello from $(date)" > /srv/apps/ops/test.txt
-/usr/local/sbin/box-backup
-restic snapshots                          # three snapshots: app=bob, app=caddy, app=ops
-rm /srv/apps/ops/test.txt
-restic restore latest --tag app=ops --target /tmp/r --include /mnt/snap/ops/test.txt
-cat /tmp/r/mnt/snap/ops/test.txt          # the file is back
-lvs vg0                                    # no *-snap-* left over
-```
+Paste the real ping URLs from step 0 in place of the placeholders.
 
 ✅ **Done when:**
-- the file comes back;
-- no `-snap-` volumes are left;
-- healthchecks.io shows **box-backup** and **box-pool** green.
+- `systemctl list-timers` lists all five with a next run;
+- `pgbackrest --stanza=main info` shows a full plus at least one incremental;
+- healthchecks.io shows **pg-incr**, **pg-check** and **box-files** green.
+
+**Worst-case data loss is now `archive_timeout`, about 60 seconds** — down from an hour — and any
+moment in the retention window can be restored to, which a block snapshot could not do at all.
 
 ## Step 10 — Caddy (20 min)
 
@@ -738,7 +876,19 @@ It can't get Bob's certificate until the DNS record exists (step 12).
 ```bash
 cd /srv/apps/bob
 git clone https://github.com/badcodetv/agent-bob.git src
-mkdir -p pg-data agentd-data secrets
+mkdir -p agentd-data secrets
+```
+
+Create Bob's database and role in the one Postgres (step 9d's pattern):
+
+```sql
+CREATE ROLE app_bob LOGIN PASSWORD '…';           -- password manager
+CREATE DATABASE bob OWNER app_bob;
+REVOKE CONNECT ON DATABASE bob FROM PUBLIC;
+GRANT  CONNECT ON DATABASE bob TO app_bob;
+ALTER ROLE app_bob SET statement_timeout = '300s'; -- loose: agent work is slow by nature
+\c bob
+CREATE EXTENSION IF NOT EXISTS vector;             -- agentdb's migrations expect pgvector
 ```
 
 ### 11b. Bob's Google key
@@ -760,26 +910,52 @@ mv /tmp/gcp-key.json /srv/apps/bob/secrets/ && chmod 600 /srv/apps/bob/secrets/g
 
 ### 11c. The OVH layer on top of Bob's normal compose file
 
+> 🔴 **One decision to make here, and now is the cheapest it will ever be.** Bob's own
+> `docker-compose.yml` ships a bundled Postgres (`pgvector/pgvector:pg16`) and hardcodes
+> `DATABASE_URL` at `docker-compose.yml:96` to point at it. "One Postgres" says Bob should use the
+> box's Postgres 18 instead.
+>
+> **Recommended: point Bob at the box's Postgres.** A fresh Bob on a new box **has no data**, so the
+> PG16 → PG18 move costs nothing today; in six months it means migrating live sessions. It also puts
+> Bob's conversations under pgBackRest from the first message rather than leaving a second,
+> separately-handled database on the box. The risk is that `agentdb`'s migrations must run clean on
+> PG18 — testable locally before the box exists, and worth doing first.
+>
+> The alternative (keep Bob's bundled PG16 for round one) is lower risk on day one and higher cost
+> later, and it means pgBackRest needs a second stanza or Bob's database is unbacked.
+>
+> The block below takes the recommended route. To keep the bundled Postgres instead, drop the
+> `postgres` override and the `DATABASE_URL` line.
+
 ```bash
 cat > /srv/apps/bob/compose.ovh.yml <<'EOF'
-# Layered on top of src/docker-compose.yml. Puts Bob's data on the backed-up disk,
-# caps Docker-in-Docker so it can't starve other apps, and mounts the Google key.
+# Layered on top of src/docker-compose.yml:
+#  - points Bob at the box's one Postgres and disables its bundled one
+#  - caps Docker-in-Docker so it cannot starve other apps
+#  - mounts the Google key and the project map
 services:
-  dind:
-    cpus: 24
-    mem_limit: 96g
+  postgres:
+    # Bob's bundled Postgres is not used; the box's one Postgres is. `scale: 0` keeps the
+    # service defined (so healthcheck references resolve) without running it.
+    deploy:
+      replicas: 0
   agentd:
+    environment:
+      # host.docker.internal resolves to the box; Postgres listens on 127.0.0.1:5432 only.
+      DATABASE_URL: postgres://app_bob:PASSWORD@host.docker.internal:5432/bob?sslmode=disable
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /srv/apps/bob/secrets/gcp-key.json:/gcp/key.json:ro
       - /srv/apps/bob/secrets/projects.json:/secrets/projects.json:ro
+  dind:
+    cpus: 24
+    mem_limit: 96g
 volumes:
-  pg-data:
-    driver: local
-    driver_opts: { type: none, o: bind, device: /srv/apps/bob/pg-data }
   agentd-data:
     driver: local
     driver_opts: { type: none, o: bind, device: /srv/apps/bob/agentd-data }
-  # dind-data stays a normal Docker volume on the un-backed-up docker disk (rebuildable cache).
+  # dind-data stays a normal Docker volume in /srv/docker (rebuildable image cache).
 EOF
 
 cat > /srv/apps/bob/up.sh <<'EOF'
@@ -886,15 +1062,15 @@ one: `docker compose --project-directory /srv/apps/bob/src -f /srv/apps/bob/src/
 docker compose --project-directory /srv/apps/bob/src -f /srv/apps/bob/src/docker-compose.yml \
   -f /srv/apps/bob/compose.ovh.yml ps
 curl -sI http://127.0.0.1:8100 | head -1      # HTTP/1.1 200 OK
-ls /srv/apps/bob/pg-data | head -3            # Postgres files are on the backed-up disk
+docker compose exec -T -u postgres postgres psql -d bob -c '\dt' | head   # agentd's tables exist
 ```
 
 The first start takes a few minutes: it builds the images and the sandbox.
 
 ✅ **Done when:**
 - `curl` returns `200`;
-- `/srv/apps/bob/pg-data` holds Postgres files;
-- `ss -tlnp` shows nothing but `127.0.0.1` for ports 8100 and up.
+- Bob's tables exist in the `bob` database on the box's Postgres, so pgBackRest already covers them;
+- `ss -tlnp` shows nothing but `127.0.0.1` for ports 8100 and up **and for 5432**.
 
 ## Step 12 — DNS and your manual test (15 min)
 
@@ -908,40 +1084,82 @@ The first start takes a few minutes: it builds the images and the sandbox.
 
 ## Step 13 — The first real restore test (30 min)
 
+**This is the only reason to believe any of the above.** It proves two different things: that a
+backup comes back, and — new with WAL archiving — that it comes back **to a chosen moment**, which
+is the test that the WAL chain is unbroken.
+
 ```bash
-/usr/local/sbin/box-backup          # back up Bob now that it has real data
-/usr/local/sbin/box-drill           # restore it into a scratch disk and start Postgres on it
-systemctl enable --now box-drill.timer
+cd /srv/apps/postgres
+PGB="docker compose exec -T -u postgres postgres pgbackrest --stanza=main"
+
+# 1. Is archiving actually reaching Google, right now?
+$PGB check
+
+# 2. Is the repository internally consistent?
+$PGB verify
+
+# 3. Write a marker, note the time, then write another.
+docker compose exec -T -u postgres postgres psql -c \
+  "CREATE TABLE IF NOT EXISTS drill(t timestamptz default now(), note text);
+   INSERT INTO drill(note) VALUES ('before');"
+sleep 5; TARGET=$(date -u +'%Y-%m-%d %H:%M:%S')+00 ; sleep 5
+docker compose exec -T -u postgres postgres psql -c "INSERT INTO drill(note) VALUES ('after');"
+$PGB backup --type=incr
+
+# 4. Restore to the moment BETWEEN them, into a scratch directory, and time it.
+mkdir -p /srv/drill && chown 999:999 /srv/drill
+start=$(date +%s)
+$PGB restore --delta --target-action=promote \
+    --type=time --target="$TARGET" --pg1-path=/srv/drill
+echo "restore took $(( $(date +%s) - start ))s"
 ```
 
-Check healthchecks.io: **box-drill** shows a message like
-`restored bob in 94s; agent_sessions=3`. Write the real time here:
+Then start a throwaway Postgres on `/srv/drill`, let it finish recovery, and check:
+
+```sql
+SELECT note FROM drill;      -- must show 'before' and NOT 'after'
+```
+
+`before` present and `after` absent is the proof. If `after` is there, the point-in-time target was
+not honoured; if neither is there, the WAL chain is broken. **Either is a stop-everything finding.**
+
+```bash
+systemctl enable --now pg-drill.timer     # weekly, from step 9f's pattern
+rm -rf /srv/drill
+```
+
+Write the real number here:
 
 > **Measured restore time:** _____ seconds for _____ GB (date: ______)
+>
+> **Point-in-time target honoured:** yes / no (date: ______)
 
-✅ **Done when:** box-drill is green, and the number above is filled in.
+✅ **Done when:** both lines above are filled in and **pg-drill** is green on healthchecks.io.
 **The box is now live, and its backups are proven.**
-
----
 
 # Part 3 — Everyday operations
 
 ## Add a new app (15 minutes)
 
-1. **Pick a port** from the table in 1.6 and add the app to the table.
-2. **Make its disk:** `new-app-volume <app> 50G`. It's backed up hourly from now on, with nothing
-   else to set up.
+1. **Pick a port** from the table in 1.6 and add the app to that table.
+2. **Make its database and role** in the one Postgres, with its own limits (step 9d). Tight
+   `statement_timeout` and `work_mem` unless it genuinely needs more.
 3. **Put the app at `/srv/apps/<app>/`**, with a compose file following three rules:
-   - data only in **bind mounts** under `/srv/apps/<app>/…`, **never** named Docker volumes
-     (those land on the unbacked disk);
-   - ports only as `"127.0.0.1:<port>:<container-port>"`;
-   - `restart: unless-stopped`, plus `cpus:` and `mem_limit:` for anything heavy.
+   - data only in **bind mounts** under `/srv/apps/<app>/…`, never named Docker volumes
+     (those land in `/srv/docker`, which is not backed up);
+   - **no local database.** It uses the one Postgres at `127.0.0.1:5432`. If it insists on its own
+     datastore, that is migration work — see `design/2026-09-12-postgres-native-backups.md` §3;
+   - ports only as `"127.0.0.1:<port>:<container-port>"`, plus `restart: unless-stopped` and
+     `cpus:`/`mem_limit:` for anything heavy.
 4. **Secrets** go in `/srv/apps/<app>/.env` (mode 600), and in the password manager.
 5. **Caddy:** add a site block (`app.example.com { reverse_proxy 127.0.0.1:<port> }`) and reload.
-6. **DNS:** point the hostname's A record at the box.
+6. **DNS:** point the hostname's A record at the box, **last**, once the app answers on the box.
 
-**Before the first app with customer data:** Bob's Docker-in-Docker must stop being
-`privileged` (1.7).
+Nothing else to set up: the database is already backed up continuously, and `/srv/apps/<app>/`'s
+config files are in the nightly restic pass.
+
+**Before the first app with customer data:** Bob's Docker-in-Docker must stop being `privileged`
+(1.7).
 
 ## Update Bob
 
@@ -949,37 +1167,49 @@ Check healthchecks.io: **box-drill** shows a message like
 cd /srv/apps/bob/src && git pull && /srv/apps/bob/up.sh
 ```
 
-## Undo a mistake in one app (roll back to an earlier hour)
+## Undo a mistake — roll a database back to a chosen moment
+
+This is the thing the old design could not do. You do not need a backup from the right hour; you
+name the moment.
 
 ```bash
-set -a; . /etc/box-backup.env; set +a
-restic snapshots --tag app=bob                      # pick a snapshot ID from the time you want
-cd /srv/apps/bob && docker compose --project-directory src -f src/docker-compose.yml -f compose.ovh.yml down
-mkdir -p /srv/restore && restic restore <ID> --target /srv/restore
-# Look at /srv/restore/mnt/snap/bob, then swap the folders you need, for example:
-mv /srv/apps/bob/pg-data /srv/apps/bob/pg-data.broken
-cp -a /srv/restore/mnt/snap/bob/pg-data /srv/apps/bob/pg-data
-/srv/apps/bob/up.sh
+cd /srv/apps/postgres
+PGB="docker compose exec -T -u postgres postgres pgbackrest --stanza=main"
+$PGB info                                   # what is available, and how far back
+
+# Safest: restore a COPY alongside, look at it, then swap. Never restore over the only copy.
+mkdir -p /srv/restore && chown 999:999 /srv/restore
+$PGB restore --delta --type=time --target='2026-09-12 14:32:07+00' \
+      --target-action=promote --pg1-path=/srv/restore
 ```
 
-Delete `pg-data.broken` and `/srv/restore` once you're happy.
+Start a throwaway Postgres on `/srv/restore`, check the data is what you expected, then move the
+rows or the whole database across. Delete `/srv/restore` when you are happy.
+
+To roll the **live** database back instead, stop every app first, then restore over
+`/srv/apps/postgres/data` with the same command. **Take a fresh `backup --type=incr` before you do
+it**, so the current state is still recoverable if the target moment turns out to be wrong.
 
 ## The whole box died
 
-Target: **under 2 hours for Bob.**
+Target: **under 2 hours.**
 
 1. Order a new RISE-L (step 1).
-2. Do steps 2–7, then the restic install and settings in 9a, with **`restic init` skipped**. The
-   repository already exists; paste the restic password and the backup key from the password
-   manager. Recreate the `bob`, `caddy` and `ops` disks with `new-app-volume`.
-3. Restore each app's disk:
+2. Do steps 2–8, then install pgBackRest's config from the password manager — the repository
+   already exists, so **skip `stanza-create`**. You need the repository passphrase and the Google
+   service-account key; without the passphrase the backups are unreadable.
+3. Restore the databases:
    ```bash
-   restic restore latest --tag app=bob --target /tmp/r && cp -a /tmp/r/mnt/snap/bob/. /srv/apps/bob/
-   restic restore latest --tag app=caddy --target /tmp/r && cp -a /tmp/r/mnt/snap/caddy/. /srv/apps/caddy/
+   pgbackrest --stanza=main restore --pg1-path=/srv/apps/postgres/data
    ```
-4. Do step 9b–c (scripts and timers). Start Caddy (`docker compose up -d` in `/srv/apps/caddy`),
-   then run `/srv/apps/bob/up.sh`.
-5. Change the DNS A record to the new IP.
+   Then start Postgres and let it finish recovery.
+4. Restore the config files:
+   ```bash
+   set -a; . /etc/box-files.env; set +a
+   restic restore latest --target / --include /srv/apps
+   ```
+5. Start Caddy, then `/srv/apps/bob/up.sh`.
+6. Change the DNS A records to the new IP.
 
 **Before the booking system moves in**, rehearse this once on a second RISE-L rented for a day.
 
@@ -987,26 +1217,42 @@ Target: **under 2 hours for Bob.**
 
 | What | Where |
 | --- | --- |
-| Each app's everything (data, compose files, `.env`) | `/srv/apps/<app>/`, one virtual disk each, backed up hourly |
-| Docker images and caches | `/var/lib/docker`, **not** backed up (rebuildable) |
-| Backup settings and keys | `/etc/box-backup.env`, `/etc/box-backup/` |
-| Backup scripts | `/usr/local/sbin/box-*`, `new-app-volume` |
-| Schedules | `systemctl list-timers 'box-*'` |
-| Backups | `gs://webkit-servers-ovh-backups/restic` (encrypted) |
+| Every app's data | **one Postgres**, `/srv/apps/postgres/data` |
+| Each app's compose file, `.env`, and any files it owns | `/srv/apps/<app>/` |
+| Docker images and caches | `/srv/docker`, **not** backed up (rebuildable) |
+| pgBackRest config, repo passphrase, Google key | `/etc/pgbackrest/` (mode 600) |
+| The nightly file pass's config | `/etc/box-files.env`, `/etc/box-files/` |
+| Schedules | `systemctl list-timers 'pg-*' 'box-*'` |
+| Database backups | `gs://webkit-servers-ovh-backups/pgbackrest` (compressed, encrypted) |
+| Config-file backups | `gs://webkit-servers-ovh-backups/files` (encrypted) |
+| Bob's session snapshots, artifacts, datasets | `gs://webkit-servers-agent-bob`, and Artifact Registry |
 | Secrets, off the box | the "OVH box" password-manager entry |
+
+🔴 **Two things in the password manager are unrecoverable if lost:** the pgBackRest repository
+passphrase, and the restic password. Neither can be regenerated. Without them every backup is
+permanently unreadable.
 
 ## Health at a glance
 
 ```bash
-systemctl list-timers 'box-*'                 # when each job last ran and runs next
-lvs -o lv_name,data_percent,metadata_percent vg0/pool   # stay under 80%
+systemctl list-timers 'pg-*' 'box-*'          # when each job last ran and runs next
+cd /srv/apps/postgres && docker compose exec -T -u postgres postgres \
+  pgbackrest --stanza=main info               # backups available, and how far back
+docker compose exec -T -u postgres postgres \
+  pgbackrest --stanza=main check              # is WAL reaching Google right now?
 cat /proc/mdstat                              # both disks [UU]
-set -a; . /etc/box-backup.env; set +a; restic snapshots --latest 1
+df -h /srv /srv/docker                        # disk headroom
+docker compose exec -T postgres psql -U postgres -c \
+  "SELECT datname, pg_size_pretty(pg_database_size(datname)) FROM pg_database ORDER BY 2 DESC;"
 ```
 
-**Built since:** `deploy/ovh/bootstrap.sh` + `deploy/ovh/new-app-volume` in this repo cover
-Steps 3–7. **Still not built:** the `box-*` backup scripts as repo files (Step 9 is still
-copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
+If `pg-check` is green on healthchecks.io, archiving is working. If `pg-drill` is green, a restore
+has actually been performed this week.
+
+
+**Built since:** `deploy/ovh/bootstrap.sh` in this repo covers Steps 3–7. **Still not built:** the
+Postgres and pgBackRest setup as repo files (Step 9 is still copy-paste), Uptime Kuma, pgbouncer,
+and OVH's Backup Agent switched on as a second copy (priced and recommended in 1.5).
 
 ---
 
@@ -1076,8 +1322,17 @@ copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
   - [OVH disk replacement](https://docs.ovhcloud.com/en/guides/bare-metal-cloud/dedicated-servers/disk-replacement)
   - [OVH Backup Agent](https://corporate.ovhcloud.com/en/newsroom/news/ovhcloud-backup-agent/)
   - [Backup Agent docs](https://docs.ovhcloud.com/en/guides/storage-and-backup/backup-agent/product-presentation)
-- **LVM, restic and Caddy:**
-  - [lvmthin(7)](https://man7.org/linux/man-pages/man7/lvmthin.7.html)
+- **Postgres and pgBackRest:**
+  - [pgBackRest user guide](https://pgbackrest.org/user-guide.html)
+  - [pgBackRest configuration reference](https://pgbackrest.org/configuration.html)
+  - [PostgreSQL continuous archiving and PITR](https://www.postgresql.org/docs/18/continuous-archiving.html)
+  - [PostgreSQL WAL configuration](https://www.postgresql.org/docs/18/runtime-config-wal.html)
+  - [PostgreSQL versioning policy](https://www.postgresql.org/support/versioning/)
+  - [PostgreSQL wiki: tuning your server](https://wiki.postgresql.org/wiki/Tuning_Your_PostgreSQL_Server)
+  - [PGDG apt repository](https://wiki.postgresql.org/wiki/Apt)
+  - [pgvector](https://github.com/pgvector/pgvector) · [PostGIS](https://postgis.net/) · [pg_partman](https://github.com/pgpartman/pg_partman) · [pg_cron](https://github.com/citusdata/pg_cron)
+  - [ParadeDB pg_search](https://github.com/paradedb/paradedb) (AGPL-3.0)
+- **restic and Caddy:**
   - [restic with Google Cloud Storage](https://restic.readthedocs.io/en/stable/030_preparing_a_new_repo.html#google-cloud-storage)
   - [restic forget policies](https://restic.readthedocs.io/en/stable/060_forget.html)
   - [Caddy reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)

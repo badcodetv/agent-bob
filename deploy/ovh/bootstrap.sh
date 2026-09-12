@@ -3,15 +3,18 @@
 # bootstrap.sh — build a fresh OVH box up to the point where Caddy and Bob can be started.
 # This is the executable form of docs/ops.md Steps 3-7. The doc explains WHY; this runs it.
 #
-#   scp -r deploy/ovh debian@<ip>:/tmp/ && ssh debian@<ip>
+#   scp deploy/ovh/bootstrap.sh debian@<ip>:/tmp/ && ssh debian@<ip>
 #   sudo -i
 #   /tmp/ovh/bootstrap.sh base       # Step 3  — packages, unattended-upgrades, hostname   (~10 min, reboots)
-#   /tmp/ovh/bootstrap.sh lvm        # Step 4  — thin pool + the bob/caddy/ops/docker LVs  (~5 min)
+#   /tmp/ovh/bootstrap.sh disk       # Step 4  — /srv/apps/* + the pgBackRest spool dir     (~1 min)
 #   /tmp/ovh/bootstrap.sh tailscale  # Step 5a — install + `tailscale up` (prints a link)  (~3 min)
 #   ### now prove `ssh debian@<tailscale-ip>` works from a NEW terminal on your laptop ###
 #   /tmp/ovh/bootstrap.sh lockdown --i-can-ssh-over-tailscale   # Step 5b + 6 — SSH keys only, nftables
 #   /tmp/ovh/bootstrap.sh docker     # Step 7  — Docker CE onto the un-backed-up LV        (~5 min)
 #   /tmp/ovh/bootstrap.sh verify     # re-checks every "Done when" in one go
+#
+# Steps 8-13 (the GCS bucket, the one Postgres, pgBackRest, Caddy, Bob, DNS, the restore
+# drill) are NOT in here yet — follow docs/ops.md for those.
 #
 # Every phase is idempotent: re-running one is safe.
 #
@@ -22,7 +25,6 @@ note() { echo; echo "== $*"; }
 ok()   { echo "   ok: $*"; }
 
 [[ $EUID -eq 0 ]] || die "run as root (sudo -i)"
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # ---------------------------------------------------------------- Step 3: base
 phase_base() {
@@ -50,59 +52,27 @@ EOF
   echo ">>> REBOOT NOW:  reboot     then run:  bootstrap.sh lvm"
 }
 
-# ------------------------------------------------------------- Step 4: LVM pool
-phase_lvm() {
-  note "Step 4 — LVM thin pool"
+# ------------------------------------------------------ Step 4: lay out /srv
+# Was an LVM thin pool with one virtual disk per app, which existed only so a live
+# database could be snapshotted and file-copied. pgBackRest removed that need
+# (design/2026-09-12-postgres-native-backups.md §6), so this is now directories.
+phase_lvm() { phase_disk "$@"; }        # old name kept so stale notes still work
+phase_disk() {
+  note "Step 4 — lay out /srv"
 
-  if vgs vg0 >/dev/null 2>&1; then
-    ok "vg0 already exists, skipping pool creation"
-  else
-    local dev
-    dev=$(findmnt -no SOURCE /srv 2>/dev/null || true)
-    [[ -n "$dev" ]] || die "/srv is not mounted. Expected the OVH installer's placeholder partition.
-       If you used the installer's own LVM option instead, create vg0 + vg0/pool by hand, then re-run."
-    echo "   /srv is on $dev — this will be WIPED and handed to LVM."
-    read -rp "   type the device path again to confirm: " confirm
-    [[ "$confirm" == "$dev" ]] || die "mismatch, aborting"
+  findmnt /srv >/dev/null 2>&1 \
+    || die "/srv is not mounted. Expected the OVH installer to give it the remaining space.
+       Re-check step 2's partitioning before continuing."
 
-    umount /srv
-    sed -i '\#[[:space:]]/srv[[:space:]]#d' /etc/fstab
-    wipefs -a "$dev"
-    pvcreate "$dev"
-    vgcreate vg0 "$dev"
-    lvcreate --type thin-pool -l 90%FREE --poolmetadatasize 2G -n pool vg0
-    ok "vg0/pool created on $dev"
-  fi
+  mkdir -p /srv/apps/caddy /srv/apps/postgres /srv/apps/bob /srv/apps/ops
+  mkdir -p /srv/backup/spool          # pgBackRest's async archive-push spool
+  mkdir -p /srv/docker                # Docker's data-root; set in daemon.json (phase docker)
+  ok "/srv/apps/{caddy,postgres,bob,ops}, /srv/backup/spool, /srv/docker"
 
-  # Let the pool grow itself at 70% full, while the spare 10% of the VG lasts.
-  sed -i -E 's/^[[:space:]]*#?[[:space:]]*thin_pool_autoextend_threshold = .*/\tthin_pool_autoextend_threshold = 70/' /etc/lvm/lvm.conf
-  sed -i -E 's/^[[:space:]]*#?[[:space:]]*thin_pool_autoextend_percent = .*/\tthin_pool_autoextend_percent = 20/'   /etc/lvm/lvm.conf
-  grep -qE '^\s*thin_pool_autoextend_threshold = 70' /etc/lvm/lvm.conf \
-    || die "could not set thin_pool_autoextend_threshold in /etc/lvm/lvm.conf — set it by hand"
-  ok "pool autoextends at 70%, by 20%"
-
-  install -m 0755 "$HERE/new-app-volume" /usr/local/sbin/new-app-volume
-  ok "/usr/local/sbin/new-app-volume installed"
-
-  new-app-volume bob   100G
-  new-app-volume caddy 2G
-  new-app-volume ops   10G
-
-  # Docker's store: NO backup tag. Images and caches are rebuildable (ops.md 1.5).
-  if ! lvs vg0/docker >/dev/null 2>&1; then
-    systemctl is-active --quiet docker && systemctl stop docker
-    lvcreate -qq -V 300G -T vg0/pool -n docker
-    mkfs.ext4 -q -L docker /dev/vg0/docker
-    mkdir -p /var/lib/docker
-    grep -q '^/dev/vg0/docker ' /etc/fstab \
-      || echo "/dev/vg0/docker /var/lib/docker ext4 defaults,noatime 0 2" >> /etc/fstab
-    mount /var/lib/docker
-    ok "vg0/docker mounted at /var/lib/docker (NOT backed up, by design)"
-  else
-    ok "vg0/docker already exists"
-  fi
-
-  lvs -o lv_name,lv_size,lv_tags vg0
+  df -h /srv
+  echo
+  echo "   Databases are backed up by pgBackRest (ops.md step 9), not from this filesystem."
+  echo "   /srv/docker is deliberately NOT backed up: images and caches are rebuildable."
 }
 
 # -------------------------------------------------------- Step 5a: Tailscale up
@@ -175,9 +145,9 @@ EOF
 # ------------------------------------------------------------- Step 7: Docker
 phase_docker() {
   note "Step 7 — Docker CE"
-  findmnt -no SOURCE /var/lib/docker | grep -q '/dev/mapper/vg0-docker' \
-    || die "/var/lib/docker is not on the vg0/docker LV — run 'bootstrap.sh lvm' first,
-       otherwise every image would land on the small root disk."
+  [[ -d /srv/docker ]] \
+    || die "/srv/docker does not exist — run 'bootstrap.sh disk' first, otherwise every image
+       would land on the small root partition."
 
   if ! command -v docker >/dev/null 2>&1; then
     install -m 0755 -d /etc/apt/keyrings
@@ -192,6 +162,7 @@ phase_docker() {
 
   cat > /etc/docker/daemon.json <<'EOF'
 {
+  "data-root": "/srv/docker",
   "log-driver": "local",
   "log-opts": { "max-size": "10m", "max-file": "3" },
   "live-restore": true,
@@ -201,7 +172,9 @@ EOF
   systemctl restart docker
   usermod -aG docker debian
   docker run --rm hello-world >/dev/null && ok "docker works"
-  df -h /var/lib/docker
+  docker info --format '{{.DockerRootDir}}' | grep -qx /srv/docker \
+    || die "Docker's root dir is not /srv/docker — check /etc/docker/daemon.json"
+  df -h /srv/docker
 }
 
 # ---------------------------------------------------------------- verify
@@ -211,20 +184,18 @@ phase_verify() {
 
   note "Verifying every 'Done when' from Steps 3-7"
   check "RAID: all md devices [UU]"          '! grep -qE "\[[U_]*_[U_]*\]" /proc/mdstat'
-  check "vg0/pool exists"                    'lvs vg0/pool'
-  check "LV bob exists"                      'lvs vg0/bob'
-  check "LV caddy exists"                    'lvs vg0/caddy'
-  check "LV ops exists"                      'lvs vg0/ops'
-  check "LV docker exists"                   'lvs vg0/docker'
-  check "backup tag on bob only where meant" '[ "$(lvs --noheadings -o lv_name @backup | tr -d " " | sort | tr "\n" ",")" = "bob,caddy,ops," ]'
-  check "/srv/apps/bob mounted"              'mountpoint -q /srv/apps/bob'
-  check "/var/lib/docker on its own LV"      'findmnt -no SOURCE /var/lib/docker | grep -q vg0-docker'
+  check "/srv is mounted"                    'findmnt /srv'
+  check "/srv/apps/postgres exists"          '[ -d /srv/apps/postgres ]'
+  check "/srv/apps/caddy exists"             '[ -d /srv/apps/caddy ]'
+  check "/srv/apps/bob exists"               '[ -d /srv/apps/bob ]'
+  check "pgBackRest spool dir exists"        '[ -d /srv/backup/spool ]'
+  check "Docker root dir is /srv/docker"     'docker info --format "{{.DockerRootDir}}" | grep -qx /srv/docker'
   check "tailscale up"                       'tailscale status'
   check "sshd: no passwords"                 'sshd -T | grep -q "^passwordauthentication no"'
   check "nftables host table loaded"         'nft list table inet host'
   check "docker running"                     'docker info'
   echo
-  lvs -o lv_name,lv_size,data_percent,lv_tags vg0
+  df -h /srv /srv/docker
   echo
   [[ $fail -eq 0 ]] && echo "ALL GREEN — next: docs/ops.md Step 8 (the GCS bucket, from your laptop)" \
                     || { echo "SOME CHECKS FAILED (above)"; exit 1; }
@@ -232,7 +203,7 @@ phase_verify() {
 
 case "${1:-}" in
   base)      phase_base ;;
-  lvm)       phase_lvm ;;
+  disk|lvm)  phase_disk ;;
   tailscale) phase_tailscale ;;
   lockdown)  shift; phase_lockdown "${1:-}" ;;
   docker)    phase_docker ;;

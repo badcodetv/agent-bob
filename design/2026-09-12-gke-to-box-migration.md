@@ -87,7 +87,10 @@ decision that settles which.
 ## 4. Per app
 
 Every app below is one Compose stack under `/srv/apps/<app>/`, per `docs/ops.md` Part 3 "Add a new
-app". Common to all of them:
+app". **Since 2026-09-12 there is no per-app database:** every app gets one database and one role in
+the box's single Postgres 18, with its own query-time and memory limits
+(`design/2026-09-12-postgres-native-backups.md` §9.5, `docs/ops.md` step 9d). Backups are
+pgBackRest's job and need no per-app setup. Common to all of them:
 
 - **Images live in `gcr.io/webkit-servers/…`**, now served by Artifact Registry. The box needs a
   read-only service-account key to pull. Do this once, not per app.
