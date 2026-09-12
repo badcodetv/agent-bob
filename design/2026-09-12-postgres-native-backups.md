@@ -310,3 +310,170 @@ test of it.
 8. 🔴 **Is the booking system's Elasticsearch dependency live?** (§3a.) Must be answered before
    NoCode and Franchise Cloud are switched off the week of 2026-09-14, because their clusters are
    the only two that exist.
+
+---
+
+## 8. Which Postgres, and which extensions — researched 2026-09-12
+
+Kai asked for this to be researched rather than guessed, against the capability list he gave:
+document/JSON used like Mongo, full indexing, full-text search, vector search, **hybrid search**,
+geospatial, time series, and the ability to add extensions later.
+
+Researched against primary sources on 2026-09-12, including a download-and-grep of the live
+`bookworm-pgdg` package index rather than blog posts. Sections E–G (the hybrid-search query
+pattern, the tuning table and the final stack) are still landing and go in §9.
+
+### 8.1 Version: PostgreSQL 18
+
+| Version | Released | Latest patch | EOL |
+| --- | --- | --- | --- |
+| **18** | 2025-09-25 | **18.6** (2026-08-11) | **2030-11-14** |
+| 17 | 2024-09-26 | 17.11 | 2029-11-08 |
+| 14 | 2021-09-30 | 14.24 | **2026-11-12 — two months away** |
+
+**Take 18.** Four-plus years of runway, and two PG18 features land directly on the requirements:
+
+- **`extension_control_path`** lets an extension live outside the server's own directories, so one
+  can be added **without rebuilding the server image**. This is the direct answer to "possibly
+  we're going to need to install new plugins as we go".
+- **`io_method`** is a new asynchronous I/O subsystem (`worker` by default, `io_uring`, `sync`),
+  which matters on local NVMe. PGDG's `postgresql-18` links `liburing2 >= 2.3`, so `io_uring` is
+  genuinely available rather than theoretical.
+
+🔴 **Do not take PostgreSQL 19 on GA.** It is at Beta 3 (2026-08-13) with GA expected within weeks.
+A booking system with paying customers should not be the first load on a two-week-old major, and
+extensions lag a new major by 1–2 months (§8.4).
+
+### 8.2 The base image: the choice we thought we had does not exist
+
+This plan previously asked Kai to choose between "stock Postgres plus packages" and "a pre-built
+image such as ParadeDB's". **That is not a fork in the road.** The official image's own Dockerfile:
+
+```
+FROM debian:bookworm-slim
+ENV PG_MAJOR 18
+ENV PG_VERSION 18.6-1.pgdg12+2
+  aptRepo="... http://apt.postgresql.org/pub/repos/apt bookworm-pgdg main $PG_MAJOR"
+```
+
+That version string is **byte-identical** to the one in the PGDG index. The official Docker image
+*is* the PostgreSQL project's own Debian packages, with the repository already wired in.
+
+**So: `postgres:18-bookworm` plus a short Dockerfile adding the extensions.** Security patches
+arrive on the project's own cadence via `docker compose pull`; a new extension a year from now is
+`apt install postgresql-18-<ext>`; and **no third party sits between us and a Postgres security
+patch.** That was the stated objection to ParadeDB's image holding the booking system's data, and
+this removes it while still allowing ParadeDB's *extension* to be installed on top.
+
+### 8.3 Per capability
+
+`PGDG ✅` = confirmed present in the live index. `Vendor` = absent, must come from the maintainer.
+
+| Capability | Use | Version | Licence | Source |
+| --- | --- | --- | --- | --- |
+| **Document / JSON, used like Mongo** | **built-in JSONB + GIN** | core | PostgreSQL | nothing to install |
+| **Geospatial** | **PostGIS** | 3.6.4 | GPL-2.0 | PGDG ✅ `postgresql-18-postgis-3` |
+| **Vector search** | **pgvector** | 0.8.6 | PostgreSQL | PGDG ✅ `postgresql-18-pgvector` |
+| **Time series** | **pg_partman + pg_cron** | 5.5.0 / 1.6.8 | PostgreSQL | PGDG ✅ `-partman`, `-cron` |
+| **Full-text search** | **pg_search** (ParadeDB, BM25) | 0.25.9 | **AGPL-3.0** | Vendor `.deb` |
+| **Hybrid search** | a SQL pattern, no extension | — | — | — |
+| **Add extensions later** | PG18 `extension_control_path` | core | PostgreSQL | nothing to install |
+
+Also worth taking from PGDG while building: `postgresql-18-pgaudit`, `postgresql-18-repack`,
+`postgresql-18-hypopg`.
+
+**On the document requirement: nothing needs installing.** Built-in JSONB with a GIN index gives
+nested documents, flexible schema and indexed queries on arbitrary paths. One real tuning choice —
+use **`jsonb_path_ops`** when containment queries dominate (index is 20–30% of table size) rather
+than the default `jsonb_ops` (60–80%); `jsonb_ops` only earns its size when the query paths are
+unknown.
+
+**Rejected: FerretDB / DocumentDB**, the MongoDB wire-protocol layer. It drags in
+`documentdb_core`, `pg_cron`, `pgvector`, `postgis` *and* `tsm_system_rows`. Only worth that
+surface if an application literally speaks a Mongo driver that cannot be changed. Nothing of
+BadCode's does.
+
+### 8.4 The two decisions inside this
+
+#### Time series: drop TimescaleDB (recommended), or take it from the vendor
+
+🔴 **PGDG's `timescaledb` package is Apache-only**, verbatim from its own `Description` field:
+*"This package contains the Apache-licensed version of timescaledb."* Missing: compression /
+columnstore, continuous aggregates, retention policies, job scheduling, SkipScan and the advanced
+hyperfunctions. **Nothing errors — the features are simply absent.**
+
+| | **A — pg_partman + pg_cron ✅** | B — TimescaleDB from TigerData's repo |
+| --- | --- | --- |
+| Licence | fully permissive | Apache core + TSL (source-available) for the useful parts |
+| Source | the Postgres project's own packages | a third-party apt repo |
+| Version pinning | nothing to wait for | **becomes the extension that decides our major version** (34 days behind PG18 GA) |
+| Conflicts | none | **incompatible with Citus**; only partially compatible with pg_partman |
+| Gets you | partitioning + scheduled maintenance | compression, continuous aggregates, retention |
+
+**Recommend A.** There is no time-series workload in the audit (§3a) to justify B, partitioning
+plus a scheduled job covers the stated need at this scale, and A keeps every extension permissive
+and on one release train. Adding TimescaleDB later is a package install; switching apt repos on a
+live instance is not. **Take B only if compression or continuous aggregates are already known to
+be needed.**
+
+The licence is *not* the reason to prefer A. TSL bars offering the software itself as a database
+service but explicitly permits "Value Added Products/Services" using it as a backend component, so
+the booking system, forum and internal app are fine. ⚠️ One clause to watch if B is ever taken:
+that permission is conditioned on users being *"prohibited, either contractually or technically,
+from defining, redefining, or modifying the database schema"* — which would get awkward if Agent
+Bob ever exposed a DDL surface to third parties. That is a reading of licence text, not a ruling.
+
+#### Full-text search: pg_search (recommended), with ten minutes of legal
+
+`pg_search` is the quality answer and it is **AGPL-3.0**. ParadeDB's own position is that
+*"AGPL doesn't prohibit commercial deployment. You can run ParadeDB yourself for business purposes
+without restriction"* — self-hosting for one's own product is permitted.
+
+⚠️ The unsettled question is whether AGPL §13's network source-offer reaches **the application
+code**. The standard reading is no — an extension and a client application communicating over a
+wire are separate programs. Widely held, **not court-tested**. `pg_textsearch` (TigerData, April
+2026, permissive) exists partly to sidestep exactly this, but **cannot do phrase queries**, which
+probably disqualifies it for a forum. **Worth ten minutes of legal advice before paying customers'
+data depends on it** — not a blocker now.
+
+Built-in `tsvector`/`tsquery` remains fine for the small sites. Its weakness is ranking: no
+corpus-wide inverse document frequency, so relevance ordering is poor. That is precisely what
+would be noticed when replacing Elasticsearch.
+
+### 8.5 Traps to design around, not discover
+
+1. **`pg_cron` installs in exactly ONE database per cluster** (`cron.database_name`, default
+   `postgres`). With one database per app this bites on day one. `cron.schedule_in_database()` is
+   the workaround, but one database ends up owning all scheduling metadata — including
+   pg_partman's maintenance job. **Decide which, at build time.**
+2. **`pg_search` 0.25+ hard-requires pgvector** (it uses the `vector` type; `CREATE EXTENSION
+   pg_search CASCADE` pulls it in). Convenient for hybrid search, but it couples pgvector upgrades
+   to pg_search's expectations — and **Agent Bob already depends on pgvector.**
+3. **Four extensions need `shared_preload_libraries`, i.e. a restart of the one instance every app
+   depends on**: `pg_cron`, `pg_search`, plus `timescaledb` (list first, if taken) and
+   `pg_textsearch` (if taken). **Plan the whole list up front.** ⚠️ Sources contradict each other
+   on whether `pg_search` truly requires it — the current README says yes unconditionally, older
+   0.17-era docs said unnecessary on PG17+. Assume required; the documented failure mode is a
+   connection crash or a hang during index creation.
+4. **`ALTER EXTENSION … UPDATE` must be run per database.** Easy to miss one on a four-app instance.
+5. **`pg_search` write amplification.** Its index segments are immutable, so updating one field
+   rewrites its neighbours, and background merges consolidate many small segments. Mutable segments
+   and background merging mitigate it, but **a forum with heavy editing will feel it. Test on the
+   real corpus at real write rates before switching Elasticsearch off.**
+
+**Reassurance on version risk:** the PostgreSQL wiki's PG18 extension-bug page lists 140+ working
+extensions and **none of our candidates are in its broken list**. pgvector and PostGIS track
+Postgres *betas* — they were ready before PG18 shipped, not after.
+
+### 8.6 🔴 The real cost of one Postgres is not extensions
+
+One `shared_buffers`, one WAL, one restart, one out-of-memory event, one blast radius.
+
+**A forum reindex evicts the booking system's hot pages. `work_mem` is applied per sort or hash
+node rather than per query, so one runaway agent query can exhaust memory on the machine that
+processes payments.**
+
+This is the honest price of the consolidation Kai chose, and it is paid in configuration and
+discipline rather than software. It does not argue against one Postgres — it argues for setting
+per-app limits on day one rather than after the first incident. The concrete day-one configuration
+is in §9.
