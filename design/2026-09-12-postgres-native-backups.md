@@ -703,6 +703,20 @@ The §9.1 Dockerfile was built and run on a throwaway container before any of th
   pg_partman 5.5.0, pg_cron 1.6, pg_repack 1.5.3, pgaudit 18.0.
 - **One correction found**: `pgaudit` requires `shared_preload_libraries` (§8.5 item 3).
 
+- 🟢 **Agent Bob's own database layer passes on PG18.** `go test ./agentdb/` against a throwaway
+  PostgreSQL 18.6 with `AGENTKIT_TEST_POSTGRES_URL` set: **`ok … 232.342s`, exit 0.** This is the
+  run `CLAUDE.md` warns a plain `go test ./...` does not give you, so it was checked rather than
+  assumed, and the live cases demonstrably ran rather than skipped:
+  - **all 49 migrations applied** (`agentdb_migrations` holds 49 rows, 26 tables in `public`);
+  - the **pgvector path is real** — `memories.content_embedding` is a `vector` column carrying an
+    **HNSW index on `vector_cosine_ops`**, built successfully on PG18;
+  - the **jsonb-selector path is real** — 20 `jsonb` columns, a GIN index on `labels`, and the
+    partial index on `labels ->> 'retracts'`;
+  - the full-text half of memory search is there too (`GIN (content_tsv)`);
+  - a `-v` run of the memory and selector tests printed **151 results and zero `--- SKIP`**.
+
+  **This closes the Step 11c decision:** Bob can use the box's Postgres 18 rather than its bundled
+  PostgreSQL 16, and since a fresh Bob has no data, doing it at install time costs nothing.
 - **The `pg_search` download URL in §9.1 resolves** (HTTP 200, and the release asset comes back named
   `postgresql-18-pg-search_0.25.9-1PARADEDB-bookworm_amd64.deb`), so the version/distro/arch
   pattern in the Dockerfile is right. Installing and loading it is not yet tried.
