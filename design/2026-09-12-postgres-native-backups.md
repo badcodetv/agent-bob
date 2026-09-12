@@ -298,9 +298,15 @@ test of it.
    practice."* The capability list he gave is document/JSON used like Mongo, full indexing,
    full-text search, vector search, **hybrid search**, geospatial, time series, and the ability to
    add extensions later. Research in progress; §8 holds the answer when it lands.
-7. 💰 **OVH's Backup Agent** — Kai asked what it costs. Research in progress. Open from
-   `design/2026-09-11-ovh-compose-hosting.md` §10 Q4, and it matters slightly more now: with the
-   thin pool gone there is one fewer local safety net, though Google still holds the real backups.
+7. ✅ **OVH's Backup Agent — answered 2026-09-12: £0 agent + £0.0061/GB/month, so ~£0.20/month
+   today. Recommend switching it on.** Nightly whole-server image to a distant OVH datacentre, 14
+   days retention with **14 days immutability**, file-level or whole-server restore, and **free
+   egress on restore**. Worth it as a second copy at a different company boundary from Google, and
+   the immutable lock is a property pgBackRest's repository does not have. Details and the three
+   caveats are in `docs/ops.md` 1.5 — the live ones are that **Eco/Rise eligibility is
+   unconfirmed** (check the control panel after delivery) and that the agent is **public-IP only,
+   incompatible with vRack**. Our mdadm RAID1 + ext4 layout is supported; Veeam does not back up
+   LVM snapshots, which is one more small reason the thin pool is better gone.
 8. 🔴 **Is the booking system's Elasticsearch dependency live?** (§3a.) Must be answered before
    NoCode and Franchise Cloud are switched off the week of 2026-09-14, because their clusters are
    the only two that exist.

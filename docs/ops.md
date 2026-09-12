@@ -170,13 +170,50 @@ read-only at once. The guards:
 - the pool grows itself while spare space remains;
 - the backup script always deletes its snapshots, even after a crash.
 
-### An optional extra copy: OVH's Backup Agent
+### A cheap second copy: OVH's Backup Agent — priced 2026-09-12, recommend yes
 
-Since January 2026, OVH offers a free Veeam-based agent. It takes a **daily** backup of the whole
-server into OVH storage in a different datacentre. You pay only for that storage (about $0.008 per
-GB per month on OVH's US page). It can't meet our 1-hour target and it isn't on Google, so it's
-**an optional second copy, not the main backup.** Consider switching it on once customer data
-lives on the box.
+Since January 2026 OVH resells a Veeam-based agent for bare-metal servers. Researched 2026-09-12:
+
+| | |
+| --- | --- |
+| Agent / licence | **£0** |
+| Storage | **£0.0061 ex VAT per GB per month** (UK site; 0,007 € on the French site). It is simply OVH Object Storage at list price |
+| **Cost for us** | **~£0.20/month** at today's ~25 GB; **~£1.60/month** at 200 GB |
+| Schedule | nightly, started between 22:00 and 06:00 CET. First run a full image, then incrementals |
+| Retention | 14 days by default, up to 30, with **14 days of immutability (WORM)** — nothing can delete or encrypt it |
+| Granularity | whole-server image only; **restore** offers file-level *or* whole-server, self-service |
+| Where | a vault in a deliberately distant OVH datacentre (documented anti-affinity) |
+| Restore / egress | **free** — "OVHcloud will not charge for incoming/outgoing traffic, remote backup, or encryption" |
+
+**Recommend switching it on**, once the box exists. Three reasons it is worth £0.20:
+- it is a second copy at a **different company boundary** from Google, so one compromised or
+  suspended Google account does not take both;
+- the **14-day immutable lock** is a property our own pgBackRest repository does not have;
+- with the LVM thin pool gone there is one fewer local safety net, and this replaces it for pennies.
+
+It still **cannot be the main backup**: daily-only misses the 1-hour target, it is whole-server
+rather than Postgres-aware, and it sits with the same company as the server.
+
+**Two things to check, and one that is already fine:**
+- 🟡 **Eco/Rise eligibility is unconfirmed.** The only documented restriction is "Dedicated Servers
+  only" — no page names Eco, Rise or Kimsufi as included *or* excluded, and the marketing
+  illustrates with the Advance and Scale ranges. Rise is the budget line, so **confirm it appears
+  in the control panel after delivery** rather than counting on it.
+- 🔴 **Public-IP only: incompatible with vRack and additional IPs.** Our plan uses one IPv4 and no
+  vRack (Caddy routes by hostname), so this is compatible — but it forecloses adding a vRack later
+  while the agent is on.
+- ✅ **Our disk layout is supported.** Veeam Agent for Linux supports Linux native software RAID
+  (`mdadm`) and ext4, which is exactly what OVH's installer produces. Note that Veeam does **not**
+  back up LVM snapshots — one more small reason the thin pool is better gone. Confirm Debian 12's
+  kernel against Veeam's compatible-OS list at install time.
+
+### Free backup storage: Rise includes 500 GB, but do not rely on it
+
+The Rise range advertises **500 GB of backup space included**, over FTP/FTPS, NFS or SMB, extendable
+to 1/5/10 TB. 🔴 But OVH's own docs warn the feature *"might be unavailable or limited on servers of
+the Eco product line"*, and Rise **is** the Eco line. As a backup target it is weak anyway: no
+scheduler, no immutability, no image restore. **Treat it as a possible third copy, never as a
+substitute for either of the two above.**
 
 ## 1.6 HTTPS and the front door: Caddy
 
