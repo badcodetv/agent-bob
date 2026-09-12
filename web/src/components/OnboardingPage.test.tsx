@@ -144,6 +144,25 @@ describe('OnboardingPage', () => {
     expect(requests.some((r) => r.url.includes('/agent/session'))).toBe(false)
   })
 
+  // The same screen, reloaded after someone else approved — or after this
+  // person closed the tab between approving and reading. `applied` on
+  // GET /agent/charter/current is a server fact now (DI10); before it existed
+  // this hook only knew about an apply IT had performed, so a reload forgot the
+  // approval had happened and offered "Approve" on an already-approved charter.
+  // Nothing is clicked here: the state has to come off the wire.
+  it('treats the server saying applied as approved, with no apply of its own', async () => {
+    charterResponse = {
+      status: 200,
+      body: { ...validCharterBody, applied: true, applied_at: 1789000999000 },
+    }
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+
+    await screen.findByTestId('onboarding-next')
+    expect(screen.getByTestId('run-architect')).toBeTruthy()
+    // And it did not apply anything to learn that.
+    expect(requests.some((r) => r.url.includes('/agent/charter/apply'))).toBe(false)
+  })
+
   it('reports a failure to run the architect in the server words', async () => {
     charterResponse = { status: 200, body: validCharterBody }
     globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

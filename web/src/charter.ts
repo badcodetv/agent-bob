@@ -60,6 +60,21 @@ export interface CharterCurrent {
   memory_id: string
   created_at: number
   valid: boolean
+  /**
+   * The server's own answer to "has this interview's charter been approved?"
+   * — read from the append-only config log's `topology_apply` bracket, which
+   * names the interview session (`go/httpapi/charter.go`'s `charterApplied`).
+   *
+   * Before this field existed the console had to infer it, and the only
+   * observable it had was a NAME: does a worker called `architect` exist? A
+   * charter setting a custom `architect_name` defeated that guess and left the
+   * project reading as still-in-interview forever, with no way past "Finish
+   * setting up this project" (DI10, and DI29 was the same root cause wearing a
+   * different hat). Never infer this again — read it.
+   */
+  applied: boolean
+  /** When it was approved, unix ms. 0 while `applied` is false. */
+  applied_at: number
   errors: CharterIssue[]
   /** Present only when valid. */
   summary_of_effects: CharterEffects | null
@@ -132,6 +147,14 @@ export function coerceCharterCurrent(raw: unknown): CharterCurrent {
     // block Approve, never wave it through — this is the one field on the
     // screen that decides whether a human can change the project's shape.
     valid: r.valid === true,
+    // Strict `=== true`, same as `valid`, and for a mirror-image reason. The
+    // failure mode here is the opposite one: a garbled or absent field must
+    // read as NOT applied, so the worst case is a finished project being
+    // offered its onboarding screen again — recoverable, visible, and
+    // obviously wrong to the human looking at it. Coercing loosely could
+    // instead hide a genuinely unfinished setup, which is silent.
+    applied: r.applied === true,
+    applied_at: num(r.applied_at),
     errors: Array.isArray(r.errors) ? r.errors.map(coerceCharterIssue) : [],
     summary_of_effects: effects ? coerceCharterEffects(effects) : null,
   }

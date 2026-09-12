@@ -66,8 +66,31 @@ describe('coerceCharterCurrent', () => {
       memory_id: '',
       created_at: 0,
       valid: false,
+      applied: false,
+      applied_at: 0,
       errors: [],
       summary_of_effects: null,
+    })
+  })
+
+  // `applied` decides whether the console thinks a project is still being set
+  // up (DI10), so it is coerced as strictly as `valid` and errs the same way:
+  // anything that is not the boolean true reads as NOT applied. The worst case
+  // is then offering a finished project its onboarding screen again — visible
+  // and recoverable — rather than silently hiding an unfinished setup.
+  it('applied is true only for the boolean, and carries its timestamp', () => {
+    expect(coerceCharterCurrent({ applied: true, applied_at: 1789000999000 })).toMatchObject({
+      applied: true,
+      applied_at: 1789000999000,
+    })
+    for (const raw of ['true', 1, {}, [], null, undefined]) {
+      expect(coerceCharterCurrent({ applied: raw }).applied).toBe(false)
+    }
+    // A server that reports applied without a timestamp still reads as
+    // applied — the flag is the decision, the time is only for display.
+    expect(coerceCharterCurrent({ applied: true })).toMatchObject({
+      applied: true,
+      applied_at: 0,
     })
   })
 

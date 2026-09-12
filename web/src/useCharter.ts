@@ -54,10 +54,13 @@ export interface CharterApi {
   applying: boolean
   applyError: string | null
   applyIssues: CharterIssue[]
-  /** True once an apply has succeeded in this session of the screen. The
-   *  server is the authority on whether a charter was applied; this is only
-   *  what THIS screen has seen, which is what the "Run the architect now"
-   *  control keys off. */
+  /** True when the charter has been approved — either because THIS screen saw
+   *  its own apply succeed, or because the server says so (`CharterCurrent`'s
+   *  `applied`, added for DI10). It used to be the first of those alone,
+   *  because the route reported nothing; the consequence was that a reload
+   *  mid-onboarding forgot the approval had happened and offered "Approve"
+   *  again on an already-approved charter. It is what the "Run the architect
+   *  now" control keys off, and what stops the poll. */
   applied: boolean
 }
 
@@ -76,7 +79,14 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const [applyIssues, setApplyIssues] = useState<CharterIssue[]>([])
-  const [applied, setApplied] = useState(false)
+  // What THIS screen has seen. The exported `applied` below is this OR the
+  // server's own answer, so a reload no longer forgets an approval.
+  const [sawApply, setSawApply] = useState(false)
+
+  // The exported answer: this screen's own apply, or the server's record of
+  // one. `charter.applied` is the field DI10 added to GET /agent/charter/current
+  // — before it existed this hook could only ever report the first half.
+  const applied = sawApply || charter?.applied === true
 
   const reload = useCallback(async () => {
     if (session === '') {
@@ -118,6 +128,9 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     if (session === '' || refreshMs <= 0 || applied) return
     const id = setInterval(() => void reloadRef.current(), refreshMs)
     return () => clearInterval(id)
+    // `applied` here is the combined answer, so the server confirming an
+    // approval this screen did not perform also stops the poll — which is what
+    // a second tab open on the same project needs.
   }, [applied, refreshMs, session])
 
   const apply = useCallback(
@@ -140,7 +153,7 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
             rationale: rationale ?? '',
           }),
         })
-        setApplied(true)
+        setSawApply(true)
         return coerceTopologyApplyResult(raw)
       } catch (err) {
         if (configApiStatus(err) === 422 && err instanceof Error) {

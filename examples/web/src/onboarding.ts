@@ -226,18 +226,18 @@ export function useOnboardingSession(opts: {
  *  browser with nothing in the chat stream announcing it. */
 const INTERVIEW_POLL_MS = 4_000;
 
-/**
- * The engine's default `architect_name` (`go/charter/charter.go:41`, mirrored
- * as `DEFAULT_ARCHITECT_NAME` in `web/src/charter.ts`). The interviewer worker
- * itself exists for the WHOLE interview — it is what runs it — so worker
- * existence in general cannot stand in for "applied"; only the architect's
- * arrival can. A charter that sets a custom `architect_name` defeats this
- * check (this project would read as still-in-interview after it is actually
- * done); that gap is inherent to using a name as the observable for a fact
- * the API does not expose, and is out of scope for A2 — see the Discovered
- * Issues Log.
- */
-const ARCHITECT_WORKER_NAME = "architect";
+// THERE IS NO ARCHITECT NAME HERE ANY MORE, and that is the fix.
+//
+// This module used to hold `ARCHITECT_WORKER_NAME = "architect"` and decide
+// that an interview was over when `GET /agent/workers` contained a worker by
+// that name — because approving a charter's one immediate roster effect is to
+// create the architect. It was documented as a known gap and it was a real
+// defect: the charter schema lets an interview name its architect anything,
+// and a charter that did left the project reading as still-in-interview
+// FOREVER, showing "Finish setting up this project" with no way past it
+// (DI10). The server now reports the fact outright — `applied` on
+// `GET /agent/charter/current`, from the append-only config log — so this file
+// reads it instead of guessing at it. Do not reintroduce a name check.
 
 export interface InterviewState {
   /**
@@ -264,14 +264,20 @@ export interface InterviewState {
  * `localStorage`-only gate this used to be (design §3 G1: "the interview is a
  * state of the project, not a state of the browser").
  *
- * `GET /agent/charter/current` carries no `applied` field (`web/src/charter.ts`'s
- * `CharterCurrent` has none, and `useCharter`'s own `applied` is only "this
- * screen has seen an apply succeed", not a server fact a fresh mount can read
- * back — see its doc comment). So this uses the observable design §3 G1
- * names instead: approving a charter's only immediate roster effect is the
- * architect worker — so "does a worker named `architect` exist yet" stands in
- * for "has the charter been applied" (see `ARCHITECT_WORKER_NAME`'s comment
- * for the one case this misses).
+ * Two reads, and the second only when the first finds something:
+ *
+ *   1. `GET /agent/sessions/by-name/onboard` — is there an interview session?
+ *      No session means no interview has ever started. That is NOT the same as
+ *      "the interview is over", and conflating the two is what DI29 was.
+ *   2. `GET /agent/charter/current?session=<id>` — has its charter been
+ *      approved? A 404 here is the ordinary mid-interview state (nothing
+ *      deposited yet), not an error. `applied: true` is the ONLY thing that
+ *      ends the interview, and it is a server fact now rather than something
+ *      this file infers from the roster (DI10).
+ *
+ * Sequential rather than parallel, because the charter read needs the session
+ * id. The extra round trip only happens once an interview exists, and while
+ * one does this hook is the thing keeping the human's way back to it visible.
  */
 export function useInterviewState(opts: {
   apiBase: string;
@@ -305,10 +311,10 @@ export function useInterviewState(opts: {
 
     const check = async () => {
       try {
-        const [sessionRes, workersRes] = await Promise.all([
-          fetch(`${apiBase}/agent/sessions/by-name/${ONBOARD_SESSION_NAME}`, { headers }),
-          fetch(`${apiBase}/agent/workers`, { headers }),
-        ]);
+        const sessionRes = await fetch(
+          `${apiBase}/agent/sessions/by-name/${ONBOARD_SESSION_NAME}`,
+          { headers },
+        );
         if (cancelled) return;
 
         let onboardSessionId: string | null = null;
@@ -317,23 +323,40 @@ export function useInterviewState(opts: {
           if (typeof row.id === "string" && row.id !== "") onboardSessionId = row.id;
         }
 
-        let hasArchitect = false;
-        if (workersRes.ok) {
-          const body = (await workersRes.json()) as { workers?: { name?: unknown }[] };
-          hasArchitect =
-            Array.isArray(body.workers) &&
-            body.workers.some((w) => w != null && w.name === ARCHITECT_WORKER_NAME);
+        if (onboardSessionId === null) {
+          // No interview has ever started. Resolved, not settled: this is the
+          // state every ordinary project is in at mount, and the watch must
+          // keep running so that a human who clicks "set up this project" is
+          // noticed. Latching here is exactly DI29.
+          setState({ inInterview: false, onboardSessionId: null, resolved: true });
+          return;
         }
 
-        const inInterview = onboardSessionId !== null && !hasArchitect;
+        const charterRes = await fetch(
+          `${apiBase}/agent/charter/current?session=${encodeURIComponent(onboardSessionId)}`,
+          { headers },
+        );
         if (cancelled) return;
-        setState({ inInterview, onboardSessionId, resolved: true });
-        // Only the architect's existence ends the watch. A project that never
-        // onboards therefore keeps polling two cheap GETs every
-        // INTERVIEW_POLL_MS for as long as its console tab is open — the same
-        // order as the Desk's own live refresh, and the price of not being
-        // wrong in the direction that strands a human mid-interview.
-        if (hasArchitect) settled.current = true;
+
+        // A 404 is the ordinary case: the interview is running and has not
+        // deposited a charter yet. Any other non-OK answer also reads as "not
+        // applied", which errs towards showing the human their way back into
+        // setup — the same direction every other decision in this hook errs.
+        let applied = false;
+        if (charterRes.ok) {
+          const body = (await charterRes.json()) as { applied?: unknown };
+          applied = body.applied === true;
+        }
+
+        if (cancelled) return;
+        setState({ inInterview: !applied, onboardSessionId, resolved: true });
+        // Only the server's `applied` ends the watch, and nothing un-applies a
+        // charter. A project that never onboards therefore keeps polling one
+        // cheap GET every INTERVIEW_POLL_MS for as long as its console tab is
+        // open — the same order as the Desk's own live refresh, and the price
+        // of not being wrong in the direction that strands a human
+        // mid-interview.
+        if (applied) settled.current = true;
       } catch {
         // A transient failure leaves the previous state — the same posture as
         // useCharter's "a 404 is the empty state, not an error": a shell-level
