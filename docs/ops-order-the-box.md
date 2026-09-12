@@ -1,5 +1,10 @@
 # Order the box — Kai's checklist
 
+> **Moved.** This document's home is now the private ops repository,
+> `git@github.com:binocarlos/ops.git` (cloned at `~/projects/badcode/ops`), as
+> `docs/order-the-box.md`. **Edit it there** — that copy is canonical. This copy is left in
+> place because other documents link to it, and it will drift.
+
 **Everything you need to do yourself, in order, in one file.** Written 2026-09-12.
 Nothing here needs the repository open. Read it on your phone if you like.
 

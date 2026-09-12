@@ -1,5 +1,10 @@
 # Moving the GKE apps to the box — the per-app plan
 
+> **Moved.** This document's home is now the private ops repository,
+> `git@github.com:binocarlos/ops.git` (cloned at `~/projects/badcode/ops`), as
+> `design/2026-09-12-gke-to-box-migration.md`. **Edit it there** — that copy is canonical. This copy is left in
+> place because other documents link to it, and it will drift.
+
 Companion to `docs/ops.md` Part 4 and `design/2026-09-11-ovh-compose-hosting.md` Appendix A.
 Those two say *what is there*. This says **what moves, in what order, and what will bite**.
 

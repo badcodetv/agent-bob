@@ -1,5 +1,10 @@
 # Postgres-native backups, and what that deletes from the LVM plan
 
+> **Moved.** This document's home is now the private ops repository,
+> `git@github.com:binocarlos/ops.git` (cloned at `~/projects/badcode/ops`), as
+> `design/2026-09-12-postgres-native-backups.md`. **Edit it there** — that copy is canonical. This copy is left in
+> place because other documents link to it, and it will drift.
+
 An adversarial filter Kai put on `design/2026-09-11-ovh-compose-hosting.md` on 2026-09-12:
 
 > *"It feels like a lot of layering and block virtualization, as opposed to saying every day we take

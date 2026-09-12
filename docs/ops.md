@@ -1,5 +1,10 @@
 # Ops — the OVH box
 
+> **Moved.** This document's home is now the private ops repository,
+> `git@github.com:binocarlos/ops.git` (cloned at `~/projects/badcode/ops`), as
+> `docs/build-the-box.md`. **Edit it there** — that copy is canonical. This copy is left in
+> place because other documents link to it, and it will drift.
+
 How BadCode runs its apps on one OVH server: **what we decided and why** (Part 1), **how to set it
 up, step by step** (Part 2), **how to run it day to day** (Part 3), and **what we already know
 about moving the GKE apps later** (Part 4).

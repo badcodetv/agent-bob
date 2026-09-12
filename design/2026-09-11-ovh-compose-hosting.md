@@ -1,5 +1,10 @@
 # OVH Compose Hosting — one box, many stacks, block-level backups to Google
 
+> **Moved.** This document's home is now the private ops repository,
+> `git@github.com:binocarlos/ops.git` (cloned at `~/projects/badcode/ops`), as
+> `design/2026-09-11-ovh-compose-hosting.md`. **Edit it there** — that copy is canonical. This copy is left in
+> place because other documents link to it, and it will drift.
+
 Status: **DESIGN — nothing provisioned, nothing bought.** Written 2026-09-11.
 
 > 🔴 **§3 and §4 are SUPERSEDED (2026-09-12).** The LVM thin pool, the per-app logical volume and
