@@ -118,12 +118,78 @@ This is the load-bearing claim. If it holds, §1's argument is decisive. Measure
 | **Caddy** | certificates and the ACME account on disk | 🟡 not Postgres — but **re-issuable from Let's Encrypt in seconds**. Losing it costs a re-issue, not data. Watch the rate limits on a mass re-issue |
 | **Each app's `.env`** | a file on disk | 🟡 not Postgres — but these belong in the password manager as the primary copy anyway, which is already the rule |
 | **badcode / bookingsystem / forum / kellie / quoteright / panwww** | Postgres, plus a 30 KB forum volume | ✅ effectively yes |
-| **n8n** | workflows and credentials | 🔴 **must be checked per install.** n8n defaults to **SQLite on disk**; it only lives in Postgres if explicitly configured. If it is SQLite today, that is a file-on-disk database — exactly the thing the block-snapshot design existed for |
-| **Redis** | 1.8 MiB, used as a cache | ✅ treat as rebuildable; do not back it up |
-| **Elasticsearch ×2** | 1 GiB between them | ✅ **out of scope** — both belong to NoCode and Franchise Cloud, shut down the week of 2026-09-14. This is what makes "only Postgres" reachable at all |
+| **n8n** | Postgres, with a Redis queue | ✅ **resolved 2026-09-12 — it is on Postgres, not SQLite.** `DB_TYPE` + `DB_POSTGRESDB_*` are set on the deployment and it mounts no volume at all. Nothing to back up beyond the database. Whether it is *wanted* is a separate question — §3a |
+| **Redis** | badcode's is ephemeral (no volume); the shared one holds 1.8 MiB | ✅ treat as rebuildable; do not back it up. Referenced by bookingsystem, quoteright and panwww — §3a |
+| **Elasticsearch ×2** | 1 GiB between them | 🔴 **NOT simply out of scope — see §3a.** Both clusters belong to NoCode and Franchise Cloud, but **the booking system's secret carries `ELASTICSEARCH_SERVICE_HOST` and `ELASTICSEARCH_INDEX_PREFIX`**, so the app that migrates *last* may depend on a cluster that is switched off *first* |
 
-**Conclusion: the claim holds, with one open item (n8n) and two things that are not Postgres but are
-cheap to lose (Caddy's certs, and `.env` files whose real home is the password manager).**
+**Conclusion: the claim holds.** The one thing that looked like a counterexample (n8n on SQLite) is
+not one. What is left that is not Postgres is Caddy's re-issuable certificates and `.env` files
+whose real home is the password manager.
+
+---
+
+## 3a. What the datastore audit actually found
+
+Read 2026-09-12 from each app's `appsecrets` — **key names only, never values**:
+
+```sh
+kubectl get secret -n <ns> appsecrets -o json | jq -r '.data | keys[]'
+```
+
+| App | Postgres | Redis | Elasticsearch |
+| --- | --- | --- | --- |
+| **bookingsystem** | ✅ `POSTGRES_SERVICE_HOST`, `POSTGRES_DB` | ✅ `REDIS_SERVICE_HOST` | 🔴 **`ELASTICSEARCH_SERVICE_HOST`, `ELASTICSEARCH_INDEX_PREFIX`** |
+| **quoteright** | ✅ `POSTGRES_SERVICE_HOST` | ✅ `REDIS_SERVICE_HOST` | — |
+| **panwww** | ✅ `POSTGRES_SERVICE_HOST` | ✅ `REDIS_SERVICE_HOST` | — |
+| **forum** | ✅ `POSTGRES_HOST` | — | — |
+| **badcode** | ✅ `POSTGRES_HOST` (its own ParadeDB) | its own ephemeral redis, for n8n's queue | — |
+| **kellie** | **none at all** | — | — |
+
+Three consequences, in order of how much they matter:
+
+### 🔴 The booking system appears to use Elasticsearch
+
+This is the one finding that reorders work. The decision was "NoCode and Franchise Cloud are not
+coming with us, so we do not need Elasticsearch". But the two Elasticsearch clusters live in
+`nocode-elasticsearch` and `franchisecloud-elasticsearch`, and **the booking system's secret points
+at an Elasticsearch host**. The booking system is the app with paying customers and the last one
+scheduled to move; NoCode and Franchise Cloud are switched off the week of 2026-09-14, first.
+
+**A present environment variable is not proof of a live dependency** — it may be dead configuration
+from a feature that was removed. But if it is live, then switching off NoCode or Franchise Cloud
+breaks search in the booking system *before* any migration begins, and the replacement (Postgres
+full-text search good enough to replace Elasticsearch 7.5.2) moves onto the booking system's
+critical path rather than being a nice-to-have.
+
+**Action: establish whether it is live before 2026-09-14.** Cheapest test is to search in the
+booking system's UI and see whether results come back.
+
+### n8n: on Postgres, but probably not wanted
+
+`DB_TYPE` and `DB_POSTGRESDB_*` are set, `EXECUTIONS_MODE` is queue-based against Redis, and there
+is no volume. So it is backed up by whatever backs up its database, and it needs no special care.
+
+Whether to carry it is a different question, and the repository argues against it: BadCode's own
+`docs/superpowers/specs/2026-06-02-comic-asset-tooling-design.md:11` describes the previous
+`storyteller` project as *"a heavy stack — a Go API, a job queue, Postgres, n8n, and a web UI"* and
+says **"that weight is exactly what we are shedding."** Nothing in the current badcode repository
+references n8n in code — the only mentions are that sentence and this thread's own notes.
+
+**Action: open `n8n.badcode.tv`, look at the workflow list and the executions log.** Empty or stale
+means drop it, and the badcode Redis goes with it, since its only visible job is n8n's queue.
+
+### Redis: three apps reference it, none stores anything
+
+badcode's Redis has no volume at all, so it is already pure cache. The shared one holds 1.8 MiB in a
+20 GiB disk. Nothing here is a system of record. **Recommendation: run one small Redis on the box
+for whoever genuinely needs a cache or a queue, back it up never, and drop it entirely if dropping
+n8n removes the last real user.** Check the three referencing apps the same way — a key in a secret
+is not a dependency.
+
+### Two naming conventions, for whoever writes the migration script
+
+Older apps use `POSTGRES_SERVICE_HOST` / `POSTGRES_DB`; newer ones use `POSTGRES_HOST` /
+`POSTGRES_DATABASE`. Worth normalising while rewriting each `.env` by hand anyway.**
 
 So the residue after pgBackRest is a few megabytes of near-static configuration files. Those do not
 need an instant copy-on-write snapshot; a nightly `restic` of `/srv/apps` — excluding every data
@@ -205,27 +271,36 @@ test of it.
 
 ---
 
-## 7. Decisions this needs from Kai
+## 7. Decided by Kai, 2026-09-12
 
-1. **Adopt this, replacing the LVM design?** (Recommend yes.) It changes Step 4 and Step 9 of
-   `docs/ops.md` before they are ever run, which is the cheapest possible moment.
-2. **One Postgres instance for every app, or one per app?** Recommend **one instance, one database
-   per app**: one backup configuration, one set of tuning, best use of 128 GB. The cost is a shared
-   upgrade window and a shared blast radius. Per-app instances are the isolation-first answer and
-   are affordable on this hardware — this is a real trade, not a formality.
-3. **Which Postgres, and which extension bundle?** The ask is "one Postgres with vector, geospatial,
-   document and search extensions available". Two routes:
-   - **A: stock Postgres + extensions from packages** (pgvector, PostGIS, and `pg_search` if
-     full-text is wanted). Security patches arrive on Postgres's own schedule. Recommend this for
-     the instance holding the booking system.
-   - **B: the ParadeDB image**, which is what badcode already runs (`paradedb/paradedb:v0.21.0-pg17`)
-     and which bundles search, analytics and vectors. Convenient, but it puts a third party's
-     release cadence between us and a Postgres security patch on a database holding paying
-     customers' data.
-   Either way, **the major version is pinned by whichever extension lags most** — check current
-   support before choosing a number, do not assume the newest release is usable.
-4. **Is n8n on SQLite or Postgres?** (§3.) If SQLite, it needs converting during its migration, or
-   it is the one app that still wants a file-level backup.
-5. **OVH's Backup Agent** as a cheap second, whole-server, daily copy — still open from
-   `design/2026-09-11-ovh-compose-hosting.md` §10 Q4. It matters slightly more now: with the thin
-   pool gone there is one fewer local safety net, though Google still holds the real backups.
+1. ✅ **Adopt pgBackRest, replacing the LVM snapshot design.** *"pgBackRest sounds like a good plan,
+   because it sounds like exactly the kind of native tool that we need."* §6's deletions are
+   therefore approved; `docs/ops.md` Steps 4 and 9 are to be rewritten before either is ever run.
+2. ✅ **One Postgres for everything.** *"One Postgres is the goal… it's fine for us to handle the
+   migration of existing Postgres databases into our new one-Postgres setup, that's okay, we're
+   just going to do the migration."* One instance, one database per app.
+3. ✅ **Postgres 9.6 → route A, dump and restore, with a per-app migration script.** *"It's very
+   reasonable that we write a migration script for all data… the booking system for example isn't
+   huge."* Confirmed by measurement: 22.7 GiB across every database on the cluster.
+4. ✅ **No Elasticsearch, no Redis if it can be helped, and probably no n8n.** *"What we're really
+   trying to do is really strip things back to a really simple basics."* The audit in §3a says how
+   far that can go, and names the one thing standing in the way (the booking system's
+   Elasticsearch reference).
+5. 🟡 **Rare exceptions get a hand-written procedure, not a design.** *"In the rare case that we've
+   got like a Mongo or a Redis or something, I doubt that we will, but we can just write manual
+   backup procedures for those and let's not worry about that in this moment."* Recorded so it is a
+   decision rather than an omission.
+
+### Still open
+
+6. 🔬 **Which Postgres, and which extensions** — Kai asked for this to be researched rather than
+   guessed: *"the best thing to do would be to have a fully featured Postgres setup using best
+   practice."* The capability list he gave is document/JSON used like Mongo, full indexing,
+   full-text search, vector search, **hybrid search**, geospatial, time series, and the ability to
+   add extensions later. Research in progress; §8 holds the answer when it lands.
+7. 💰 **OVH's Backup Agent** — Kai asked what it costs. Research in progress. Open from
+   `design/2026-09-11-ovh-compose-hosting.md` §10 Q4, and it matters slightly more now: with the
+   thin pool gone there is one fewer local safety net, though Google still holds the real backups.
+8. 🔴 **Is the booking system's Elasticsearch dependency live?** (§3a.) Must be answered before
+   NoCode and Franchise Cloud are switched off the week of 2026-09-14, because their clusters are
+   the only two that exist.
