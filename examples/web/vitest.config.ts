@@ -19,6 +19,16 @@
 // and `yarn build` do, and fails the same way without it ("Cannot find module
 // '@agentkit/chat-ui'"). Restating the aliases would let them drift; merging
 // cannot.
+//
+// ONE DIVERGENCE TO KNOW ABOUT. vitest 4 declares a peer dependency on vite
+// >=6 and this app builds on vite 5, so yarn installs vitest its OWN nested
+// vite (node_modules/vitest/node_modules/vite). Tests therefore transform
+// through a different vite major from the one `yarn build` uses, which is where
+// the `configLoader: 'native'` and rolldown warnings on every run come from.
+// Accepted rather than resolved: vitest 4 matches `web/`'s pinned version, and
+// the alternative — moving the shell the stack SERVES to vite 7 — is a
+// production change, not a test-tooling one. Revisit if a test ever passes here
+// and fails in the browser.
 import { defineConfig, mergeConfig } from 'vitest/config'
 import viteConfig from './vite.config.ts'
 

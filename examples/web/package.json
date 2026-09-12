@@ -26,7 +26,6 @@
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.3.4",
-    "false": "0.0.4",
     "jsdom": "^29.1.1",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
