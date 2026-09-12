@@ -503,6 +503,7 @@ export {
   DESK_ASKS_CAVEAT,
   DESK_NO_DELIVERY_REASON,
   DESK_FREEZE_REFUSAL_NOTE,
+  DESK_FIRST_KINDS,
   SCHEDULE_MAX_PROVISION_FAILURES,
   buildDesk,
   countAsks,
@@ -511,6 +512,8 @@ export {
   isAttentionRequestOpen,
   deskChangeVerb,
   deskChangeSubject,
+  deskFirstKindForChange,
+  looksLikeRevertRationale,
   frozenTargetFromText,
   DESK_EARLIER_CHANGES_LIMIT,
 } from './desk.js'
@@ -520,10 +523,25 @@ export type {
   Desk,
   DeskAsk,
   DeskChange,
+  DeskFirstKind,
+  DeskFirstRecord,
   DeskGlyph,
   DeskTrouble,
   DeskTroubleKind,
 } from './desk.js'
+
+// "Firsts" — the Desk narrating the first of a kind (design §3 G4). Pure
+// reducer plus the localStorage-backed hook, same split as `navReveal.ts` /
+// `useNavReveal.ts`.
+export { FIRST_KINDS, FIRST_NARRATIONS, firstsToNarrate } from './firsts.js'
+export type { FirstNarration, FirstToNarrate } from './firsts.js'
+export {
+  default as useFirsts,
+  firstsSeenKey,
+  readFirstsSeen,
+  writeFirstsSeen,
+} from './useFirsts.js'
+export type { UseFirstsOptions, UseFirstsApi } from './useFirsts.js'
 
 // The Activity fold (A1) — the whole project on one rail, in time order
 // (design 28 §1). The unit is the occurrence, not the record, and `toMs` is the

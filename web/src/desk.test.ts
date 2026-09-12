@@ -13,6 +13,8 @@ import {
   DESK_NO_DELIVERY_REASON,
   deskChangeSubject,
   deskChangeVerb,
+  deskFirstKindForChange,
+  looksLikeRevertRationale,
   frozenTargetFromText,
   isAttentionRequestOpen,
   SCHEDULE_MAX_PROVISION_FAILURES,
@@ -738,6 +740,7 @@ describe('the whole fold', () => {
       'changes',
       'earlierChanges',
       'trouble',
+      'firsts',
     ])
   })
 
@@ -747,6 +750,7 @@ describe('the whole fold', () => {
       changes: [],
       earlierChanges: [],
       trouble: [],
+      firsts: [],
     })
   })
 
@@ -768,5 +772,152 @@ describe('the whole fold', () => {
     const before = JSON.stringify({ deliveries, schedules })
     buildDesk(input({ deliveries, schedules, subscriptions: [subscription()] }))
     expect(JSON.stringify({ deliveries, schedules })).toBe(before)
+  })
+})
+
+// ---------------------------------------------------------------------------
+
+describe('firsts — the fold tags one record of each kind (design §3 G4)', () => {
+  it('maps every config action to its kind, or to none', () => {
+    expect(deskFirstKindForChange({ action: 'worker_create', rationale: '' })).toBe('first-worker')
+    expect(deskFirstKindForChange({ action: 'subscription_create', rationale: '' })).toBe(
+      'first-subscription',
+    )
+    expect(deskFirstKindForChange({ action: 'schedule_create', rationale: '' })).toBe('first-schedule')
+    expect(deskFirstKindForChange({ action: 'worker_prompt_write', rationale: '' })).toBe(
+      'first-rewrite',
+    )
+    expect(deskFirstKindForChange({ action: 'project_prompt_write', rationale: '' })).toBe(
+      'first-rewrite',
+    )
+    // Not one of the seven.
+    expect(deskFirstKindForChange({ action: 'worker_update', rationale: '' })).toBeNull()
+    expect(deskFirstKindForChange({ action: 'project_settings_put', rationale: '' })).toBeNull()
+  })
+
+  it('reads a revert off its rationale, regardless of the underlying action', () => {
+    expect(looksLikeRevertRationale('revert of worker_prompt_write (seq 4, event c1)')).toBe(true)
+    expect(looksLikeRevertRationale('  Revert of worker_create (seq 1, event c0)')).toBe(true)
+    expect(looksLikeRevertRationale('the rewrite made the replies worse')).toBe(false)
+    expect(
+      deskFirstKindForChange({
+        action: 'worker_prompt_write',
+        rationale: 'revert of worker_prompt_write (seq 4, event c1)',
+      }),
+    ).toBe('first-revert')
+    // A revert always wins over the action's own kind, even for worker_create
+    // (restoring a deleted worker looks exactly like hiring a new one).
+    expect(
+      deskFirstKindForChange({
+        action: 'worker_create',
+        rationale: 'revert of worker_delete (seq 9, event c8)',
+      }),
+    ).toBe('first-revert')
+  })
+
+  it('tags one record of each of the seven kinds, including the J1 seconds/ms hazard', () => {
+    // Every DeskChange-shaped kind stamps unix MILLISECONDS (config events);
+    // the ask stamps unix SECONDS (attention_requests) — desk.ts documents
+    // this split at the top of the file. `NOW_MS` and `NOW` are the same
+    // instant in the two units on purpose: a fold that forgot to convert one
+    // of them would still "work" against a fixture where every timestamp is
+    // the same raw NUMBER in both units, which is exactly the trap J1 warns
+    // about. So the ask here is stamped noticeably EARLIER in wall-clock time
+    // than every change, using its own (seconds) unit — if the fold ever
+    // compared `DeskAsk.createdAt` against `DeskChange.createdAt` without the
+    // ×1000, this ask would look about a thousand times too old (or too new)
+    // relative to the changes, and the "earliest ask" test below would still
+    // pass only because there is exactly one ask — a second ask exposes it,
+    // which the ordering test further down adds.
+    const desk = buildDesk(
+      input({
+        configEvents: [
+          configEvent({ id: 'worker', action: 'worker_create', created_at: NOW_MS - 90_000 }),
+          configEvent({ id: 'sched', action: 'schedule_create', created_at: NOW_MS - 80_000 }),
+          configEvent({ id: 'sub', action: 'subscription_create', created_at: NOW_MS - 70_000 }),
+          configEvent({ id: 'rewrite', action: 'worker_prompt_write', created_at: NOW_MS - 60_000 }),
+          configEvent({
+            id: 'revert',
+            action: 'worker_update',
+            created_at: NOW_MS - 50_000,
+            rationale: 'revert of worker_update (seq 2, event x)',
+          }),
+        ],
+        attentionRequests: [request({ id: 'ask1' })],
+        deliveries: [delivery({ session_id: 'sess-1' })],
+        memories: [{ created_at: NOW_MS - 40_000 }],
+        lastSeenMs: 0,
+      }),
+    )
+
+    const byKind = new Map(desk.firsts.map((f) => [f.kind, f]))
+    expect(byKind.get('first-worker')).toEqual({ kind: 'first-worker', createdAtMs: NOW_MS - 90_000, id: 'worker' })
+    expect(byKind.get('first-schedule')).toEqual({ kind: 'first-schedule', createdAtMs: NOW_MS - 80_000, id: 'sched' })
+    expect(byKind.get('first-subscription')).toEqual({
+      kind: 'first-subscription',
+      createdAtMs: NOW_MS - 70_000,
+      id: 'sub',
+    })
+    expect(byKind.get('first-rewrite')).toEqual({ kind: 'first-rewrite', createdAtMs: NOW_MS - 60_000, id: 'rewrite' })
+    expect(byKind.get('first-revert')).toEqual({ kind: 'first-revert', createdAtMs: NOW_MS - 50_000, id: 'revert' })
+    expect(byKind.get('first-memory')).toEqual({
+      kind: 'first-memory',
+      createdAtMs: NOW_MS - 40_000,
+      id: 'memory:' + (NOW_MS - 40_000),
+    })
+    // The ask: request.created_at is unix SECONDS (the fixture's default is
+    // NOW - 9600, per the `request()` builder above), so its DeskFirstRecord
+    // must read that × 1000, not the raw seconds value — the J1 conversion,
+    // made an assertion.
+    expect(byKind.get('first-ask')).toEqual({
+      kind: 'first-ask',
+      createdAtMs: (NOW - 9600) * 1000,
+      id: 'd1',
+    })
+    expect(desk.firsts).toHaveLength(7)
+  })
+
+  it('tags every open ask, in milliseconds, for firsts.ts to pick the earliest from', () => {
+    // desk.ts's job stops at tagging every candidate; picking the earliest
+    // per kind is firsts.ts's (`firstsToNarrate`, tested in firsts.test.ts).
+    // What THIS fold must get right is that both asks land in `firsts` with
+    // the seconds→ms conversion applied to each — a fold that forgot the
+    // conversion on even one of them would put it out of order relative to
+    // the other, and relative to any config-event-derived kind.
+    const desk = buildDesk(
+      input({
+        attentionRequests: [
+          request({ id: 'ask-early', session_id: 'sess-a', created_at: NOW - 5000 }),
+          request({ id: 'ask-late', session_id: 'sess-b', created_at: NOW - 1000 }),
+        ],
+        deliveries: [
+          delivery({ id: 'd-a', session_id: 'sess-a' }),
+          delivery({ id: 'd-b', session_id: 'sess-b' }),
+        ],
+      }),
+    )
+    const asks = desk.firsts.filter((f) => f.kind === 'first-ask')
+    expect(asks).toContainEqual({ kind: 'first-ask', createdAtMs: (NOW - 5000) * 1000, id: 'd-a' })
+    expect(asks).toContainEqual({ kind: 'first-ask', createdAtMs: (NOW - 1000) * 1000, id: 'd-b' })
+  })
+
+  it('is unwindowed: a first outside the earlier-changes cap still shows up', () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      configEvent({ id: `noise-${i}`, action: 'worker_update', created_at: NOW_MS - (200_000 - i * 1000) }),
+    )
+    const desk = buildDesk(
+      input({
+        configEvents: [
+          configEvent({ id: 'first-worker-ever', action: 'worker_create', created_at: NOW_MS - 500_000 }),
+          ...many,
+        ],
+        lastSeenMs: NOW_MS - 1,
+        earlierChangesLimit: 3,
+      }),
+    )
+    // The capped tail is short…
+    expect(desk.earlierChanges.length).toBeLessThanOrEqual(3)
+    // …but the fold's own first-of-a-kind list still has the actual first.
+    expect(desk.firsts.find((f) => f.kind === 'first-worker')?.id).toBe('first-worker-ever')
   })
 })
