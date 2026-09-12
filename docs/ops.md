@@ -222,6 +222,11 @@ These get checked during setup:
 **About two working days in total.** Do the steps in order. Every step ends with a **✅ Done
 when** check. Don't move on until it passes.
 
+> **Steps 3–7 are also a script:** `deploy/ovh/bootstrap.sh` runs them as idempotent phases
+> (`base`, `lvm`, `tailscale`, `lockdown`, `docker`, `verify`), so a rebuild is a handful of
+> commands rather than copy-paste. The steps below remain the explanation of *why*; where the two
+> differ, fix the script. `bootstrap.sh verify` re-checks every "Done when" in Steps 3–7 at once.
+
 ## Step 0 — Before you order (15 min)
 
 1. **Password manager:** make an entry called **"OVH box"**. Everything secret below goes in it.
@@ -924,7 +929,8 @@ cat /proc/mdstat                              # both disks [UU]
 set -a; . /etc/box-backup.env; set +a; restic snapshots --latest 1
 ```
 
-**Not built yet:** a git repo holding these scripts (so a rebuild is one command rather than
+**Built since:** `deploy/ovh/bootstrap.sh` + `deploy/ovh/new-app-volume` in this repo cover
+Steps 3–7. **Still not built:** the `box-*` backup scripts as repo files (Step 9 is still
 copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
 
 ---
@@ -932,7 +938,11 @@ copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
 # Part 4 — Later: moving the GKE apps (what we already know)
 
 **Not part of the first round.** Kai will move these one at a time. Found read-only on
-2026-09-11.
+2026-09-11, re-measured 2026-09-12.
+
+> **The per-app plan lives in `design/2026-09-12-gke-to-box-migration.md`**: real disk usage, the
+> order, and the specific gotcha for each app. NoCode Works and Franchise Cloud are **out of
+> scope** there — both are being shut down the week of 2026-09-14.
 
 **What's there:**
 - **11 apps on one GKE machine:**
@@ -942,8 +952,12 @@ copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
   - **badcode:** app, worker, n8n, Postgres 17 (ParadeDB), Redis;
   - **small apps:** forum, kellie, quoteright, panwww, zps-apps;
   - **shared:** Postgres **9.6** (1 TB disk) and Redis.
-- **Disks today:** 6, provisioned at 1.65 TB in total. How much is actually used is unknown.
-  Check with `df -h` inside each database pod before planning.
+- **Disks today:** 6, provisioned at 1.65 TB — but **only 23.8 GiB is actually used**, measured
+  2026-09-12 from the node's kubelet statistics (no exec needed; the command is in
+  `design/2026-09-12-gke-to-box-migration.md` §1). Shared Postgres 9.6 **22.7 GiB**, nocode
+  Elasticsearch 841 MiB, franchisecloud Elasticsearch 164 MiB, badcode ParadeDB **111 MiB**, redis
+  1.8 MiB, forum 30 KB. So ~890 GB is ample, and the 9.6 upgrade is a 20–40 minute job, not an
+  all-day outage.
 
 **Gotchas per app:**
 - **The shared Postgres 9.6 is five years past end of life.** Upgrade it during its move
@@ -964,11 +978,16 @@ copy-paste), Uptime Kuma, and OVH's Backup Agent as a second copy.
   last**. Pass the Bob isolation gate (1.7) first.
 
 **Found in passing, worth doing now, independent of any move:**
-- 🔴 **Some HTTPS certificate renewals on GKE look stuck.** Several of cert-manager's renewal jobs
-  (cert-manager renews your HTTPS certificates) have been pending for 1–9 days (`nocode-domains`,
-  `zps-apps`). Those sites' certificates may expire.
-- **Google holds 9,147 old disk snapshots (~379 GB)**, many from 2017–2025, that the current
-  14-day policy never deletes. Review and delete the stale ones.
+- 🟡 **The "stuck HTTPS renewals" are stale, not urgent.** Re-checked 2026-09-12: all 14 pending
+  cert-manager challenges are for domains that no longer point at this cluster — three
+  (`andovernetball.co.uk`, `arimatheafilms.com`, `digitaltribe.me`, `ecepodcasts.com`) do not
+  resolve at all; `zps8.co.uk`, `zeteticmind.com` and `strategy.zeteticmind.com` now answer from
+  Krystal (`185.194.90.31`) with valid certificates to 2026-10-24; and `nocode.works` itself
+  returns HTTP 200 on a valid Let's Encrypt certificate to 2026-10-24. **Nothing user-facing is
+  broken**, and most of it disappears when NoCode is switched off. Housekeeping.
+- **Google holds 9,147 old disk snapshots (378.6 GB)**, oldest 2017-04-04, that the current
+  14-day policy never deletes (confirmed 2026-09-12,
+  `gcloud compute snapshots list --project=webkit-servers`). Review and delete the stale ones.
 
 ---
 

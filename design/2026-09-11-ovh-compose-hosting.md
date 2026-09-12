@@ -360,6 +360,8 @@ Kai decided these on 2026-09-11:
    load proves the need.
 2. **Hostname: `bob.badcode.tv`.** Kai controls DNS and will point the A record at the new box.
 3. **Disk: ~890 GB is enough.** Kai judges the later migrations fit.
+   **Confirmed by measurement 2026-09-12:** the whole GKE estate uses **23.8 GiB**, not the 1.65 TB
+   provisioned (`design/2026-09-12-gke-to-box-migration.md` §1). No disk upgrade needed at order time.
 
 Still open:
 
@@ -432,13 +434,17 @@ A read-only inventory of `prodcluster` (GKE, `europe-west1-b`), taken 2026-09-11
   - Moving the domains themselves needs either customer DNS changes, or the GCP IPs kept alive
     for a while as a forwarding hop.
 - **Several cert-manager HTTP-01 solvers have been stuck for 1 to 9 days right now**
-  (`nocode-domains`, `zps-apps`). Some certificate renewals are probably failing today,
-  independent of any move.
+  (`nocode-domains`, `zps-apps`). ~~Some certificate renewals are probably failing today.~~
+  **Re-checked 2026-09-12 and downgraded:** all 14 are for domains that no longer point at the
+  cluster (three do not resolve; `zps8.co.uk` / `zeteticmind.com` / `strategy.zeteticmind.com` now
+  answer from Krystal `185.194.90.31` with certificates valid to 2026-10-24; `nocode.works` itself
+  returns 200 on a valid Let's Encrypt certificate). **Nothing user-facing is broken.**
 - **Google Container Registry is retired.** `gcr.io` paths are served by Artifact Registry, and
   the box pulls with a reader-only service-account key.
 - **Apps that read GCS will need credentials instead of GKE's metadata server.** Heavy readers
   pay about $0.12/GB egress; `nocode-websites` and `forum-videos` are the ones to measure first.
-- **Snapshot housekeeping:** the project holds **9,147 disk snapshots (~379 GB)**. Many date from
+- **Snapshot housekeeping:** the project holds **9,147 disk snapshots (378.6 GB, oldest
+  2017-04-04; re-confirmed 2026-09-12)**. Many date from
   2017–2025, before the current `hourly-backup` policy (14 days) existed, so the policy never
   deletes them. Review and delete the stale ones. It costs a little each month and clutters
   every restore search.
