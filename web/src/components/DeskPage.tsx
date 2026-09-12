@@ -33,6 +33,7 @@ import { ageEscalation, coarseAgeLabel } from '../useElapsedTicker.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
+import BudgetPanel from './BudgetPanel.js'
 
 export interface DeskPageProps extends UseDeskOptions {
   /**
@@ -174,6 +175,15 @@ export default function DeskPage({
           {error}
         </Alert>
       )}
+
+      <Box sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        <BudgetPanel
+          title="Budget"
+          collapsible
+          apiBaseUrl={deskOptions.apiBaseUrl}
+          getAuthToken={deskOptions.getAuthToken}
+        />
+      </Box>
 
       {showFirstRunPanel ? (
         <FirstRun

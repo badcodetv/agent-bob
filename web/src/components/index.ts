@@ -222,3 +222,7 @@ export type { RunArchitectControlProps } from './RunArchitectControl.js'
 export { default as OnboardingPage } from './OnboardingPage.js'
 
 export type { OnboardingPageProps } from './OnboardingPage.js'
+
+export { default as BudgetPanel } from './BudgetPanel.js'
+
+export type { BudgetPanelProps } from './BudgetPanel.js'

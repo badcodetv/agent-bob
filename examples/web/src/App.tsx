@@ -520,7 +520,7 @@ function ProjectWorkspace({
             onOpenSession={showSession}
           />
         )}
-        {shownView === "settings" && <ProjectSettingsPage />}
+        {shownView === "settings" && <ProjectSettingsPage projectId={project} />}
         {shownView === "onboarding" && (
           <OnboardingPage
             sessionId={onboardSessionId}

@@ -912,6 +912,24 @@ export type { RunArchitectControlProps } from './components/RunArchitectControl.
 export { default as OnboardingPage } from './components/OnboardingPage.js'
 export type { OnboardingPageProps } from './components/OnboardingPage.js'
 
+// The budget panel (A5) — today's spend against the operator's budget, and
+// the operator-gated form that changes it.
+export { default as BudgetPanel } from './components/BudgetPanel.js'
+export type { BudgetPanelProps } from './components/BudgetPanel.js'
+export {
+  default as useUsage,
+  USAGE_ENDPOINT,
+  coerceUsage,
+  defaultUsage,
+  formatCost,
+  credentialModeSentence,
+  budgetTier,
+  budgetFraction,
+} from './usage.js'
+export type { Usage, UsageWindow, UsageBudget, UseUsageOptions, UsageApi, BudgetTier } from './usage.js'
+export { default as useWhoami, WHOAMI_ENDPOINT, coerceWhoami, defaultWhoami } from './whoami.js'
+export type { Whoami, UseWhoamiOptions, WhoamiApi } from './whoami.js'
+
 // The git projection panel — presentational, so it lives in the components
 // tier: it takes a status and renders it, and ProjectSettingsPage owns the read.
 export { default as GitProjectionPanel } from './components/GitProjectionPanel.js'
