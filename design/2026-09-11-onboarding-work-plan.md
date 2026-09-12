@@ -283,7 +283,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 2d5ea9e merged to main. Claim name `operator` (devclaims.OperatorClaim, IssueOperator); 403 body `only the operator may change budgets and caps`; `/agent/whoami` mounted through httpapi.Endpoints (not main.go, see DI 4); defaults via package-level `agentdb.SetDefaultBudgets` because compose.go:389 calls DefaultProjectSettings outside any Store (DI 5); compose + .env.example updated. All Go gates green on the branch.
 
-### A4: the usage route   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### A4: the usage route   [Status: merged, live-PG verified | Model: sonnet]
 - **Scope:** Exactly §1.4. Add `usageCostSQL` beside the two token expressions in
   `go/agentdb/token_usage.go` and one store method `ProjectUsageSince(ctx, project, since) (Usage, error)`
   returning input, output, cost and query count for `created_at >= since`, reusing
@@ -302,8 +302,8 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test ./...`; `./stack test-go` if
   a live database is available (say in Notes whether it was).
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go.
+- [x] done
+- Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go. (2026-09-12) Resumed: the WIP diff needed no code changes; amended to 5dd6d5f and merged as a12755f. The agent's `go test ./...` was green but it reported honestly that the one acceptance criterion about the midnight boundary rested on a SKIPPED live-Postgres test, so the orchestrator closed that gap: a throwaway `pgvector/pgvector:pg16` on port 55432 (never the stack's shared database — CLAUDE.md warns a sibling branch's migration has broken other agents' runs), then `AGENTKIT_TEST_POSTGRES_URL=... go test ./agentdb/... -run Usage -v -count=1` → **all four `TestLivePG_GetProjectUsageSince_*` PASS**, including `ExcludesRowsBeforeSince`. Then the whole suite on the merged tree WITH the live database attached: `go build`/`go vet` clean, `go test ./... -count=1` → 34 packages ok, 0 FAIL, exit 0. So A4 is the one ticket here proven against real Postgres, not just sqlite.
 
 ### A5: the budget panel in the console   [Status: todo | Model: sonnet]
 - **Scope:** A `BudgetPanel` component in `web/src/components/`: today's tokens against the hard
@@ -582,7 +582,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - [ ] done
 - Notes:
 
-### C3: chat empty state, create-form parity, the four copy defects   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### C3: chat empty state, create-form parity, the four copy defects   [Status: merged | Model: sonnet]
 - **Scope:** G3, G6 and G9 from the design. **G3:** `AgentChat.tsx` renders, when the transcript is
   empty, one sentence of what this session is, the sentence *"A chat is not a job: it gets none of
   the project's briefing, and nothing it says is remembered unless a worker writes a memory."*, and
@@ -604,10 +604,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused while typechecking examples/web; WIP committed as b1a700c on worktree-agent-a165e672dbaeb7334. 19 files incl. AgentChat(+test), ProjectPicker, Sidebar, DeskPage, OrgChartPage(+test), ProjectSettingsPage, ScheduleEditor, SubscriptionEditor, console.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused while typechecking examples/web; WIP committed as b1a700c on worktree-agent-a165e672dbaeb7334. 19 files incl. AgentChat(+test), ProjectPicker, Sidebar, DeskPage, OrgChartPage(+test), ProjectSettingsPage, ScheduleEditor, SubscriptionEditor, console.stack.spec.ts. (2026-09-12) Resumed: the agent found and fixed one real defect — the empty-state sentence read "unless **it** writes a memory" where this ticket quotes "unless **a worker** writes a memory" (`web/src/components/AgentChat.tsx:428` now matches). Amended to 348220a, merged as a merge of worktree-agent-a165e672dbaeb7334. **It shares DeskPage.tsx and Sidebar.tsx with A2 and git merged both cleanly — no conflict at all**, so the orchestrator checked the semantics rather than trusting the textual merge: A2's `showFirstRunPanel` (`DeskPage.tsx:147`) and `finish-onboarding` button (`:568`) are both still present, and C3's Activity/Triggers wording survived at `:286-287`. Both acceptance greps re-run on the MERGED tree and both still empty. Web gates on the merged tree: typecheck clean, `npx vitest run --testTimeout=20000` → 1563/1563 in 83 files, build clean, `examples/web` typecheck clean. Residue the agent flagged: the two `e2e/features` hits for `Rationale`/`Project name` are a history comment, not a selector — left as found. DI11 records the ticket-vs-design wording split.
 
-### C4: write a note from the Memory page   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### C4: write a note from the Memory page   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** G8. On `MemoryBrowserPage.tsx`: a **Write a note** button opening a small form
   (content, multiline; labels as one `key=value` per line in the identifier face, validated with
   the same parser the selector field uses if one is exposed, else a strict regex with a helpful
@@ -627,8 +627,8 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused at 'about to commit'; WIP committed as 3e5e92b on worktree-agent-a8928fdf78ef2c1d3. Files: MemoryBrowserPage(+test), memories.ts(+test), new e2e/features/memory-write.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused at 'about to commit'; WIP committed as 3e5e92b on worktree-agent-a8928fdf78ef2c1d3. Files: MemoryBrowserPage(+test), memories.ts(+test), new e2e/features/memory-write.stack.spec.ts. (2026-09-12) Resumed: the WIP diff needed no code changes; amended to 39a709b and merged as b0f759a with no conflict. The orchestrator re-read the provenance claim rather than taking the agent's word, because it is the one thing this ticket exists to guarantee: `memoryWriteBody` returns exactly `{labels, content}` (`web/src/memories.ts:230-240`), `web/src/memories.test.ts:342-353` pins that key set and asserts neither provenance key is present, and the server refuses a body carrying either — even as "" or null — at `go/httpapi/memories.go:480-492`. So the client cannot send provenance and the server would reject it if it did. Malformed label lines block submit via `canSubmit` and surface the reason as `helperText` (`MemoryBrowserPage.tsx:453-455,513-514`); the registry action pre-fills from the newest `name=label-registry` row via `foldNamedMemories`' descending fold (`memories.ts:451-476`). DI9 records the gap the agent found: on a project with zero memories the Memory nav entry never reveals, so this button is unreachable until something else writes one.
 
 ### C5: the Desk narrates firsts   [Status: todo | Model: sonnet]
 - **Scope:** G4. In `web/src/desk.ts`'s fold (pure, `now` passed in), tag each record with its
@@ -714,3 +714,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **9. A brand-new project has no UI path to its own first memory.** (C4, 2026-09-12) The Memory nav entry only reveals once the project has ≥1 memory (K9, `examples/web/src/App.tsx:296-298`), so the "Write a note" button C4 adds is unreachable on a project that has never had one — `e2e/features/memory-write.stack.spec.ts:20-26` routes around it by seeding a memory over the API. Harmless today because onboarding seeds two memories at charter approval, but it makes the zero-memory case a dead end. Wants its own ticket if the first note ever matters before a charter.
 
 **10. "Charter applied" is inferred from a worker's name, not reported by the API.** (A2, 2026-09-12) `useInterviewState` in `examples/web/src/onboarding.ts` decides an interview is over when `GET /agent/workers` contains a worker named `architect` (`ARCHITECT_WORKER_NAME`). The ticket text sanctioned this and the code documents it, but a charter that sets a custom `architect_name` defeats it and the project stays "in interview" forever. The real fix is an `applied` flag on the charter-current response; out of scope here.
+
+**11. The ticket and the design doc quote the empty-chat sentence differently.** (C3, 2026-09-12) This plan's C3 scope quotes "nothing it says is remembered unless **a worker** writes a memory"; design §3 G3 writes "unless **it** writes a memory". The agent followed this plan, as the ticket is the authority for its own text, and `web/src/components/AgentChat.tsx:428` now reads "a worker". The design doc is the one out of step; reconcile it there, not in the code.
+
+**12. Nothing in this wave was proven against real Postgres until it was asked for.** (orchestrator, 2026-09-12) A4's agent ran a full green `go test ./...` and still reported, correctly, that one of its four acceptance criteria rested on a test that had SKIPPED — `TestLivePG_GetProjectUsageSince_ExcludesRowsBeforeSince` needs `AGENTKIT_TEST_POSTGRES_URL`. That is CLAUDE.md's standing warning behaving exactly as advertised: a green suite does not prove the pgvector/jsonb paths. Closed here with a throwaway `pgvector/pgvector:pg16` on port 55432 (all four live cases PASS, and the whole suite re-run with it attached: 34 ok, 0 FAIL). Two things worth keeping: the fleet's Go gate should carry a live database whenever a ticket touches `agentdb`, and the throwaway must never be the compose stack's own `agent-bob-postgres-1` — a sibling branch's unmerged migration has broken other agents' runs before.
