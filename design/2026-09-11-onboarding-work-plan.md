@@ -204,7 +204,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 
 ### Stream A — safe to invite
 
-### A1: revert is reachable from the Activity rail   [Status: merged, e2e pending D2 | Model: sonnet]
+### A1: revert is reachable from the Activity rail   [Status: done, e2e verified | Model: sonnet]
 - **Scope:** Mount the existing `RevertControl` (`web/src/components/ChangelogView.tsx:324-395`)
   on the `changes` rows of `ActivityPage` (`web/src/components/ActivityPage.tsx`). The row already
   carries the config event; the control needs the entry and the revert block the API returns for
@@ -225,8 +225,8 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test`; the e2e spec typechecks
   (`cd e2e && npx tsc --noEmit -p .` if a tsconfig exists, else `npx playwright test --list`).
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Commit 316ce03 merged to main. `RevertControl` exported from ChangelogView and mounted on `kind === 'change'` rows of ActivityPage; revert blocks computed from the seq-ordered config log (`useActivity.ts`), not the rail's time sort; 3 unit tests; new `e2e/features/revert.stack.spec.ts` (revert newest from Activity, then 409 on the superseded entry). web typecheck green; full `npm test` 1546/1548 with 2 unrelated timeout flakes (DI 2). Stack e2e pending D2.
+- [x] done
+- Notes: (2026-09-11) Commit 316ce03 merged to main. `RevertControl` exported from ChangelogView and mounted on `kind === 'change'` rows of ActivityPage; revert blocks computed from the seq-ordered config log (`useActivity.ts`), not the rail's time sort; 3 unit tests; new `e2e/features/revert.stack.spec.ts` (revert newest from Activity, then 409 on the superseded entry). web typecheck green; full `npm test` 1546/1548 with 2 unrelated timeout flakes (DI 2). Stack e2e pending D2. (2026-09-12) **e2e now run (D2):** `revert.stack.spec.ts` — "revert puts a worker field back, and a superseded entry is refused" — PASSES against the live stack, so A1's acceptance is proved in a browser and not only by unit test.
 
 ### A2: the interview survives navigation, and hides the seeds while it runs   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Replace the `localStorage`-only gate on the onboarding view (`examples/web/src/App.tsx:36`,
@@ -256,7 +256,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [x] done
 - Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts. (2026-09-12) Resumed: the WIP diff needed no fixes; amended to 6dcbcbf "A2: the interview survives navigation, and the seeds stay hidden until a charter lands" and merged as 05a41f1. Orchestrator re-ran the Validation on the merged tree: `npm run typecheck` clean, `npx vitest run --testTimeout=20000` 1552/1552 pass in 81 files, `npm run build` clean, `examples/web` `yarn typecheck` clean (the timeout flag is the DI8 flake, not the ticket). 'No onboard session behaves as today' and 'charter applied hides the row' are code traces, not tests — the e2e scenario at e2e/features/onboarding.stack.spec.ts:147-172 is written and waits on D2. Known gap logged as DI10.
 
-### A3: operator claim, budget write guard, default budgets, whoami   [Status: merged, e2e pending D2 | Model: sonnet]
+### A3: operator claim, budget write guard, default budgets, whoami   [Status: done, e2e verified | Model: sonnet]
 - **Scope:** Exactly §1.1, §1.2 and §1.3 above. The claim is added where project tokens are
   minted for wildcard holders and the test login; `principal` and `httpapi.Identity` gain
   `Operator`; `PutProjectSettings` (`go/httpapi/project_settings.go:66`) reads the stored row
@@ -280,8 +280,8 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** yes
 - **Validation:** `cd go && go build ./... && go vet ./... && go test ./...`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Commit 2d5ea9e merged to main. Claim name `operator` (devclaims.OperatorClaim, IssueOperator); 403 body `only the operator may change budgets and caps`; `/agent/whoami` mounted through httpapi.Endpoints (not main.go, see DI 4); defaults via package-level `agentdb.SetDefaultBudgets` because compose.go:389 calls DefaultProjectSettings outside any Store (DI 5); compose + .env.example updated. All Go gates green on the branch.
+- [x] done
+- Notes: (2026-09-11) Commit 2d5ea9e merged to main. Claim name `operator` (devclaims.OperatorClaim, IssueOperator); 403 body `only the operator may change budgets and caps`; `/agent/whoami` mounted through httpapi.Endpoints (not main.go, see DI 4); defaults via package-level `agentdb.SetDefaultBudgets` because compose.go:389 calls DefaultProjectSettings outside any Store (DI 5); compose + .env.example updated. All Go gates green on the branch. (2026-09-12) **e2e now run (D2):** `budget.stack.spec.ts` proves both halves against the live stack — the wildcard test login gets the limits form and a successful budget write, and a mocked non-operator `whoami` gets the numbers plus "Only the operator can change this." and no form. The default-budget env vars are set in `docs/ops.md` with Kai's chosen 50,000/100,000 (2026-09-12); the e2e stack leaves them unset, which is why its captured fixture shows 0/0.
 
 ### A4: the usage route   [Status: merged, live-PG verified | Model: sonnet]
 - **Scope:** Exactly §1.4. Add `usageCostSQL` beside the two token expressions in
@@ -375,7 +375,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test -race ./cmd/agentd/... && go test ./...`
 - **Depends on:** —
 - [ ] done
-- Notes: (2026-09-11) Commit 32b28cc merged to main (rebased on cd44582). `projectSettingsHolder` (atomic.Pointer; SIGHUP + `AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) and `projectKeysHolder`; login handlers take a `userDirectory`; git-token-env closure reads the holder per call; embed-CSP origin list still a boot snapshot (DI 6); docs/ops.md switched to a mounted `projects.json` (DI 7). Gates incl. `-race` green on the branch.
+- Notes: (2026-09-11) Commit 32b28cc merged to main (rebased on cd44582). `projectSettingsHolder` (atomic.Pointer; SIGHUP + `AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) and `projectKeysHolder`; login handlers take a `userDirectory`; git-token-env closure reads the holder per call; embed-CSP origin list still a boot snapshot (DI 6); docs/ops.md switched to a mounted `projects.json` (DI 7). Gates incl. `-race` green on the branch. (2026-09-12) **Deliberately still unticked, and the only one.** Its code is merged and its unit tests pass, but the ticket's own status asks for a *live* check and D2 could not give one: the e2e stack carries the inline `AGENTKIT_PROJECT_MAP`, not `AGENTKIT_PROJECT_MAP_FILE` (confirmed by reading the env inside the running `agentd`), so the SIGHUP/timer reload path is never exercised there. Contriving a file into the container would prove the code path while proving nothing about the claim that matters — that Kai can add a friend to the OVH box without a restart. **That check belongs to the box, i.e. thread 01's ops work:** write the new email into the map file, `docker compose kill -s HUP agentd`, and confirm the new project appears without a restart and without dropping a session. Until someone runs it there, A6 is merged-and-plausible, not verified.
 
 ### A7: the operator's story, written down   [Status: merged | Model: sonnet]
 - **Scope:** Update `docs/ops.md` (§11d and wherever credentials are set) so the OVH box runs in
@@ -424,7 +424,7 @@ Never invent one. Every page ends with "What this will not do". The word for the
 spec's word (`docs/product/17-product-spec.md` §3). No marketing adjectives. Second person, present
 tense. No em-dashes in prose. Write only your own files; do not touch another ticket's pages.
 
-### B1: pages 0, 1, 2 — what Bob is, your first hour, the goal and the charter   [Status: written, awaiting B8 | Model: sonnet]
+### B1: pages 0, 1, 2 — what Bob is, your first hour, the goal and the charter   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/what-bob-is.md`, `your-first-hour.md`, `the-goal-and-the-charter.md`,
   and `docs/guide/README.md` (page order, the skeleton, the voice rules, the front-matter contract
   — copy them from the design so a later writer needs only this folder).
@@ -436,10 +436,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   an enabled daily schedule; page 2 quotes "the gate is for comprehension, not correctness".
 - **Validation:** each file has front matter with the right slug; `wc -w` per page ≤ 450.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: what-bob-is (344w), your-first-hour (450w), the-goal-and-the-charter (449w), README.md (728w: order, skeleton, voice, front-matter contract). Quotes: interviewer.md:130-143 (charter goal/measure/background verbatim; label_rules deferred to the-rulebook), docs/18:772 verbatim, CharterPanel.tsx:88-136 caption (trimmed). The why-Bob hole is left. Flagged: heading convention differs between pages (see DI 1).
+- [x] done
+- Notes: (2026-09-11) Written: what-bob-is (344w), your-first-hour (450w), the-goal-and-the-charter (449w), README.md (728w: order, skeleton, voice, front-matter contract). Quotes: interviewer.md:130-143 (charter goal/measure/background verbatim; label_rules deferred to the-rulebook), docs/18:772 verbatim, CharterPanel.tsx:88-136 caption (trimmed). The why-Bob hole is left. Flagged: heading convention differs between pages (see DI 1). (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — B1's three pages also carry B7's three real screenshots (`docs/guide/img/your-first-hour-{1,2,3}.png`) and `the-goal-and-the-charter`'s captured charter.
 
-### B2: pages 3, 4, 5 — a worker's instructions, the rulebook, clocks and wake-ups   [Status: written, awaiting B8 | Model: sonnet]
+### B2: pages 3, 4, 5 — a worker's instructions, the rulebook, clocks and wake-ups   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/a-workers-instructions.md`, `the-rulebook.md`, `clocks-and-wake-ups.md`.
 - **Sources:** design §4.2 rows 3–5 and their citations; `web/src/components/WorkerEditor.tsx`
   helper text; `WorkerTriggers.tsx:216-222` (quote it); `web/src/nlAssist.ts:6-27` and its
@@ -452,10 +452,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   proposes and never saves.
 - **Validation:** as B1.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: a-workers-instructions (433w), the-rulebook (437w), clocks-and-wake-ups (384w). Quotes verified against live files (interviewer.md §3 + worked charter label_rules; WorkerEditor.tsx:387-389; learning-stories.json + spec:308; docs/18:884-886; MemoryBrowserPage.tsx:179; WorkerTriggers.tsx:216-220; 17-product-spec.md:141-142; nlAssist.ts:6-14; router.go:420). Fixture placeholders left for: a newsletter-writer prompt (p3), Ellen adding a label (p4), a compile capture (p5). Two em-dashes remain inside verbatim quotes only. Page 4 describes write-a-note as post-C4, with a comment.
+- [x] done
+- Notes: (2026-09-11) Written: a-workers-instructions (433w), the-rulebook (437w), clocks-and-wake-ups (384w). Quotes verified against live files (interviewer.md §3 + worked charter label_rules; WorkerEditor.tsx:387-389; learning-stories.json + spec:308; docs/18:884-886; MemoryBrowserPage.tsx:179; WorkerTriggers.tsx:216-220; 17-product-spec.md:141-142; nlAssist.ts:6-14; router.go:420). Fixture placeholders left for: a newsletter-writer prompt (p3), Ellen adding a label (p4), a compile capture (p5). Two em-dashes remain inside verbatim quotes only. Page 4 describes write-a-note as post-C4, with a comment. (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — all three of B2's pages now carry captured fixtures from B7 (the real prompt edit, the second label-registry version, the schedule the architect actually saved).
 
-### B3: pages 6, 7, 8 — talking to a worker, when a worker asks you, the Desk   [Status: written, awaiting B8 | Model: sonnet]
+### B3: pages 6, 7, 8 — talking to a worker, when a worker asks you, the Desk   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/talking-to-a-worker.md`, `when-a-worker-asks-you.md`, `the-desk.md`.
 - **Sources:** design §4.2 rows 6–8; `docs/18-…` "Known limits" (chat gets no briefing);
   `docs/workflows.md` §6 (always pass `expires_in`); `web/src/components/DeskPage.tsx:514-547`
@@ -466,10 +466,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   ≤ 250 words.
 - **Validation:** as B1.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: talking-to-a-worker (377w), when-a-worker-asks-you (392w), the-desk (232w). "A chat is not a job" and "Silence is not consent" present. Sources: docs/18 Known limits; go/runner.go:2539-2557 (transcript emitted on idle, verified in source); docs/workflows.md:162-166; learning-stories.stack.spec.ts:550 (LS4 rationale verbatim); DeskPage.tsx:260 (quoted up to the clause that names dead pages); DeskPage legend ~514-565; spine.tsx:1-39. Fixture placeholder: the architect's first ask (p7). Kept a final "Next" section (Back/Forward) following B2's on-disk precedent.
+- [x] done
+- Notes: (2026-09-11) Written: talking-to-a-worker (377w), when-a-worker-asks-you (392w), the-desk (232w). "A chat is not a job" and "Silence is not consent" present. Sources: docs/18 Known limits; go/runner.go:2539-2557 (transcript emitted on idle, verified in source); docs/workflows.md:162-166; learning-stories.stack.spec.ts:550 (LS4 rationale verbatim); DeskPage.tsx:260 (quoted up to the clause that names dead pages); DeskPage legend ~514-565; spine.tsx:1-39. Fixture placeholder: the architect's first ask (p7). Kept a final "Next" section (Back/Forward) following B2's on-disk precedent. (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — `when-a-worker-asks-you` carries the architect's real `request_human_attention` message, quoted whole — and is the page DI35 is about.
 
-### B4: pages 9, 10, 11 — the rail and the changelog, memory, the chart   [Status: written, awaiting B8 | Model: sonnet]
+### B4: pages 9, 10, 11 — the rail and the changelog, memory, the chart   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/the-rail-and-the-changelog.md`, `memory.md`, `the-chart.md`.
 - **Sources:** design §4.2 rows 9–11; `docs/product/15-operator-console-design.md` §3.6 (the
   spine, quote the sentence "everything hangs off a rail…"), §3.2 (authorship is a colour), §3.7
@@ -484,10 +484,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   gesture on the chart is a proposal except emitting a real event.
 - **Validation:** as B1; `grep -ci undo docs/guide/the-rail-and-the-changelog.md` is 0.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: the-rail-and-the-changelog (442w), memory (441w), the-chart (405w). Quotes: ChangelogView.tsx:427-431; doc 15 §3.2/§3.6; MemoryBrowserPage.tsx:179; registry.md; compose.go preamble; interviewer.md label_rules; EmitEventControl.tsx:118; OrgChartPage.tsx + navReveal.test.ts:58-68. Post-A1 and post-C4 caveats present as comments. `grep -ci undo` = 0. Three Ellen examples left as B7 fixtures.
+- [x] done
+- Notes: (2026-09-11) Written: the-rail-and-the-changelog (442w), memory (441w), the-chart (405w). Quotes: ChangelogView.tsx:427-431; doc 15 §3.2/§3.6; MemoryBrowserPage.tsx:179; registry.md; compose.go preamble; interviewer.md label_rules; EmitEventControl.tsx:118; OrgChartPage.tsx + navReveal.test.ts:58-68. Post-A1 and post-C4 caveats present as comments. `grep -ci undo` = 0. Three Ellen examples left as B7 fixtures. (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — all three carry B7 captures: the real revert, a note written through the Write-a-note dialog, and the roster the architect built.
 
-### B5: pages 12, 13, 14 — the architect, what Bob will not do, money   [Status: written, awaiting B8 | Model: sonnet]
+### B5: pages 12, 13, 14 — the architect, what Bob will not do, money   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/the-architect.md`, `what-bob-will-not-do.md`, `money.md`.
 - **Sources:** `docs/18-workers-memory-events.md` §9a in full (page 12 quotes the no-brake
   paragraph **verbatim, in a block quote, unsoftened**, and the loop's six steps in plain words);
@@ -504,10 +504,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   chat is exempt, and that the count resets at midnight.
 - **Validation:** as B1.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: the-architect (352w), what-bob-will-not-do (439w), money (240w). No-brake paragraph quoted verbatim from docs/18:845-847; architect.md STEP 0 quoted; workflows.md:175-212 all six items + three known limits (docs/18:880-891); router.go:693-702 for the tiers. money.md marks post-A3/A4/A5 sentences with comments; default limit hole left for Kai; week's-spend example is a B7 fixture.
+- [x] done
+- Notes: (2026-09-11) Written: the-architect (352w), what-bob-will-not-do (439w), money (240w). No-brake paragraph quoted verbatim from docs/18:845-847; architect.md STEP 0 quoted; workflows.md:175-212 all six items + three known limits (docs/18:880-891); router.go:693-702 for the tiers. money.md marks post-A3/A4/A5 sentences with comments; default limit hole left for Kai; week's-spend example is a B7 fixture. (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — `money.md` carries real `GET /agent/usage` numbers, and Kai's chosen default (100,000/day, warning at 50,000) as of 2026-09-12.
 
-### B6: field notes and the glossary   [Status: written, awaiting B8 | Model: sonnet]
+### B6: field notes and the glossary   [Status: done | Model: sonnet]
 - **Files:** **new** `docs/guide/field-notes.md`, `docs/guide/glossary.md`.
 - **Sources:** the seven candidates in design §4.2 Part 4 plus "the forgotten sign-off"; each
   story's source is named there — read the source entry in `docs/product/06-work-plan.md`'s
@@ -522,8 +522,8 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   anywhere in `docs/guide/`.
 - **Validation:** `grep -c '^\*\*' docs/guide/glossary.md` ≥ 22.
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Written: field-notes (899w, 8 stories, each ≤120w, each ending in the rule, sourced in comments: 06-work-plan.md:490-502, :722-725; 20-operations-doctrine.md:84,:87; 13-work-plan-self-improvement.md:471-473; 22-readiness.md:24-29; architect-probe README; 2026-09-08 DI4 :2007-2009; git-projection.md:36-72; learning-stories.json:87,105,124), glossary (633w, 31 entries; labels checked against navReveal.ts:161-167, ChangelogView.tsx:395, WorkerEditor.tsx:190-199).
+- [x] done
+- Notes: (2026-09-11) Written: field-notes (899w, 8 stories, each ≤120w, each ending in the rule, sourced in comments: 06-work-plan.md:490-502, :722-725; 20-operations-doctrine.md:84,:87; 13-work-plan-self-improvement.md:471-473; 22-readiness.md:24-29; architect-probe README; 2026-09-08 DI4 :2007-2009; git-projection.md:36-72; learning-stories.json:87,105,124), glossary (633w, 31 entries; labels checked against navReveal.ts:161-167, ChangelogView.tsx:395, WorkerEditor.tsx:190-199). (2026-09-12) Ticked: B8's editorial pass is done and B7 has filled this stream's fixtures, so "awaiting B8" no longer applies — no fixtures were owed here; B6 was complete at B8 and is ticked with the rest of the stream.
 
 ### B7: Ellen's fixture project and the screenshots   [Status: done | Model: sonnet]
 - **Scope:** With the stack up in mock mode (D2 brings it up; this ticket runs after D1 merges),
