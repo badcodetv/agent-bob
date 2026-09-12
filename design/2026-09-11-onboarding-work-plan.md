@@ -675,7 +675,25 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** the run's summary line, pasted into Notes; `e2e/stack-e2e-logs-mock.txt` captured.
 - **Depends on:** D1
 - [ ] done
-- Notes:
+- Notes: (2026-09-12, orchestrator, pre-flight only — the stack has NOT been run) Two things done
+  ahead of D2 so it does not burn a whole stack cycle on them. **(1) Every spec parses.** `e2e/` has
+  no `typecheck` script and no `tsconfig.json`, so nothing had ever compiled the specs A2 and C4
+  wrote; `npx playwright test --config playwright.stack.config.ts --list` does it without a stack
+  and reports **115 tests in 21 files**, including `memory-write.stack.spec.ts` (2 tests) and A2's
+  addition, which is appended *inside* the existing `onboarding.stack.spec.ts` test rather than as a
+  new one — which is why the listing still shows one test there. **(2) Every selector A2's scenario
+  uses exists.** `finish-onboarding` (`web/src/components/DeskPage.tsx:568`), `charter-panel`
+  (`CharterPanel.tsx:89`), `charter-approve` (`CharterPanel.tsx:194`); `nav-desk`/`nav-workers` are
+  generated as `` `nav-${key}` `` (`examples/web/src/App.tsx:612`) from `NAV_ALWAYS =
+  ['desk','chat','workers','settings']` (`web/src/navReveal.ts:43`), so both are always present. The
+  two seed-button assertions are sound in both directions: while in interview `DeskPage.tsx:556-589`
+  renders the finish button *instead of* "Start from an org chart" (mutually exclusive branches), and
+  `WorkersPage.tsx:219-251` withholds both "Start from a topology" buttons and swaps the surrounding
+  prose so the phrase is not even present as text — and the assertion is `getByRole('button', …)`
+  anyway, which would not match prose. After approval the architect worker makes the project
+  non-empty, so the populated branch at `:247-251` renders the seed again, which is what the last
+  assertion wants. **None of this substitutes for D2**: it proves the specs compile and their
+  selectors exist, not that the behaviour happens.
 
 ---
 
