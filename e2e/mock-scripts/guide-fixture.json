@@ -1,0 +1,178 @@
+{
+  "rules": [
+    {
+      "match": "You are interviewing the person who has just created this project",
+      "turns": [
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "I have enough to write the charter. Checking it before I deposit it."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__charter_validate",
+              "input": {
+                "charter": "Charter v1: a weekly bookshop newsletter, judged on it going out and the list growing.\n{\n  \"goal\": \"Send one email newsletter every week to the shop's mailing list, so people who came in once come back.\",\n  \"measure\": \"In a month: four newsletters have gone out, one per week, and the subscriber count is higher than the 430 it is today.\",\n  \"label_rules\": \"kind=decision - a choice that was made and why, written by whoever made it. kind=summary - what happened in one piece of work; name=<slug> so it can be found again. kind=lesson - something that should change how we do this next time. kind=fact - a durable fact about the shop or the list, name=<what-it-is> so the current value can be read back; subscriber-count lives here. kind=draft - a newsletter that has been written but not sent; name=<issue-slug>.\",\n  \"rationale\": \"The shop's problem is repeat visits, not new customers. The measure is 'it went out' rather than sales because nothing here can attribute a sale to an email.\",\n  \"project_background\": \"An independent bookshop with one shopfront and about 430 people on its mailing list.\"\n}"
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Valid. Depositing it under this interview's session id."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__memory_create",
+              "input": {
+                "content": "Charter v1: a weekly bookshop newsletter, judged on it going out and the list growing.\n{\n  \"goal\": \"Send one email newsletter every week to the shop's mailing list, so people who came in once come back.\",\n  \"measure\": \"In a month: four newsletters have gone out, one per week, and the subscriber count is higher than the 430 it is today.\",\n  \"label_rules\": \"kind=decision - a choice that was made and why, written by whoever made it. kind=summary - what happened in one piece of work; name=<slug> so it can be found again. kind=lesson - something that should change how we do this next time. kind=fact - a durable fact about the shop or the list, name=<what-it-is> so the current value can be read back; subscriber-count lives here. kind=draft - a newsletter that has been written but not sent; name=<issue-slug>.\",\n  \"rationale\": \"The shop's problem is repeat visits, not new customers. The measure is 'it went out' rather than sales because nothing here can attribute a sale to an email.\",\n  \"project_background\": \"An independent bookshop with one shopfront and about 430 people on its mailing list.\"\n}",
+                "labels": { "kind": "org-charter", "name": "guide-fixture" }
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "The charter is on screen. Nothing exists yet — read it, and approve it when it looks right."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "match": "You are the architect of this project.",
+      "turns": [
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "First run. Checking whether a roster already exists, and reading the goal before I design anything."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__worker_list",
+              "input": {}
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__memory_current",
+              "input": { "name": "project-goal" }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "No workers besides the interviewer, so this organisation does not exist yet. Building two: one that drafts the newsletter on the clock, and one that reads what it wrote and writes down what happened — nothing else here writes memory on its own, so without that second one every future run of mine would find no evidence, forever."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__worker_create",
+              "input": {
+                "name": "newsletter-writer",
+                "description": "drafts the weekly newsletter from what's worth telling this week",
+                "system_prompt": "You are newsletter-writer. Each Monday you draft that week's newsletter for the shop's mailing list. Read kind=fact and kind=decision for anything worth mentioning; write the draft as a memory labelled kind=draft, name=<issue-slug>. Do not send anything — you only draft.",
+                "briefing": ["kind=fact", "kind=decision"],
+                "rationale": "the charter's goal is a weekly newsletter; nothing existed to write one"
+              }
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__worker_create",
+              "input": {
+                "name": "newsletter-archivist",
+                "description": "writes down what newsletter-writer produced, so there's evidence to steer by",
+                "system_prompt": "You are newsletter-archivist. When newsletter-writer finishes, read what it produced and write ONE memory labelled kind=summary, name=<the issue slug>, plus a rolling summary labelled {kind: \"rolling-summary\", worker: \"newsletter-writer\"} so the next draft has context.",
+                "rationale": "STEP 0 requires at least one worker subscribed to worker.finished, or no evidence is ever written"
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Wiring them up: the writer on a weekly clock, the archivist on the writer's completion, filtered so it doesn't wake itself."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__schedule_create",
+              "input": {
+                "worker": "newsletter-writer",
+                "cron": "0 8 * * 1",
+                "input": "Draft this week's newsletter.",
+                "rationale": "the charter asks for one newsletter a week; Monday morning gives the shop the rest of the week to send it"
+              }
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__subscription_create",
+              "input": {
+                "event_type": "worker.finished",
+                "worker": "newsletter-archivist",
+                "filter": { "worker": "newsletter-writer" },
+                "rationale": "filtered to newsletter-writer only, so newsletter-archivist never wakes itself"
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Telling the human what changed, as the rules require."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__request_human_attention",
+              "input": {
+                "message": "I built two workers. newsletter-writer wakes every Monday at 08:00 and drafts that week's newsletter from recent facts and decisions. newsletter-archivist wakes when newsletter-writer finishes and writes down what it produced, so there is evidence for me to steer by next run. Both are new — nothing existed before this. Every change here is in the changelog and can be reverted.",
+                "expires_in": 259200
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "match": "You are newsletter-writer.",
+      "turns": [
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Drafting this week's issue. Checking the subscriber count first."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__memory_search",
+              "input": { "label_selector": "kind=fact", "query": "subscriber count" }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "text",
+              "text": "Drafted. Saving it as this week's issue."
+            },
+            {
+              "type": "tool_use",
+              "name": "mcp__core__memory_create",
+              "input": {
+                "content": "Subject: New in this week — three staff picks and a signing\n\nHello from the shop. Three books our staff can't stop pressing on people this week, and a signing on Saturday with a local author. Reply to this email if you want us to hold a copy at the counter.",
+                "labels": { "kind": "draft", "name": "2026-09-14-issue" }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
