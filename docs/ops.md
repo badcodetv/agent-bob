@@ -778,15 +778,40 @@ POSTGRES_PASSWORD=$(openssl rand -hex 24)
 CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
 
-# ── Google Cloud Storage for session snapshots ──
+# ── Google Cloud Storage: artifacts, datasets, session snapshots ──
 AGENTKIT_BLOB_BACKEND=gcs
 GCS_BUCKET=webkit-servers-agent-bob
 GCP_PROJECT=webkit-servers
 GOOGLE_APPLICATION_CREDENTIALS=/gcp/key.json
+
+# ── Image registry: pull session base images from Artifact Registry ──
+# Without these the backend defaults to "blobarchive", whose EnsurePresent is
+# a no-op (go/imageregistry/blobarchive: `return nil`), so an image that is not
+# ALREADY inside DinD is never pulled and the session fails to start. That is
+# fine for the sandbox image, which init-sandbox builds locally, and fatal for
+# any image built elsewhere and pushed — Agent Wolf's, for one.
+AGENTKIT_REGISTRY_BACKEND=ociregistry
+AGENTKIT_REGISTRY_AUTH=gcp
+GCP_REGION=europe-west1
+GCP_AR_REPO=agent-bob
 EOF
 chmod 600 /srv/apps/bob/src/.env
 nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
 ```
+
+**Two consequences of the registry lines, worth knowing before you set them:**
+- **Locally built images still work.** `ociregistry`'s `EnsurePresent` inspects first and skips
+  the pull when the image is already in DinD, so the sandbox and `core` images that `init-sandbox`
+  builds are untouched. Do **not** set `AGENTKIT_REGISTRY_ALWAYS_PULL=true` on the box: it forces a
+  pull even for those, and they are not in any registry.
+- 🔴 **Archived sessions stop being reclaimable automatically.** The registry backend also decides
+  where an idle session's snapshot goes. On `blobarchive` it is a gzipped `docker save` in GCS and
+  `Remove` really deletes it. On `ociregistry` it is a layer push to Artifact Registry, and
+  `Remove` is a **no-op** — "actual deletion from the remote registry is out of band"
+  (`go/imageregistry/ociregistry/ociregistry.go:268`). So `AGENTKIT_SNAPSHOT_REAP_INTERVAL` stops
+  freeing anything, and archived sessions accumulate in Artifact Registry forever. **Set an
+  Artifact Registry cleanup policy on the `agent-bob` repo before this runs for long.** Layer
+  dedup keeps each push small, so this is a slow leak, not a cliff — but it is unbounded.
 
 **Three rules for this file:**
 - **Keep a login mode set.** With no `GOOGLE_CLIENT_ID` (and no test login), Bob runs with **no

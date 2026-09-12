@@ -210,7 +210,13 @@ outage; at 22.7 GiB it does not. Recommendation is Kai's to give.
    Krystal (`185.194.90.31`) with valid certificates to 2026-10-24, and `nocode.works` itself
    returns HTTP 200 on a valid Let's Encrypt certificate to 2026-10-24. **Nothing user-facing is
    broken.** Most of it disappears when NoCode is switched off. Downgraded from 🔴 to housekeeping.
-2. **9,147 disk snapshots, 378.6 GB, oldest 2017-04-04** (`gcloud compute snapshots list
+2. **Artifact Registry needs a cleanup policy on the `agent-bob` repo.** Once `docs/ops.md` Step 11d
+   sets `AGENTKIT_REGISTRY_BACKEND=ociregistry` (needed so session base images can be pulled at
+   all), archived idle sessions are pushed to Artifact Registry — and `ociregistry`'s `Remove` is a
+   no-op (`go/imageregistry/ociregistry/ociregistry.go:268`), so Bob's snapshot reaper frees
+   nothing. Layer dedup keeps each push small, so it is a slow leak rather than a cliff, but it is
+   unbounded. Raised by thread 04 (Wolf) 2026-09-12; verified in code here.
+3. **9,147 disk snapshots, 378.6 GB, oldest 2017-04-04** (`gcloud compute snapshots list
    --project=webkit-servers`). The 14-day policy was added later and never touches them. Costs a
    little monthly and clutters every restore search. Deleting them is destructive and needs Kai's
    explicit yes, with the list reviewed first.
