@@ -19,8 +19,12 @@
 import type { Worker } from './workers.js'
 import { formatCompactTime } from './timefmt.js'
 
-/** Endpoint paths for the memory read route. Overridable per host, like
- *  WORKER_ENDPOINTS. */
+/** Endpoint paths for the memory routes. Overridable per host, like
+ *  WORKER_ENDPOINTS.
+ *
+ *  `list` is GET (search) and POST (append) on the same path — the "Write a
+ *  note" control (design G8 / work plan C4) posts here, mirroring
+ *  EVENT_ENDPOINTS.events, which is also GET+POST on one path. */
 export const MEMORY_ENDPOINTS = {
   list: '/agent/memories',
 }
@@ -151,6 +155,88 @@ export function labelValueError(v: string): string | null {
     return `label value "${v}" is invalid: must be alphanumeric, optionally containing '-', '_' or '.', and start and end alphanumeric`
   }
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Writing a note (design G8 / work plan C4) — POST /agent/memories
+// ---------------------------------------------------------------------------
+
+/** The label registry's `name=` value (design §8, ProjectSettingsPage.tsx),
+ *  the one named memory the "Publish a new version" action targets. */
+export const LABEL_REGISTRY_NAME = 'label-registry'
+
+/**
+ * Parse the "Write a note" labels box: one `key=value` per line, blank lines
+ * ignored. This is deliberately NOT `parseMemorySelector` — a note's labels
+ * are plain assignments being written, not a query, so the selector grammar's
+ * `in (...)`, `notin (...)`, `exists` and `!key` forms have no meaning here.
+ * What IS shared is the validation: every key and value is checked with the
+ * same `labelKeyError`/`labelValueError` the selector field uses, which mirror
+ * the engine's `ValidateLabelKey`/`ValidateLabelValue` message for message —
+ * so a value the server would reject with 400 is named here first.
+ *
+ * `error` names the first bad line by number and is null once every non-blank
+ * line parsed; `labels` holds everything parsed before a bad line, the same
+ * "show the good part" contract `parseMemorySelector` has.
+ */
+export function parseLabelLines(text: string): {
+  labels: Record<string, string>
+  error: string | null
+} {
+  const labels: Record<string, string> = {}
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (line === '') continue
+    const eq = line.indexOf('=')
+    if (eq < 0) {
+      return { labels, error: `line ${i + 1} "${line}": expected key=value` }
+    }
+    const key = line.slice(0, eq).trim()
+    const value = line.slice(eq + 1).trim()
+    const keyErr = labelKeyError(key)
+    if (keyErr) return { labels, error: `line ${i + 1}: ${keyErr}` }
+    const valErr = labelValueError(value)
+    if (valErr) return { labels, error: `line ${i + 1}: ${valErr}` }
+    labels[key] = value
+  }
+  return { labels, error: null }
+}
+
+/** The inverse of `parseLabelLines` — how "Publish a new version" pre-fills
+ *  the labels box from a stored row's labels. Sorted so the text is
+ *  deterministic across renders (a `Record` has no defined key order). */
+export function formatLabelLines(labels: Record<string, string>): string {
+  return Object.entries(labels)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+}
+
+/**
+ * The exact `POST /agent/memories` body (go/httpapi/memories.go
+ * `createMemoryBody`): `labels` and `content`, nothing else.
+ *
+ * There is no `embed` (the server's default — true — is what a short human
+ * note wants) and, above all, no `created_by_worker`/`created_by_session`:
+ * the route stamps both empty from the credential and REFUSES a body that
+ * supplies either field at all, even `""` or `null` (docs/20-datasets.md §9,
+ * memories.go:479-492) — that is what marks a note written here as the
+ * application's own word rather than something written from inside a
+ * container. This type has no fields to put provenance in, so a caller
+ * cannot send it by accident; `memories.test.ts` pins the returned object's
+ * keys to exactly these two.
+ */
+export interface MemoryWriteBody {
+  labels: Record<string, string>
+  content: string
+}
+
+/** Pure builder for the POST body — kept as a function, not inlined at the
+ *  call site, so the "no provenance field" guarantee is one definition a test
+ *  can pin rather than a shape a component author could redrift. */
+export function memoryWriteBody(labels: Record<string, string>, content: string): MemoryWriteBody {
+  return { labels, content }
 }
 
 /** Split on top-level commas — commas inside a set's parentheses belong to the
