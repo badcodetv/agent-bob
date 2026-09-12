@@ -254,6 +254,16 @@ A *project* is the one hard namespace: it scopes sessions, and it is also what
 holds the product layer — workers, memories, events, schedules, images, skills,
 the config log. In the token it is the `customer` claim.
 
+`GET /agent/whoami` returns `{"email", "project", "operator"}` for the current token — `operator`
+is true for a wildcard login's tokens and for an API-key or dev-open principal, false for a
+Google account listed against one specific project. Only an operator may change
+`daily_tokens_soft`, `daily_tokens_hard` or `max_concurrent_jobs` on `PUT /agent/project-settings`;
+everyone else gets `403` on those three fields and can still change everything else on the route.
+`AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT` / `_HARD` (below, and in the table in
+`docs/15-standalone-stack.md`) set the daily token budget a **brand-new** project starts with;
+0/unset keeps today's behaviour (no brake) and an existing project's row is never rewritten by a
+later change to these two.
+
 ## End-to-end test
 
 The e2e runs against a stack you keep up between runs. It covers the chat flow

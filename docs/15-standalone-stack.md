@@ -380,6 +380,15 @@ stack-level ones:
 | `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` | model credentials. Both blank = mock model. Both set = the OAuth token wins (subscription mode) — blank the token for unattended runs, which must bill the API key |
 | `AGENTKIT_REGISTRY_ALWAYS_PULL` | `true` forces a pull on every `EnsurePresent` instead of reusing a locally-present image. Required for the `:dev`-tag dev flow (`./stack start`, whose image source defaults to the registry), where the tag is stable but its contents drift on every republish. Forwarded by `docker-compose.yml` since 2026-08-13 — before that, setting it in `.env` silently did nothing |
 | `AGENTKIT_SELF_URL` | how a session container nested in DinD reaches `agentd` (`http://172.17.0.1:8099`). **Not** a browser-reachable URL — see permalinks below |
+| `AGENTKIT_PROJECT_MAP_RELOAD` | only meaningful with `AGENTKIT_PROJECT_MAP_FILE` (a file, not the inline JSON form): how often the map is re-read on top of the `SIGHUP` reload, default `60s`, `0` disables the timer (SIGHUP still works). A malformed rewrite is logged and changes nothing; the previous map keeps serving. So adding a user is never a restart |
+| `AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT` / `_HARD` | the daily token budget (int64 tokens; unset or `0` = off) a project starts with **only if it has never had a `project-settings` row written** — an existing project is never rewritten. Applied via `agentdb.SetDefaultBudgets`, called once at boot from `go/cmd/agentd/defaultbudgets.go` (the engine itself never reads env, per `CLAUDE.md`'s liftability rule) |
+
+`GET /agent/whoami` answers `{"email", "project", "operator"}` for whatever token made the call.
+`operator` is true for a wildcard login's project tokens, an API-key principal and the dev-open
+principal; false for a Google account listed against one specific project; never true for an
+embed token. It gates the three budget/cap fields on `PUT /agent/project-settings`
+(`daily_tokens_soft`, `daily_tokens_hard`, `max_concurrent_jobs`) — a non-operator changing any of
+those three gets `403`, everything else on the route still writes.
 
 **Two variables `agentd` reads that `docker-compose.yml` does not forward.** Setting either in
 `.env` does nothing in the compose stack; each needs its own `environment:` line on the `agentd`
