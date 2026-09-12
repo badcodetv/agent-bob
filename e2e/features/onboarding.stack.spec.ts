@@ -144,8 +144,34 @@ test.describe('onboarding', () => {
     // change the project on a clock without asking.
     await expect(page.getByText(/runs on this schedule from now on/i)).toBeVisible()
 
+    // ── A2 / design §3 G1: the interview survives navigation ────────────────
+    //
+    // Clicking away from the onboarding view used to clear the only path back
+    // to the charter and Approve (`App.tsx:393-396` before this fix). "In
+    // interview" is now derived from the server, so Desk offers a way back in,
+    // and the topology seed — the architect's designed alternative — is
+    // withheld on both Desk and Workers while the interview is still running.
+    await page.getByTestId('nav-desk').click()
+    await expect(page.getByTestId('finish-onboarding')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Start from an org chart' })).toHaveCount(0)
+    await page.getByTestId('nav-workers').click()
+    await expect(page.getByRole('button', { name: /start from a topology/i })).toHaveCount(0)
+
+    // Back to Desk, and in through the door this fix adds.
+    await page.getByTestId('nav-desk').click()
+    await page.getByTestId('finish-onboarding').click()
+    await expect(page.getByTestId('charter-panel')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('charter-approve')).toBeVisible()
+
     await page.getByTestId('charter-approve').click()
     await expect(page.getByTestId('charter-applied')).toBeVisible({ timeout: 60_000 })
+
+    // The seed is back once the interview is over (the architect worker now
+    // exists — see `useInterviewState`'s comment on why that is the signal).
+    await page.getByTestId('nav-workers').click()
+    await expect(page.getByRole('button', { name: /start from a topology/i })).toBeVisible({
+      timeout: 30_000,
+    })
 
     // ── what approving actually did ─────────────────────────────────────────
     const workers = await client.listWorkers()

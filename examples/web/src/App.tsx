@@ -24,7 +24,7 @@ import {
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
-import { useOnboardingSession } from "./onboarding";
+import { useInterviewState, useOnboardingSession } from "./onboarding";
 import Sidebar from "./Sidebar";
 import { darkTheme, lightTheme } from "./theme";
 
@@ -319,14 +319,33 @@ function ProjectWorkspace({
   // While the Desk is open it already holds both lists, so it reports its own
   // count up and this hook stands down (W4 collapsing X7's duplicate fetch).
   const onDesk = view === "desk";
+  const projectToken = auth.projects.find((p) => p.id === project)?.token ?? "";
   // The interview itself: created once, reused on re-entry, and never started
   // at all unless this project is actually being onboarded.
   const { sessionId: onboardSessionId, error: onboardError } = useOnboardingSession({
     apiBase: API,
-    token: auth.projects.find((p) => p.id === project)?.token ?? "",
+    token: projectToken,
     goal: onboardingGoal,
     enabled: view === "onboarding",
   });
+  // Whether this PROJECT (not this browser tab) is still in its interview —
+  // the server-derived replacement for the localStorage-only gate (design §3
+  // G1 / A2). Independent of `onboardSessionId` above, which only exists once
+  // the onboarding VIEW has actually started or rejoined the session; this
+  // one is known as soon as the workspace mounts, so the Desk and Workers can
+  // withhold the topology seed and Desk can offer a way back in before the
+  // human ever opens the onboarding view this visit.
+  const { inInterview, onboardSessionId: interviewSessionId, resolved: interviewResolved } =
+    useInterviewState({ apiBase: API, token: projectToken });
+  const openOnboarding = useCallback(() => setView("onboarding"), []);
+  // The pending goal is only a carrier for the text between project creation
+  // and the interview's first seed message (design §3 G1) — once the server
+  // says the interview is over, forget it, or a later reload of this project
+  // would read the stale goal and jump straight back into the onboarding view
+  // (the exact "state of the browser, not the project" bug G1 fixes).
+  useEffect(() => {
+    if (interviewResolved && !inInterview) onOnboardingDone();
+  }, [interviewResolved, inInterview, onOnboardingDone]);
   const [deskAsks, setDeskAsks] = useState(0);
   const { count: fetchedAsks } = useAsksCount({ enabled: !onDesk });
   const openAsks = onDesk ? deskAsks : fetchedAsks;
@@ -389,19 +408,27 @@ function ProjectWorkspace({
         <ViewNav
           view={shownView}
           entries={visible}
-          onChange={(next) => {
-            // Leaving onboarding ends it: clearing the pending goal stops a
-            // later remount from dropping the human back into the interview.
-            if (view === "onboarding") onOnboardingDone();
-            setView(next);
-          }}
+          // Navigating away no longer ends the interview (design §3 G1): it is
+          // a state of the project, derived above from the server, so a nav
+          // click can never again strand the human with no way back to the
+          // charter and Approve.
+          onChange={setView}
           asks={openAsks}
         />
         <RevealNotice appeared={appeared} onDismiss={acknowledge} />
         {/* The sidebar stays mounted in every view: it carries the project
             switcher and the session list, which are how you leave a view. */}
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <Sidebar auth={auth} project={project} onSwitchProject={onSwitchProject} onCreateProject={onCreateProject} onSignOut={onSignOut} />
+          <Sidebar
+            auth={auth}
+            project={project}
+            onSwitchProject={onSwitchProject}
+            onCreateProject={onCreateProject}
+            onSignOut={onSignOut}
+            onboardSessionId={interviewSessionId}
+            inInterview={inInterview}
+            onOpenOnboarding={openOnboarding}
+          />
         </Box>
       </Box>
 
@@ -414,6 +441,8 @@ function ProjectWorkspace({
             onAsksCount={setDeskAsks}
             onStartFromTopology={() => setView("workers")}
             onOpenChat={() => setView("chat")}
+            inInterview={inInterview}
+            onOpenOnboarding={openOnboarding}
           />
         )}
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link
@@ -429,6 +458,7 @@ function ProjectWorkspace({
             selected={workerFromChart}
             onSelect={setWorkerFromChart}
             initialTab={triggersFromChart ? "triggers" : undefined}
+            hideTopologySeed={inInterview}
           />
         )}
         {/* No fetchConfigEvents: GET /agent/config-events is mounted, so the

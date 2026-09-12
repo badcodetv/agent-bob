@@ -26,14 +26,35 @@ export default function Sidebar({
   onSwitchProject,
   onCreateProject,
   onSignOut,
+  onboardSessionId = null,
+  inInterview = false,
+  onOpenOnboarding,
 }: {
   auth: AuthState;
   project: string;
   onSwitchProject: (projectID: string) => void;
   onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
+  /** The `onboard` session's id, while known (design §3 G1 / A2). */
+  onboardSessionId?: string | null;
+  /** True while this project's interview is unresolved. */
+  inInterview?: boolean;
+  /** Opens the onboarding view — used instead of resuming plain chat when the
+   *  `onboard` session is clicked while `inInterview` is true. */
+  onOpenOnboarding?: () => void;
 }) {
   const { sessions, refresh, select } = useAgentSessions();
+
+  // While a project is in interview, its `onboard` session is not a chat like
+  // any other: clicking it should return the person to the onboarding view
+  // (charter and all), not to a bare transcript (design §3 G1).
+  const selectSession = (id: string) => {
+    if (inInterview && onboardSessionId !== null && id === onboardSessionId && onOpenOnboarding) {
+      onOpenOnboarding();
+      return;
+    }
+    select(id);
+  };
   const { createSession, session, isCreating } = useAgentChat();
   const [userFilter, setUserFilter] = useState<string>("me");
   const [searchQuery, setSearchQuery] = useState("");
@@ -177,7 +198,7 @@ export default function Sidebar({
         onClose={() => {}}
         sessions={sessions}
         activeSessionId={session?.id}
-        onSelectSession={select}
+        onSelectSession={selectSession}
         users={users}
         selectedUserEmail={userFilter}
         onUserFilterChange={setUserFilter}
