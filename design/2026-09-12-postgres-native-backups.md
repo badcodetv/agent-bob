@@ -477,3 +477,227 @@ This is the honest price of the consolidation Kai chose, and it is paid in confi
 discipline rather than software. It does not argue against one Postgres — it argues for setting
 per-app limits on day one rather than after the first incident. The concrete day-one configuration
 is in §9.
+
+---
+
+## 9. The recommended stack, the configuration, and the day-one guardrails
+
+Completes §8. Researched 2026-09-12. ⚠️ The configuration table below is **assembled** from the
+PostgreSQL wiki's tuning page, Crunchy Data and EDB plus the PG18 documentation — it is not quoted
+from one authority. Benchmark it; do not adopt it blind.
+
+### 9.1 The stack
+
+**PostgreSQL 18.6 on `postgres:18-bookworm`, plus a thin Dockerfile:**
+
+| From | Packages |
+| --- | --- |
+| **PGDG apt** (the Postgres project's own) | `postgresql-18-pgvector` 0.8.6 · `postgresql-18-postgis-3` + `-scripts` 3.6.4 · `postgresql-18-cron` 1.6.8 · `postgresql-18-partman` 5.5.0 · `postgresql-18-pgaudit` · `postgresql-18-repack` |
+| **Vendor `.deb`** | `postgresql-18-pg-search_0.25.9-1PARADEDB-bookworm_amd64.deb` |
+| **Nothing to install** | JSONB + GIN (`jsonb_path_ops`) for documents · `extension_control_path` for later additions |
+
+```
+shared_preload_libraries = 'pg_cron,pg_search'
+```
+
+Time series is **native partitioning + pg_partman + pg_cron**. TimescaleDB Community, if a concrete
+need for columnstore compression or continuous aggregates ever appears, comes **from TigerData's
+packagecloud repo and never from PGDG** (§8.4).
+
+### 9.2 Hybrid search: there is no native hybrid search, and `pg_search` does not fuse for you
+
+ParadeDB's own guide confirms Reciprocal Rank Fusion is implemented by hand. RRF converts *ranks*
+into scores rather than trying to normalise BM25 scores against cosine distances, which are not on
+comparable scales. `k = 60` is the convention.
+
+```sql
+WITH
+fulltext AS (
+  SELECT id, ROW_NUMBER() OVER (ORDER BY pdb.score(id) DESC) AS r
+  FROM documents WHERE content ||| 'search_term' LIMIT 20      -- ||| is pg_search's operator
+),
+semantic AS (
+  SELECT id, ROW_NUMBER() OVER (ORDER BY embedding <=> '[vector]') AS r
+  FROM documents LIMIT 20
+),
+rrf AS (
+  SELECT id, 1.0/(60+r) AS s FROM fulltext
+  UNION ALL
+  SELECT id, 1.0/(60+r) AS s FROM semantic
+)
+SELECT m.id, SUM(s) AS score, m.content
+FROM rrf JOIN documents m USING (id)
+GROUP BY m.id, m.content ORDER BY score DESC;
+```
+
+🔴 **The pitfall: keep `LIMIT` *inside* each CTE.** Compute `ROW_NUMBER()` over the whole table and
+limit afterwards, and Postgres must evaluate the window function over every matching row before
+applying the limit — a full scan that throws away both indexes.
+
+Weighting, if the two halves are weighted rather than summed equally: guidance found suggests
+leaning ~0.7 toward the vector side for prose, dropping to 0.3–0.4 when users type exact
+identifiers. **Booking references want the low end; forum prose the high end.**
+
+### 9.3 Configuration for 128 GB / 32 threads / NVMe
+
+**Note first: at ~24 GB of total data, a 32 GB `shared_buffers` caches the entire estate.** Tuning
+here is about write behaviour and headroom, not rescuing reads.
+
+```
+shared_buffers = 32GB                      # 1/4 of RAM; above ~40% rarely helps
+effective_cache_size = 96GB
+work_mem = 32MB                            # PER sort/hash NODE, not per query — see 9.5
+maintenance_work_mem = 2GB                 # held below EDB's 5% because autovacuum workers multiply it
+autovacuum_work_mem = 1GB
+wal_buffers = 64MB                         # the default caps at 16MB, too small here
+
+max_worker_processes = 32
+max_parallel_workers = 16                  # deliberately not 32 — four tenants need headroom
+max_parallel_workers_per_gather = 4
+max_parallel_maintenance_workers = 4
+
+random_page_cost = 1.1                     # the default 4.0 assumes a spinning disk
+effective_io_concurrency = 200
+io_method = worker                         # PG18, restart-only. io_workers = 8 (default is 3)
+huge_pages = on
+```
+
+Outside Postgres: set the NVMe I/O scheduler to `none`, raise `autovacuum_max_workers` to ~6 with
+`autovacuum_vacuum_cost_limit` 2000+ (⚠️ uncited judgement), and disable Transparent Huge Pages
+alongside the explicit huge pages (⚠️ standard practice, no citation found this pass).
+
+🔴 **`huge_pages = on` means Postgres refuses to start without them.** That is the point — but it
+turns "bumped `shared_buffers`, forgot the huge pages" into a **boot failure on the machine taking
+bookings.** Size them from Postgres rather than guessing:
+
+```sh
+postgres -C shared_memory_size_in_huge_pages     # PG15+ tells you the number
+# add ~5%, then set vm.nr_hugepages in /etc/sysctl.d/
+```
+
+✅ **`io_uring` is genuinely available**: PGDG's `postgresql-18` declares
+`Depends: … liburing2 (>= 2.3)` and Debian 12's kernel is well past the 5.1 requirement. Start on
+`worker`, benchmark `io_uring`.
+
+### 9.4 The settings that matter for pgBackRest → GCS
+
+```
+wal_level = replica                        # docs: "replica or higher" to enable archiving
+archive_mode = on                          # NOT "always" — pgBackRest disallows archive_mode=always
+archive_timeout = 60s
+archive_command = 'pgbackrest --stanza=main archive-push %p'
+max_wal_size = 32GB
+wal_compression = zstd
+summarize_wal = off
+```
+
+**`archive_timeout = 60s` is the number the worst-case data loss depends on, and it is sourced.**
+PostgreSQL 18's documentation, verbatim: *"archive_timeout settings of a minute or so are usually
+reasonable"*, with the reason not to go shorter, also verbatim: *"archived files that are archived
+early due to a forced switch are still the same length as completely full files. It is therefore
+unwise to set a very short archive_timeout — it will bloat your archive storage."*
+
+So **worst-case loss is about 60 seconds**, paid for by pushing a full 16 MB segment every minute on
+an otherwise quiet database. Going to 10s multiplies GCS storage for almost no gain.
+
+🔴 **`summarize_wal` stays OFF.** It drives PG17's *native* `pg_basebackup --incremental` through a
+background summariser process. **pgBackRest has its own block-level incremental and does not use
+it** — switching it on costs a process and disk writes for nothing.
+
+**`wal_keep_size` is a red herring here.** It retains WAL for streaming replicas and slots, not for
+archiving. With no replica, the default is right.
+
+⚠️ **`wal_compression = zstd` is reasoning, not a pgBackRest statement.** Postgres compresses
+full-page images *inside* WAL records; pgBackRest compresses repository objects. Different layers,
+so complementary rather than double compression — and pgBackRest states it *"does not compress more
+than once"* internally.
+
+**pgBackRest's own side:**
+
+```
+compress-type=zst            # their docs: default is gz, "zst is recommended because it is much
+                             # faster and provides compression similar to gz"
+archive-async=y              # plus a spool-path, so a slow GCS upload never stalls a commit
+repo1-type=gcs
+repo1-gcs-bucket=<bucket>
+repo1-gcs-key=/etc/pgbackrest/gcs-sa.json
+repo1-path=/repo             # a prefix, not the bucket root
+repo1-cipher-type=aes-256-cbc
+start-fast=y
+delta=y
+```
+
+⚠️ **We are not on Google Compute Engine**, so `repo1-gcs-key-type=auto` (instance metadata) is
+unavailable — a service-account key file must sit on disk. **Treat it as a credential**: mode 600,
+and the passphrase and key both in the password manager.
+
+**Does PG18 change the older advice? Essentially no, for a pgBackRest user.** PG18's backup work is
+`pg_verifybackup` tar support and `pg_combinebackup --link`, both on the `pg_basebackup` path
+pgBackRest does not use. GCS support has been in pgBackRest since 2.33.
+
+### 9.5 🔴 Risk 1, and the day-one configuration that answers it
+
+Four apps and paying customers behind one `shared_buffers`, one WAL and one restart. This is the top
+risk of the consolidation, and it is **actionable rather than merely worrying**. Set this up on the
+first day, not after the first incident:
+
+```sql
+-- one database and one role per app; no app gets superuser
+REVOKE CONNECT ON DATABASE booking FROM PUBLIC;      -- per database: apps cannot reach each other
+GRANT  CONNECT ON DATABASE booking TO app_booking;
+
+-- per-role guardrails, applied at login
+ALTER ROLE app_booking  SET statement_timeout = '15s';
+ALTER ROLE app_forum    SET statement_timeout = '30s';
+ALTER ROLE app_internal SET statement_timeout = '120s';   -- the agent / analytics
+ALTER ROLE app_bob      SET statement_timeout = '300s';
+ALTER ROLE app_booking  SET work_mem = '16MB';
+ALTER ROLE app_internal SET work_mem = '128MB';           -- the only one that needs it
+ALTER ROLE app_booking  SET idle_in_transaction_session_timeout = '30s';
+ALTER ROLE app_internal SET lock_timeout = '5s';
+```
+
+And outside SQL:
+
+- **pgbouncer with a separate pool per database**, and `max_db_connections` per pool, so one app
+  cannot eat the whole connection budget. Give booking a reserved slice.
+- `reserved_connections` / `superuser_reserved_connections`, so an operator can always get in while
+  something is saturating the server.
+- `log_min_duration_statement = '1s'` and `log_temp_files = 0`, to name the offender *before* it
+  becomes an incident.
+- **Budget `work_mem` as global × concurrent nodes, not per query.** That product is what actually
+  exhausts memory.
+- **A pgBackRest restore that has actually been performed.** Booking is the one that must come back.
+
+The load-bearing idea: **the booking system's limits are tight and the agent's are loose, set per
+role, so the agent cannot borrow the booking system's memory or time.**
+
+### 9.6 The other two risks
+
+**Risk 2 — `pg_search` is the one soft spot on the critical path.** It is the only non-PGDG
+component, it is AGPL, it carries a Rust/pgrx build dependency, it needs a
+`shared_preload_libraries` restart, it has documented write amplification, **and it is what stands
+between us and switching Elasticsearch off** — which §3a says the booking system may still need.
+*Mitigation:* prove it on the real forum corpus at real write rates first; leave the small sites on
+built-in `tsvector`; keep `pg_textsearch` on the watchlist as the permissive escape hatch once it
+grows phrase queries.
+
+**Risk 3 — a major upgrade becomes a four-app event gated by the slowest extension.** TimescaleDB
+was 34 days behind PG18; pgvector was *ahead* of it. Every non-PGDG extension widens that window.
+*Mitigation:* keep the list permissive and PGDG-packaged — which is precisely why the partitioning
+route for time series earns its keep.
+
+### 9.7 Stated plainly: what is not confirmed
+
+Carried forward so none of it reads as settled:
+
+- **`pg_search`'s `shared_preload_libraries` requirement** — the current README says it is required
+  unconditionally; 0.17-era docs said it was unnecessary on PG17+. **Assume required.**
+- **AGPL §13's reach into application code** — standard reading is that it does not; not
+  court-tested.
+- **TSL's "modify the schema" clause** versus an Agent Bob DDL surface, if TimescaleDB is ever
+  taken — a reading of licence text, not a ruling.
+- **`wal_compression` versus repository compression** — reasoning, not a pgBackRest statement.
+- **Transparent Huge Pages and the autovacuum numbers** — standard practice, uncited this pass.
+- **The whole of §9.3** — assembled from several reputable sources, not quoted from one. Benchmark.
+- **TimescaleDB's PG17 lag** — unverifiable, so "34 days behind PG18" is one data point, not a trend.
