@@ -485,6 +485,16 @@ export function buildDesk(input: BuildDeskInput): Desk {
  * The fold's own tagged records, collapsed into the one flat list `firsts.ts`
  * reduces (design §3 G4). Every unit here is normalised to milliseconds
  * (`DeskFirstRecord.createdAtMs`) — see its doc comment for why that matters.
+ *
+ * `asks` here is `buildDeskAsks`'s output — OPEN asks only, joined to a live
+ * attention request. That is deliberate, not an oversight: an ask that has
+ * already been answered has no row left on the Desk to carry the sentence,
+ * so `first-ask` can only ever narrate on a still-open one. The practical
+ * consequence is that "first ask" means "the earliest ask that is STILL
+ * open" rather than "the literal first ask this project ever asked" — the
+ * same thing for a project narrating this in real time as records land, but
+ * an approximation if this feature is switched on for the first time on a
+ * project whose actual first ask has already been answered and closed.
  */
 function buildDeskFirstRecords(
   changes: DeskChange[],
