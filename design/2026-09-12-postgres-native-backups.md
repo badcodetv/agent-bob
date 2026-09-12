@@ -120,7 +120,7 @@ This is the load-bearing claim. If it holds, §1's argument is decisive. Measure
 | **badcode / bookingsystem / forum / kellie / quoteright / panwww** | Postgres, plus a 30 KB forum volume | ✅ effectively yes |
 | **n8n** | Postgres, with a Redis queue | ✅ **resolved 2026-09-12 — it is on Postgres, not SQLite.** `DB_TYPE` + `DB_POSTGRESDB_*` are set on the deployment and it mounts no volume at all. Nothing to back up beyond the database. Whether it is *wanted* is a separate question — §3a |
 | **Redis** | badcode's is ephemeral (no volume); the shared one holds 1.8 MiB | ✅ treat as rebuildable; do not back it up. Referenced by bookingsystem, quoteright and panwww — §3a |
-| **Elasticsearch ×2** | 1 GiB between them | 🔴 **NOT simply out of scope — see §3a.** Both clusters belong to NoCode and Franchise Cloud, but **the booking system's secret carries `ELASTICSEARCH_SERVICE_HOST` and `ELASTICSEARCH_INDEX_PREFIX`**, so the app that migrates *last* may depend on a cluster that is switched off *first* |
+| **Elasticsearch ×2** | 1 GiB between them | ✅ **out of scope, and confirmed harmless 2026-09-12.** Both clusters belong to NoCode and Franchise Cloud. The booking system's secret carries `ELASTICSEARCH_SERVICE_HOST`, but the code never reads it — §3a. Nothing we keep touches either cluster |
 
 **Conclusion: the claim holds.** The one thing that looked like a counterexample (n8n on SQLite) is
 not one. What is left that is not Postgres is Caddy's re-issuable certificates and `.env` files
@@ -138,7 +138,7 @@ kubectl get secret -n <ns> appsecrets -o json | jq -r '.data | keys[]'
 
 | App | Postgres | Redis | Elasticsearch |
 | --- | --- | --- | --- |
-| **bookingsystem** | ✅ `POSTGRES_SERVICE_HOST`, `POSTGRES_DB` | ✅ `REDIS_SERVICE_HOST` | 🔴 **`ELASTICSEARCH_SERVICE_HOST`, `ELASTICSEARCH_INDEX_PREFIX`** |
+| **bookingsystem** | ✅ `POSTGRES_SERVICE_HOST`, `POSTGRES_DB` | ✅ `REDIS_SERVICE_HOST` | ⬜ `ELASTICSEARCH_SERVICE_HOST` is **set but never read** — dead config, see §3a |
 | **quoteright** | ✅ `POSTGRES_SERVICE_HOST` | ✅ `REDIS_SERVICE_HOST` | — |
 | **panwww** | ✅ `POSTGRES_SERVICE_HOST` | ✅ `REDIS_SERVICE_HOST` | — |
 | **forum** | ✅ `POSTGRES_HOST` | — | — |
@@ -147,22 +147,35 @@ kubectl get secret -n <ns> appsecrets -o json | jq -r '.data | keys[]'
 
 Three consequences, in order of how much they matter:
 
-### 🔴 The booking system appears to use Elasticsearch
+### ✅ The booking system does NOT use Elasticsearch — closed 2026-09-12
 
-This is the one finding that reorders work. The decision was "NoCode and Franchise Cloud are not
-coming with us, so we do not need Elasticsearch". But the two Elasticsearch clusters live in
-`nocode-elasticsearch` and `franchisecloud-elasticsearch`, and **the booking system's secret points
-at an Elasticsearch host**. The booking system is the app with paying customers and the last one
-scheduled to move; NoCode and Franchise Cloud are switched off the week of 2026-09-14, first.
+**This was the one finding that looked like it would reorder work, and it does not.** The decision
+was "NoCode and Franchise Cloud are not coming with us, so we do not need Elasticsearch". Against
+that, the booking system's secret carries `ELASTICSEARCH_SERVICE_HOST` while both clusters live in
+`nocode-elasticsearch` and `franchisecloud-elasticsearch` — apps switched off the week of
+2026-09-14, before the booking system (the app with paying customers) moves last.
 
-**A present environment variable is not proof of a live dependency** — it may be dead configuration
-from a feature that was removed. But if it is live, then switching off NoCode or Franchise Cloud
-breaks search in the booking system *before* any migration begins, and the replacement (Postgres
-full-text search good enough to replace Elasticsearch 7.5.2) moves onto the booking system's
-critical path rather than being a nice-to-have.
+**A present environment variable is not proof of a live dependency**, so the question was settled by
+reading the code rather than by testing the UI. In `~/projects/booking/booking`:
 
-**Action: establish whether it is live before 2026-09-14.** Cheapest test is to search in the
-booking system's UI and see whether results come back.
+- **Search is already Postgres full-text search.** `api/src/store/booking.js:145-158` runs
+  `.whereRaw("search_vector @@ to_tsquery('english', ?)")`; `update_search` at `:160-171` maintains
+  that column with `to_tsvector`.
+- **No code imports the client.** `grep -rn "elastic" api/src -i` returns three lines, all of them
+  the settings keys' own definitions at `api/src/settings.js:73-75`.
+- **No code reads those keys.** `grep -rn "elasticsearchhost\|elasticsearchport\|elasticsearch_index_prefix"`
+  across the whole repo (excluding `node_modules`) returns only `settings.js:73-75` again.
+- **The remaining traces are dead.** `@elastic/elasticsearch` at `api/package.json:15` is a declared
+  but unimported dependency; the `elasticsearch` service at `docker-compose.yml:12` is local dev
+  only; the frontend's `ElasticSearchBox` (`frontend/src/components/search/ElasticSearchBox.js:74`)
+  is a component *name* that dispatches to the Postgres route.
+
+**Consequences.** NoCode Works and Franchise Cloud can be switched off on schedule with no effect on
+the booking system. `pg_search` comes off the critical path — nothing is waiting on it to replace
+Elasticsearch 7.5.2, so it can be proven on the forum corpus at leisure and the small sites can stay
+on built-in `tsvector`. And the dead wiring (three secret variables, three settings keys, the npm
+dependency, the compose service) should be deleted while the booking system is being moved, so the
+next reader does not lose an afternoon to the same question.
 
 ### n8n: on Postgres, but probably not wanted
 
@@ -307,9 +320,9 @@ test of it.
    unconfirmed** (check the control panel after delivery) and that the agent is **public-IP only,
    incompatible with vRack**. Our mdadm RAID1 + ext4 layout is supported; Veeam does not back up
    LVM snapshots, which is one more small reason the thin pool is better gone.
-8. 🔴 **Is the booking system's Elasticsearch dependency live?** (§3a.) Must be answered before
-   NoCode and Franchise Cloud are switched off the week of 2026-09-14, because their clusters are
-   the only two that exist.
+8. ✅ **Is the booking system's Elasticsearch dependency live? No — closed 2026-09-12 by reading
+   the code** (§3a). Its search is already Postgres `to_tsvector`/`to_tsquery`; the environment
+   variable is dead config. NoCode and Franchise Cloud can be switched off on schedule.
 
 ---
 
@@ -680,8 +693,9 @@ role, so the agent cannot borrow the booking system's memory or time.**
 
 **Risk 2 — `pg_search` is the one soft spot on the critical path.** It is the only non-PGDG
 component, it is AGPL, it carries a Rust/pgrx build dependency, it needs a
-`shared_preload_libraries` restart, it has documented write amplification, **and it is what stands
-between us and switching Elasticsearch off** — which §3a says the booking system may still need.
+`shared_preload_libraries` restart, and it has documented write amplification. **It is no longer on
+the critical path**: §3a closed the booking-system question, so nothing is waiting on `pg_search` to
+switch Elasticsearch off.
 *Mitigation:* prove it on the real forum corpus at real write rates first; leave the small sites on
 built-in `tsvector`; keep `pg_textsearch` on the watchlist as the permissive escape hatch once it
 grows phrase queries.

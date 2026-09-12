@@ -171,23 +171,26 @@ I build the database, which is a day or two in.
 | # | Question | My recommendation |
 | --- | --- | --- |
 | 1 | Time series: `pg_partman` + `pg_cron`, or TimescaleDB from the vendor? | **pg_partman + pg_cron.** Debian's TimescaleDB silently omits the features people want it for; the real one needs a third-party repo that then dictates our Postgres version. No time-series workload exists today. Adding it later is a package install |
-| 2 | Full-text search: ParadeDB's `pg_search`, or Postgres's built-in? | **`pg_search`.** Better ranking, and it's what replaces Elasticsearch. It's AGPL — self-hosting is explicitly permitted, but worth ten minutes of legal before booking-system data depends on it |
+| 2 | Full-text search: ParadeDB's `pg_search`, or Postgres's built-in? | **`pg_search`.** Better ranking than Postgres's built-in search. It's AGPL — self-hosting is explicitly permitted, but worth ten minutes of legal before booking-system data depends on it. **Not urgent:** nothing is waiting on it now that the booking system turns out to use plain Postgres search (§6) |
 | 3 | Should Agent Bob use the box's Postgres 18, or keep its own bundled Postgres 16? | **The box's.** I tested it: Bob's full database suite passes on 18, all 49 migrations apply, the vector and label indexes all build. A fresh Bob has no data, so install time is the only moment this move is free |
 | 4 | Switch on OVH's Backup Agent as a cheap second copy? | **Yes, once the box exists** — £0 agent + £0.0061/GB/month, so about **£0.20/month**. Nightly whole-server image in a different OVH datacentre, 14 days of it immutable, and restores are free. Check it actually appears in the control panel first; OVH's docs don't confirm this range is eligible |
 | 5 | The old shared Postgres 9.6: dump-and-restore, or `pg_upgrade`? | **Dump and restore.** It's 22.7 GB, so 20–40 minutes, and a failure leaves the old one untouched |
 
 ---
 
-## 6. Two things you can check in a minute, and one has a deadline
+## 6. One thing you can check in a minute
 
-🔴 **Search for something in the booking system** (`nowtakemybooking.com`). Its configuration
-points at an **Elasticsearch host**, and the only two Elasticsearch clusters belong to NoCode Works
-and Franchise Cloud — which you switch off **the week of Monday 2026-09-14**, while the booking
-system is the last thing to move.
+✅ **The booking-system search worry is closed — you don't need to test it.** Its configuration
+pointed at an **Elasticsearch host** (a separate search server), and the only two Elasticsearch
+servers belong to NoCode Works and Franchise Cloud, which you switch off **the week of Monday
+2026-09-14** — while the booking system is the last thing to move. That looked like a trap.
 
-A setting being present isn't proof it's used. But if search returns results, it's live, and
-switching NoCode off breaks the booking system's search with no migration involved. **Worth knowing
-before Monday.**
+It isn't. Reading the booking system's own code on 2026-09-12 shows its search is **already
+Postgres**: `api/src/store/booking.js:145-158` searches a Postgres text column, and nothing
+anywhere in the code loads the Elasticsearch client or reads that setting. The setting, the npm
+package and a component called `ElasticSearchBox` are all leftovers from a feature that was
+replaced. **Switch NoCode and Franchise Cloud off on schedule; nothing breaks.** The dead settings
+get deleted when the booking system moves.
 
 🟡 **Open `n8n.badcode.tv`** and look at the workflow list and executions log. n8n is workflow
 automation left over from the old `storyteller` stack — your own repo calls that stack *"exactly

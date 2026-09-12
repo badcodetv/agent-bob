@@ -42,6 +42,8 @@ kubectl get --raw "/api/v1/nodes/gke-prodcluster-two-cpu-pool-5cdd2560-jqow/prox
 3. **Both Elasticsearch clusters are nearly empty** (1 GiB between them). They belong to NoCode and
    Franchise Cloud, which are out of scope, so the "Elastic won't support block-snapshot restore"
    hazard never lands on us. If either app is ever revived, reindex from source rather than migrate.
+   **And nothing we are keeping uses them** — see §4.8, which closes the booking-system question by
+   reading the code.
 
 Live load, same day (`kubectl top node`): **531m CPU (27%), 9.1 GiB memory (68%)** for the whole
 cluster. RISE-L is 32 threads and 128 GB. Everything here fits inside a fraction of the box, and
@@ -180,6 +182,21 @@ pgBackRest's job and need no per-app setup. Common to all of them:
 - **Deployments:** `api`, `frontend` from `bookingsystem-*:915829e4…`. No volume of its own; uses
   the shared Postgres.
 - **`nowtakemybooking.com` has paying customers.** Announce a window. Lower the TTL a day ahead.
+- ✅ **It does not use Elasticsearch. Closed 2026-09-12 by reading the code, not by testing the UI.**
+  Search is Postgres full-text search already: `api/src/store/booking.js:145-158` does
+  `.whereRaw("search_vector @@ to_tsquery('english', ?)")`, and `update_search` at `:160-171`
+  maintains that column with `to_tsvector`. Nothing in `api/src` imports `@elastic/elasticsearch`
+  and nothing reads the three settings keys — `grep -rn "elasticsearchhost|elasticsearchport|elasticsearch_index_prefix"`
+  across the repo returns only their own definitions at `api/src/settings.js:73-75`. The
+  `@elastic/elasticsearch` entry at `api/package.json:15`, the `elasticsearch` service in the local
+  `docker-compose.yml:12`, and the frontend's `ElasticSearchBox` component name
+  (`frontend/src/components/search/ElasticSearchBox.js:74`) are dead leftovers; the component
+  dispatches to the Postgres route. **So NoCode Works and Franchise Cloud can be switched off on
+  schedule** — nothing the booking system does depends on their clusters.
+- **During the move, delete the dead Elasticsearch wiring**: the three `ELASTICSEARCH_*` variables
+  in the `appsecrets` secret, the three keys at `api/src/settings.js:73-75`, the
+  `@elastic/elasticsearch` dependency, and the local compose service. Leaving them in place is how
+  a future reader loses another afternoon to this question.
 - 🔴 **Hard gate before this lands on the box:** Agent Bob runs a **privileged** Docker-in-Docker
   container so AI sessions can run code. That is acceptable while Bob is alone. **Before customer
   data shares the box, Bob must lose `privileged`** — by moving to the sysbox runtime or into its
@@ -264,6 +281,18 @@ kubectl get --raw "/api/v1/nodes/<node>/proxy/stats/summary"                # re
 kubectl top node ; kubectl top pod -A --sort-by=memory
 gcloud compute snapshots list --project=webkit-servers
 dig +short <domain> ; curl -sS -o /dev/null -w '%{http_code}' https://<domain>
+```
+
+Closing the booking-system Elasticsearch question (2026-09-12) was source reading, not cluster
+access — in `~/projects/booking/booking`:
+
+```sh
+sed -n '140,175p' api/src/store/booking.js        # search is to_tsquery on search_vector
+sed -n '70,78p'   api/src/settings.js             # the three ELASTICSEARCH_* keys, defined here
+grep -rn "elastic" api/src -i                     # only those three definitions; no client import
+grep -rn "elastic" . -i --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=build
+grep -rn "elasticsearchhost\|elasticsearchport\|elasticsearch_index_prefix" . \
+     --exclude-dir=node_modules                   # only settings.js:73-75 — nothing reads them
 ```
 
 `kubectl exec … -- df -h` was **refused** by the session's safety classifier ("Production Reads").

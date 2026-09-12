@@ -1466,8 +1466,11 @@ and OVH's Backup Agent switched on as a second copy (priced and recommended in 1
   read-only service-account key.
 - **Apps that read GCS need a key file** instead of GKE's automatic credentials. Heavy readers pay
   Google's download fee; check `nocode-websites` and `forum-videos` first.
-- **Order:** small apps first, then the Elasticsearch apps, then badcode, and **the booking system
-  last**. Pass the Bob isolation gate (1.7) first.
+- **Order:** small apps first, then badcode, and **the booking system last**. Pass the Bob isolation
+  gate (1.7) first. The two Elasticsearch apps are not in the order at all — they are NoCode Works
+  and Franchise Cloud, which are switched off rather than moved, and nothing we keep uses their
+  clusters (`design/2026-09-12-gke-to-box-migration.md` §4.8). The full per-app plan, with measured
+  disk usage, is that file.
 
 **Found in passing, worth doing now, independent of any move:**
 - 🟡 **The "stuck HTTPS renewals" are stale, not urgent.** Re-checked 2026-09-12: all 14 pending

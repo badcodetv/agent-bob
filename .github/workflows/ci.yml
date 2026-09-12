@@ -194,6 +194,18 @@ jobs:
         working-directory: web
       - run: yarn install --frozen-lockfile
       - run: yarn typecheck
+      # THE SHELL'S OWN UNIT TESTS. Added 2026-09-12; this package had no test
+      # runner at all until then, and that gap is the root cause of DI29 in
+      # design/2026-09-11-onboarding-work-plan.md — a one-line latch in
+      # src/onboarding.ts that blinded the console to an onboarding interview
+      # starting. web/'s suite cannot see this directory, so the only gate that
+      # ever caught it was a human driving a real browser. Runs before `yarn
+      # build` because it is the faster of the two.
+      #
+      # (The job's display name still says "typecheck · build". It is the check
+      # name branch protection refers to — see this file's header — and the web
+      # job likewise runs verify-package.sh without naming it.)
+      - run: yarn test
       - run: yarn build
 
   # The comparison rig's offline unit layer: 223 tests over the arithmetic

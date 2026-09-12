@@ -8,7 +8,8 @@
     "build-guide": "node scripts/build-guide.mjs",
     "dev": "node scripts/build-guide.mjs && vite",
     "build": "node scripts/build-guide.mjs && vite build",
-    "typecheck": "node scripts/build-guide.mjs && tsc --noEmit"
+    "typecheck": "node scripts/build-guide.mjs && tsc --noEmit",
+    "test": "node scripts/build-guide.mjs && vitest run"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -19,12 +20,18 @@
     "react-dom": "18.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.3.4",
+    "false": "0.0.4",
+    "jsdom": "^29.1.1",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
     "typescript": "^5.9.3",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^4.0.18"
   }
 }
