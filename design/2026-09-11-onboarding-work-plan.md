@@ -354,7 +354,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 32b28cc merged to main (rebased on cd44582). `projectSettingsHolder` (atomic.Pointer; SIGHUP + `AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) and `projectKeysHolder`; login handlers take a `userDirectory`; git-token-env closure reads the holder per call; embed-CSP origin list still a boot snapshot (DI 6); docs/ops.md switched to a mounted `projects.json` (DI 7). Gates incl. `-race` green on the branch.
 
-### A7: the operator's story, written down   [Status: todo | Model: sonnet]
+### A7: the operator's story, written down   [Status: merged | Model: sonnet]
 - **Scope:** Update `docs/ops.md` (§11d and wherever credentials are set) so the OVH box runs in
   **API-key mode** with the subscription token blank, states why (the budget can only bound a
   metered key; the subscription carries only so many bots), sets the two default-budget env vars,
@@ -372,8 +372,21 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** n/a (docs)
 - **Validation:** `grep -n AGENTKIT_DEFAULT_DAILY_TOKENS_HARD go/cmd/agentd/main.go docs/ops.md .env.example` all non-empty
 - **Depends on:** A3, A6
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Written and merged as 3aa9bef → merge of `fleet/A7`; no conflict. `docs/ops.md`
+  §11d now runs API-key mode with `CLAUDE_CODE_OAUTH_TOKEN` blank and says why, and a new §11f is the
+  OM-8 spend-brake check. New `docs/guide/for-operators/inviting-someone.md`, plus env/route updates
+  to `README-stack.md` and `docs/15-standalone-stack.md`. **The agent declined to call its own
+  Validation green, correctly** — see DI14; `grep` on `main.go` returns nothing because A3 put the
+  var names in `defaultbudgets.go` (DI5), so the command as written cannot pass and the ticket's own
+  text is what is wrong. Orchestrator verified on the merged tree: the guide build goes **17 → 18
+  page(s)**, so the new page's front matter parses and the generator does walk `for-operators/`
+  (`build-guide.mjs:94-104`); there is genuinely no `DELETE /agent/project` route
+  (`grep -rn "DELETE /agent/project\|deleteProject" go/httpapi go/cmd/agentd` → empty), which the
+  page documents rather than papering over; and **`docs/guide/` now has zero broken relative links**
+  (scanned all 18 pages), closing the one the RESUME block named. The two budget numbers are left as
+  `FILL-BEFORE-FIRST-INVITE` at `docs/ops.md:783-784` and no number is stated anywhere in the new
+  page — `money.md`'s hole is untouched. Kai has still not chosen them.
 
 ### Stream B — the guide
 
@@ -738,3 +751,9 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **12. Nothing in this wave was proven against real Postgres until it was asked for.** (orchestrator, 2026-09-12) A4's agent ran a full green `go test ./...` and still reported, correctly, that one of its four acceptance criteria rested on a test that had SKIPPED — `TestLivePG_GetProjectUsageSince_ExcludesRowsBeforeSince` needs `AGENTKIT_TEST_POSTGRES_URL`. That is CLAUDE.md's standing warning behaving exactly as advertised: a green suite does not prove the pgvector/jsonb paths. Closed here with a throwaway `pgvector/pgvector:pg16` on port 55432 (all four live cases PASS, and the whole suite re-run with it attached: 34 ok, 0 FAIL). Two things worth keeping: the fleet's Go gate should carry a live database whenever a ticket touches `agentdb`, and the throwaway must never be the compose stack's own `agent-bob-postgres-1` — a sibling branch's unmerged migration has broken other agents' runs before.
 
 **13. C1's merge would have silently reverted A2, and no test would have caught it.** (orchestrator, 2026-09-12) The only conflict in the whole wave was one hunk of `examples/web/src/App.tsx` — `ViewNav`'s `onChange`. A2's side deleted `if (view === "onboarding") onOnboardingDone()`, because ending the interview on a nav click *is* the defect A2 exists to fix. C1's branch predates A2, so its side still carried that line, plus its own new guide-hash cleanup. Taking C1's side — which is what "keep the incoming change" habitually means, and what a merge tool's default would offer — reverts A2 completely while leaving every unit test green, because nothing offline asserts that clicking away *keeps* an interview alive; only A2's stack e2e does, and that waits on D2. Resolved by keeping A2's deletion and C1's cleanup, with the reason written at the site so the next person does not re-add it. The general lesson for the fleet: **a branch that predates a merged ticket carries that ticket's old behaviour as its conflict side, and the danger is inverse to the conflict's size.** Every other file in the wave auto-merged, including two that A2 and C3 shared — and those needed a semantic check too (done: A2's `showFirstRunPanel`/`finish-onboarding` and C3's Activity/Triggers wording both verified present on the merged tree).
+
+**14. A7's Validation command cannot pass as written, and the agent said so instead of fudging it.** (A7, 2026-09-12) The ticket asks for `grep -n AGENTKIT_DEFAULT_DAILY_TOKENS_HARD go/cmd/agentd/main.go docs/ops.md .env.example` to be non-empty for all three. `main.go` has no match and cannot have one: A3 resolved the defaults in `go/cmd/agentd/defaultbudgets.go` (constant `defaultDailyTokensHardVar`), reached from `main.go` only through `resolveDefaultBudgets(os.Getenv)` — which DI5 already recorded. So the literal string never appears in `main.go`. The ticket text is the thing that is wrong; the code is fine. Worth keeping as a pattern: a Validation line written from a design doc can outlive the layout it assumed, and the right move is the one taken here — report it, do not edit code to satisfy a stale grep.
+
+**15. The repo already contained a guessed default daily budget, and it is 5× lower than the orchestrator's own recommendation.** (A7, 2026-09-12) `.env.example:189-190` carries commented `AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT=50000` / `_HARD=100000`, added by A3, beside a comment stating the design intent plainly: *"A low value here is what keeps an invited friend's first project braked before anyone visits the console to raise it."* The orchestrator had independently recommended 250,000/500,000 to Kai, reasoning from "a normal working day should not be strangled" — which is the **opposite** intent to the one already written down. On re-reading, the repo's intent is the better one: the default is a brake the operator raises deliberately, not an allowance, and chat is exempt from the budget (`go/cmd/agentd/router.go:699-702`) so no budget can ever lock a human out of talking to their workers. Measured floor for the arithmetic: the core preamble alone is ~1.5 KB ≈ 380 tokens (`go/compose.go:623`), before project background, briefing, worker prompt, tool definitions and per-turn re-sending, and **no real-API token observation is recorded anywhere in this repo** — the only captured usage envelope is a mock row of 10 in / 6 out (`go/agentdb/token_usage.go:15-45`). So any number here is a judgment, not a measurement, and the honest recommendation is to adopt the low one already written: **50,000 soft / 100,000 hard**. Kai's call, still open.
+
+**16. Removing a project does not purge it.** (A7, 2026-09-12) There is no `DELETE /agent/project` route. OM-8's "delete the throwaway project" can only mean removing it from `projects.json`, which revokes login but leaves its sessions, workers and memory in the database. A7 documented that in `docs/ops.md` §11f and in the new guide page rather than implying a clean delete exists. If a real tenant ever needs erasing, that route does not exist yet.
