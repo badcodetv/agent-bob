@@ -57,6 +57,17 @@ cd /srv/apps/wolf
 git clone https://github.com/badcodetv/agent-wolf.git src
 ```
 
+🟡 **`new-app-volume` may not exist by the time this runs.** Thread 01 is evaluating replacing the
+LVM thin-pool + restic design with pgBackRest and WAL archiving to GCS (`942a2f9` on
+`thread/01-ovh`, pending Kai). If that is accepted, the thin pool, `new-app-volume` and the five
+backup scripts go away, and **this step collapses to the `mkdir` and the `git clone`** — no volume,
+no line to change anywhere else.
+
+That is not a loss, and § 0 is why: Wolf holds no server-side state, so its disk was only ever
+carrying a `.env`. What protects a tester's work is Bob's Postgres, which is exactly what
+pgBackRest would protect better. **Add nothing else here that depends on a per-app thin volume
+until thread 01's status file says the backup design is settled.**
+
 ## 3. The networking rule that must survive the move
 
 `wolf-api` shares Bob's Docker-in-Docker container's **network namespace**. This is not a local
