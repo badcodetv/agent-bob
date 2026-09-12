@@ -222,6 +222,11 @@ export default function ProjectSettingsPage({
           <Button disabled={s.saving || !s.dirty} onClick={() => void s.reload()}>
             Discard changes
           </Button>
+          {!s.canSave && s.rationale.trim() === '' && (
+            <Typography variant="caption" color="text.secondary">
+              Saving needs a reason — it becomes this change's entry in the changelog.
+            </Typography>
+          )}
           {!s.dirty && (
             <Typography variant="caption" color="text.secondary">
               No unsaved changes

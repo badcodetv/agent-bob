@@ -121,6 +121,10 @@ export { default as WorkerEditor } from './WorkerEditor.js'
 
 export type { WorkerEditorProps } from './WorkerEditor.js'
 
+export { default as CreateProjectForm } from './CreateProjectForm.js'
+
+export type { CreateProjectFormProps } from './CreateProjectForm.js'
+
 export { default as WorkerJobHistory } from './WorkerJobHistory.js'
 
 export type { WorkerJobHistoryProps } from './WorkerJobHistory.js'

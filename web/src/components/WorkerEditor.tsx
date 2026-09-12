@@ -398,6 +398,11 @@ export default function WorkerEditor({
               Delete
             </Button>
           )}
+          {!canSave && rationale.trim() === '' && (
+            <Typography variant="caption" color="text.secondary">
+              Saving needs a reason — it becomes this change's entry in the changelog.
+            </Typography>
+          )}
           {!dirty && !isNew && (
             <Typography variant="caption" color="text.secondary">
               No unsaved changes

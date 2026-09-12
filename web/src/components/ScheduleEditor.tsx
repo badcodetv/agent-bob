@@ -221,13 +221,13 @@ export default function ScheduleEditor({
 
         <Box>
           <TextField
-            label="Rationale"
+            label="Why?"
             fullWidth
             size="small"
             value={rationale}
             placeholder="moving the morning tweet an hour later; engagement peaks at 10"
             onChange={(e) => setRationale(e.target.value)}
-            inputProps={{ 'aria-label': 'Rationale' }}
+            inputProps={{ 'aria-label': 'Why?' }}
           />
           <FormHelperText>
             Optional commit message. It is stored with the change in the config log and shown in
