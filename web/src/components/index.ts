@@ -222,3 +222,11 @@ export type { RunArchitectControlProps } from './RunArchitectControl.js'
 export { default as OnboardingPage } from './OnboardingPage.js'
 
 export type { OnboardingPageProps } from './OnboardingPage.js'
+
+export { default as AboutThisScreen } from './AboutThisScreen.js'
+
+export type { AboutThisScreenProps } from './AboutThisScreen.js'
+
+export { GuideProvider, useGuideParagraph } from '../guide/GuideProvider.js'
+
+export type { GuideProviderProps, GuideParagraph, GuideParagraphMap } from '../guide/GuideProvider.js'

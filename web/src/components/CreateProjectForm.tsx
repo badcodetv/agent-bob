@@ -14,6 +14,7 @@
 
 import React, { useState } from 'react'
 import { Alert, Box, Button, Stack, TextField, Typography } from '@mui/material'
+import AboutThisScreen from './AboutThisScreen.js'
 
 export interface CreateProjectFormProps {
   /** Called with the trimmed project id and goal on submit. Throw/reject to show the error inline. */
@@ -53,6 +54,11 @@ export default function CreateProjectForm({ onCreate, onCreated, onCancel, autoF
 
   return (
     <Box component="form" onSubmit={(e) => void submit(e)} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Always expanded, no dismiss (§ Scope): there is no project yet for a
+          dismissal to be scoped to, and the guide's copy for this surface is
+          one sentence — no chevron is worth the click. Falls back to the
+          sentence below when the guide has no `project-create` page yet. */}
+      <AboutThisScreen surface="project-create" projectId="" alwaysExpanded />
       <Typography variant="body2" color="text.secondary">
         Creating a project starts an interview. It asks what the project is for and how you would
         know it is working, then writes that down for you to approve.

@@ -45,14 +45,18 @@ import {
   type ProjectSettings,
 } from '../projectSettings.js'
 import JsonObjectEditor from './JsonObjectEditor.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 export interface ProjectSettingsPageProps extends UseProjectSettingsOptions {
   /** Heading text. Pass '' to render no heading (host supplies its own). */
   title?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 export default function ProjectSettingsPage({
   title = 'Project settings',
+  projectId = '',
   ...options
 }: ProjectSettingsPageProps) {
   // Re-read the projection after a save: turning a repository on (or off) is a
@@ -87,6 +91,8 @@ export default function ProjectSettingsPage({
           {title}
         </Typography>
       )}
+
+      <AboutThisScreen surface="settings" projectId={projectId} />
 
       {s.error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>

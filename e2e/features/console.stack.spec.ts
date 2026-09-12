@@ -465,4 +465,56 @@ test.describe('operator console', () => {
       page.getByLabel('frozen — only a human may change it').first(),
     ).toBeVisible({ timeout: 30_000 })
   })
+
+  // ── C2: "About this screen" on the Desk ────────────────────────────────────
+  //
+  // Only the Desk is exercised live here (the ticket's own scope): the eleven
+  // mount points share one component and one provider, so the thing worth
+  // proving against a real browser is the wiring — the build's generated
+  // paragraphs actually reaching `AboutThisScreen` through `GuideProvider`,
+  // the guide link actually resolving, and dismissal actually surviving a
+  // reload — not eleven near-identical repeats of the same three facts.
+  // `AboutThisScreen.test.tsx` (`web/src/components/`) covers the component's
+  // own logic (no-paragraph ⇒ nothing rendered, per-surface/per-project
+  // dismissal) at the unit level, against a mocked provider.
+  test('the Desk\'s About line opens, links to a guide page that renders, and stays dismissed after reload', async ({ page }) => {
+    await openFreshProject(page, 'e2e-cx-about')
+
+    // Collapsed: the toggle line, nothing more.
+    const toggle = page.getByTestId('about-toggle-desk')
+    await expect(toggle).toBeVisible({ timeout: 30_000 })
+    await expect(toggle).toContainText('About this screen')
+    await expect(page.getByText('The Desk is where you start every visit.')).toHaveCount(0)
+
+    // Opens on click, showing the guide's own first paragraph (docs/guide/the-desk.md)
+    // — proof the generated paragraph actually reached the component through
+    // build-guide.mjs → pages.generated.ts → App.tsx's GuideProvider, not a
+    // placeholder string.
+    await toggle.click()
+    await expect(page.getByText('The Desk is where you start every visit.')).toBeVisible()
+
+    // "Read more in the guide →" is a real link to a page that renders.
+    const guideLink = page.getByRole('link', { name: 'Read more in the guide →' })
+    await expect(guideLink).toHaveAttribute('href', '#/guide/the-desk')
+    await guideLink.click()
+    await expect(page.getByRole('heading', { name: 'The Desk' })).toBeVisible({ timeout: 15_000 })
+
+    // Back to the Desk, dismiss the line, and reload: dismissal is sticky
+    // per (surface, project) in localStorage (aboutDismissal.ts), so the
+    // control that remains after a reload must be the small "bring it back"
+    // one, never the full disclosure.
+    await gotoView(page, 'desk')
+    await page.getByTestId('about-toggle-desk').click()
+    await page.getByTestId('about-dismiss-desk').click()
+    await expect(page.getByTestId('about-restore-desk')).toBeVisible()
+
+    await page.reload()
+    await expect(page.getByTestId('nav-desk')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('about-restore-desk')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('about-toggle-desk')).toHaveCount(0)
+
+    // And restoring it brings the full disclosure back, collapsed.
+    await page.getByTestId('about-restore-desk').click()
+    await expect(page.getByTestId('about-toggle-desk')).toBeVisible()
+  })
 })

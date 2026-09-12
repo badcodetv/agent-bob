@@ -70,6 +70,10 @@ export type { SurfaceId } from './guide/surfaces.js'
 export { parseGuidePage, GUIDE_PART_LABELS } from './guide/frontMatter.js'
 export type { GuideFrontMatter, ParsedGuidePage } from './guide/frontMatter.js'
 export { GUIDE_HASH_PREFIX, buildGuideHash, parseGuideHash } from './guide/guideRoute.js'
+export { GuideProvider, useGuideParagraph } from './guide/GuideProvider.js'
+export type { GuideProviderProps, GuideParagraph, GuideParagraphMap } from './guide/GuideProvider.js'
+export { default as AboutThisScreen } from './components/AboutThisScreen.js'
+export type { AboutThisScreenProps } from './components/AboutThisScreen.js'
 
 // Project settings (B3) — the /agent/project-settings surface: pure helpers,
 // the load/edit/save hook, and the page.

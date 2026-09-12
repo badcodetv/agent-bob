@@ -22,6 +22,7 @@ import AskUserCard from './AskUserCard.js'
 import ArtifactPanel from './ArtifactPanel.js'
 import ThinkingBlock from './ThinkingBlock.js'
 import ChatInputToolbar from './ChatInputToolbar.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import useFileAttachments from '../hooks/useFileAttachments.js'
 import useVoiceDictation from '../hooks/useVoiceDictation.js'
 import type { RenderPlugin, AgentSSEEvent } from '../plugins.js'
@@ -134,6 +135,8 @@ interface AgentChatProps {
    * chat gets ones about the project.
    */
   workerName?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 export default function AgentChat(props: AgentChatProps) {
@@ -173,6 +176,7 @@ export default function AgentChat(props: AgentChatProps) {
   const onOpenArtifactViewer = props.onOpenArtifactViewer
   const forkedMessageCount = props.forkedMessageCount
   const workerName = props.workerName
+  const projectId = props.projectId ?? ''
 
   const [input, setInput] = useState('')
   const [, setViewerArtifact] = useState<ArtifactInfo | null>(null)
@@ -414,6 +418,7 @@ export default function AgentChat(props: AgentChatProps) {
     <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
       {/* Chat area */}
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+        <AboutThisScreen surface="chat" projectId={projectId} sx={{ mx: 2, mt: 2, mb: 0 }} />
         {/* Messages */}
         <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
           {displayMessages.length === 0 && (

@@ -7,6 +7,7 @@ import {
   ActivityPage,
   CredentialModeBadge,
   DeskPage,
+  GuideProvider,
   MemoryBrowserPage,
   NAV_LABELS,
   OnboardingPage,
@@ -21,10 +22,12 @@ import {
   useNavReveal,
   usePrefersReducedMotion,
   useSessionPermalink,
+  type GuideParagraphMap,
   type NavEntry,
 } from "@agentkit/chat-ui";
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
 import GuidePage from "./GuidePage";
+import { GUIDE_PAGES } from "./guide/pages.generated.js";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
 import { useInterviewState, useOnboardingSession } from "./onboarding";
@@ -83,6 +86,25 @@ type View = NavEntry;
 // both were unreachable.
 const LIVE_REFRESH_MS = 15_000;
 
+// The bridge C2 depends on: `GUIDE_PAGES` (built by build-guide.mjs from
+// docs/guide/*.md, ticket C1) is keyed by slug and carries each page's
+// `surfaces` list; `AboutThisScreen` looks a paragraph up BY SURFACE. This is
+// the one place that inversion happens, so `web/` itself never has to import
+// a generated file to make the lookup it needs (design §3 G2). First page
+// wins a surface named on more than one: `GUIDE_PAGES` is already sorted by
+// part/order (build-guide.mjs), so "first" is deterministic, and two pages
+// claiming the same surface is a Stream-B authoring mistake this shell is not
+// the place to catch.
+function buildGuideParagraphs(pages: typeof GUIDE_PAGES): GuideParagraphMap {
+  const map: GuideParagraphMap = {};
+  for (const page of pages) {
+    for (const surface of page.surfaces) {
+      if (!(surface in map)) map[surface] = { slug: page.slug, text: page.firstParagraph };
+    }
+  }
+  return map;
+}
+
 // App state machine: loading → dev (legacy /dev/token, straight to chat)
 //                            → login → project picker → chat (per-project JWT)
 export default function App() {
@@ -94,6 +116,10 @@ export default function App() {
   // value, not by inversion (design §3.3).
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
   const theme = prefersDark ? darkTheme : lightTheme;
+
+  // Built once: GUIDE_PAGES is a build-time constant (empty until docs/guide/
+  // has pages — C1's "guide not written yet" case), never refetched.
+  const guideParagraphs = useMemo(() => buildGuideParagraphs(GUIDE_PAGES), []);
 
   useEffect(() => {
     fetchAuthConfig(API)
@@ -237,7 +263,9 @@ export default function App() {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <ProjectPicker auth={auth} onSelect={selectProject} onCreate={createProject} onSignOut={signOut} />
+        <GuideProvider paragraphs={guideParagraphs}>
+          <ProjectPicker auth={auth} onSelect={selectProject} onCreate={createProject} onSignOut={signOut} />
+        </GuideProvider>
       </ThemeProvider>
     );
   }
@@ -247,16 +275,18 @@ export default function App() {
       <CssBaseline />
       {/* Keyed by project: switching remounts the provider with the new token. */}
       <AgentChatProvider key={project} config={chatConfig}>
-        <ProjectWorkspace
-          auth={auth}
-          credentialMode={credentialMode}
-          project={project}
-          onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
-          onOnboardingDone={() => setPendingOnboarding(null)}
-          onSwitchProject={selectProject}
-          onCreateProject={createProject}
-          onSignOut={signOut}
-        />
+        <GuideProvider paragraphs={guideParagraphs}>
+          <ProjectWorkspace
+            auth={auth}
+            credentialMode={credentialMode}
+            project={project}
+            onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
+            onOnboardingDone={() => setPendingOnboarding(null)}
+            onSwitchProject={selectProject}
+            onCreateProject={createProject}
+            onSignOut={signOut}
+          />
+        </GuideProvider>
       </AgentChatProvider>
     </ThemeProvider>
   );
@@ -499,7 +529,7 @@ function ProjectWorkspace({
         {shownView === "chart" && (
           <OrgChartPage projectId={project} onOpenAutomation={openScheduleFromChart} />
         )}
-        {shownView === "chat" && <AgentChat />}
+        {shownView === "chat" && <AgentChat projectId={project} />}
         {shownView === "workers" && (
           <WorkersPage
             projectId={project}
@@ -512,7 +542,7 @@ function ProjectWorkspace({
         )}
         {/* No fetchConfigEvents: GET /agent/config-events is mounted, so the
             changelog tab reads the route directly. */}
-        {shownView === "memory" && <MemoryBrowserPage onOpenSession={showSession} />}
+        {shownView === "memory" && <MemoryBrowserPage projectId={project} onOpenSession={showSession} />}
         {shownView === "activity" && (
           <ActivityPage
             projectId={project}
@@ -520,12 +550,13 @@ function ProjectWorkspace({
             onOpenSession={showSession}
           />
         )}
-        {shownView === "settings" && <ProjectSettingsPage />}
+        {shownView === "settings" && <ProjectSettingsPage projectId={project} />}
         {shownView === "onboarding" && (
           <OnboardingPage
             sessionId={onboardSessionId}
             sessionError={onboardError}
             refreshMs={4000}
+            projectId={project}
           />
         )}
         {shownView === "guide" && <GuidePage slug={guideSlug} />}

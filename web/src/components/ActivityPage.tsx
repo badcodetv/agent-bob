@@ -43,6 +43,7 @@ import { highlightSx, highlightMarker, NEW_MARKER_LABEL, type HighlightTone } fr
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 export interface ActivityPageProps extends UseActivityOptions {
   projectId: string
@@ -142,6 +143,8 @@ export default function ActivityPage({
           )}
         </Stack>
       </Stack>
+
+      <AboutThisScreen surface="activity" projectId={projectId} />
 
       {/* Lenses. `role="group"` and not a tablist: these do not swap panels,
           they narrow one list, and announcing them as tabs would promise a
