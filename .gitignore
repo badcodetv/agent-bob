@@ -5,6 +5,10 @@
 web/dist/
 web/*.tgz
 
+# The guide (ticket C1): examples/web/scripts/build-guide.mjs writes this
+# from docs/guide/*.md on every build. Never hand-edit.
+web/src/guide/firstParagraphs.generated.json
+
 # Local env + secrets — never commit
 .env
 node_modules

@@ -61,6 +61,16 @@ export type { SessionRoute } from './permalink.js'
 export { default as useSessionPermalink, projectIdFromLocation } from './useSessionPermalink.js'
 export type { UseSessionPermalinkOptions, SessionPermalinkApi } from './useSessionPermalink.js'
 
+// The guide (design 2026-09-11-onboarding-and-the-guide.md §3 G7, work plan
+// §1.5/§1.6): the closed surface-id set, the front-matter parser shared with
+// the build-time generator in examples/web, and the `#/guide/<slug>` hash
+// route's pure parse/build pair.
+export { GUIDE_SURFACES, isSurfaceId } from './guide/surfaces.js'
+export type { SurfaceId } from './guide/surfaces.js'
+export { parseGuidePage, GUIDE_PART_LABELS } from './guide/frontMatter.js'
+export type { GuideFrontMatter, ParsedGuidePage } from './guide/frontMatter.js'
+export { GUIDE_HASH_PREFIX, buildGuideHash, parseGuideHash } from './guide/guideRoute.js'
+
 // Project settings (B3) — the /agent/project-settings surface: pure helpers,
 // the load/edit/save hook, and the page.
 export {
