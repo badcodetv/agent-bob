@@ -446,7 +446,13 @@ function WriteNoteDialog({
   // only on the pre-fill values matters here: "Write a note" always pre-fills
   // with the same two empty strings, so a key that ignored `open` would leave
   // a half-typed note in place the next time the same button is clicked.
-  const identity = open ? `${title} ${initialLabels} ${initialContent}` : ' closed'
+  // The separator is written as the ESCAPE, never as the byte: a raw NUL in a
+  // source file makes grep report 'no matches' over the whole directory and
+  // git report 'Binary files differ', and `scripts/check-no-nul-bytes.sh` fails
+  // CI for exactly that reason (doc 22 RD25). The runtime string is identical.
+  const identity = open
+    ? `${title}\u0000${initialLabels}\u0000${initialContent}`
+    : '\u0000closed'
   const seededFor = useRef<string | null>(null)
   if (seededFor.current !== identity) {
     seededFor.current = identity
