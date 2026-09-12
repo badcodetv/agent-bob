@@ -305,7 +305,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [x] done
 - Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go. (2026-09-12) Resumed: the WIP diff needed no code changes; amended to 5dd6d5f and merged as a12755f. The agent's `go test ./...` was green but it reported honestly that the one acceptance criterion about the midnight boundary rested on a SKIPPED live-Postgres test, so the orchestrator closed that gap: a throwaway `pgvector/pgvector:pg16` on port 55432 (never the stack's shared database — CLAUDE.md warns a sibling branch's migration has broken other agents' runs), then `AGENTKIT_TEST_POSTGRES_URL=... go test ./agentdb/... -run Usage -v -count=1` → **all four `TestLivePG_GetProjectUsageSince_*` PASS**, including `ExcludesRowsBeforeSince`. Then the whole suite on the merged tree WITH the live database attached: `go build`/`go vet` clean, `go test ./... -count=1` → 34 packages ok, 0 FAIL, exit 0. So A4 is the one ticket here proven against real Postgres, not just sqlite.
 
-### A5: the budget panel in the console   [Status: todo | Model: sonnet]
+### A5: the budget panel in the console   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** A `BudgetPanel` component in `web/src/components/`: today's tokens against the hard
   limit as one hairline bar (no colour unless over the soft tier — `steel` for the bar, `rose`
   when a stop is in force, per the design palette), today's cost, last 7 and 30 days as two lines,
@@ -330,8 +330,31 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && bash scripts/verify-package.sh`
 - **Depends on:** A3, A4 (build against their branches merged into main by the orchestrator)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Built, then sent back **twice**, then merged as `03142ec` (branch commit
+  `f032ee2`). Round 1 delivered the panel, `usage.ts`, `whoami.ts` and the G5 split, green. Round 2
+  fixed **DI18** — the lost-update defect the agent found itself and mis-framed as pre-existing;
+  `BudgetPanel` now takes an optional `settings` prop so the settings page supplies its single
+  instance (`ProjectSettingsPage.tsx:219`) while the Desk mount keeps its own. The agent improved on
+  the fix asked for: instead of an `onSaved` callback it watches a genuine `saving` true→false with
+  no error, which refreshes the numbers whichever button saved — right, because on a shared instance
+  either can change the budget, and `settings.save()` never rejects so a `.then()` would also have
+  fired on validation early-returns. **Its regression test is proven both ways**: it reverted the fix,
+  saw `expected +0 to be 9000`, restored it, saw it pass. Round 3 closed **DI19**, the third guarded
+  field. Orchestrator re-ran the Validation on the merged tree: typecheck clean, `vitest
+  --testTimeout=20000` **1684/1684 in 91 files**, `verify-package.sh` PASS, web build clean,
+  `examples/web` build and typecheck clean at 18 guide pages — and re-ran
+  `ProjectSettingsPage.test.tsx` alone to confirm the three tests that matter survived the merge
+  rather than inferring it from a rising total: the shared-instance regression and both
+  `max_concurrent_jobs` gate cases pass (32/32 in that file).
+  On the field moves: the design's "No field moves or changes; only the grouping" reads like a
+  prohibition on what A5 did, and is not — you cannot build two tiers without moving fields between
+  them, so the grouping *is* the move. What it forbids is a field renamed, revalidated, rewired or
+  dropped, and none was: `s.update`, `s.draft`, `s.fieldErrors` still flow through one instance.
+  Removing the two token budgets from the open numeric list was **necessary**, for a better reason
+  than the ticket text the agent cited: left there, a non-operator could edit them and the
+  whole-object PUT would 403, so taking them out is what makes the operator gate real at the point
+  of use rather than only at the wire.
 
 ### A6: the project map reloads without a restart   [Status: merged, live check pending | Model: sonnet]
 - **Scope:** When `AGENTKIT_PROJECT_MAP_FILE` is set, re-read and re-parse it on `SIGHUP` **and**
@@ -776,3 +799,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **17. Five page components had no `projectId` prop at all.** (C2, 2026-09-12) `ProjectSettingsPage`, `MemoryBrowserPage`, `WorkerEditor`, `WorkerTriggers` and `OnboardingPage` never took one; only `WorkersPage`, `DeskPage`, `ActivityPage`, `OrgChartPage` and `WorkerHistory` did. C2 needs it to key per-project dismissal, so it added the prop to each as optional defaulting to `''`. That is the right shape for a published package — no consumer breaks — and our shell passes it everywhere, so nothing is wrong today. The residue: a host that omits it gets dismissal scoped to the empty-string project, which only matters to a multi-project embedder, and none exists. Worth a follow-up only if one appears.
 
 **18. A5 mounted a second, independent settings loader inside the settings page, and a save from the main form silently reverted the budget.** (A5 → orchestrator, 2026-09-12) A5 reported this itself, which is how it was caught — but framed it as "a pre-existing shape of risk ... not something A5 introduced structurally". That framing is wrong and the orchestrator rejected it. Before A5, `ProjectSettingsPage` held exactly one `useProjectSettings` instance; A5 mounts `BudgetPanel` *inside* that page (`ProjectSettingsPage.tsx:204`) and `BudgetPanel.tsx:62` gives it its own. Two independent GETs and two whole-object PUTs then render on one page — and the write path makes the consequence certain, not merely possible: `projectSettings.ts:311-313` builds the body by spreading the whole settings object minus `project`/`updated_at`, and `useProjectSettings.ts:9-13` states the route has no patch semantics. So the main form always sends `daily_tokens_soft`/`_hard` as read at mount. An operator who raises the hard limit in the panel and then saves anything in Advanced reverts it, with a success message and a changelog entry asserting the opposite. For the one control in this wave whose purpose is to be a trustworthy brake on spend, that is a defect, not a footnote. Sent back to A5 with the narrow fix: an optional `settings` prop on `BudgetPanel` so the parent supplies the single instance on the settings page while the Desk mount keeps its own, plus a test that saves from the main form and asserts the PUT carries the **new** limit — a behaviour switch, not a storage round-trip. **General lesson: two independent readers of one whole-object PUT on the same screen is a lost-update bug by construction, and the second one is always the one that introduced it.**
+
+**19. The console gated two of the three fields the server calls operator-only.** (orchestrator, 2026-09-12) `go/httpapi/project_settings.go:96-106` refuses a non-operator whose body differs from the stored row on `DailyTokensSoft`, `DailyTokensHard` **or `MaxConcurrentJobs`** — three fields. A5 moved the two token budgets into its operator-gated panel and left `max_concurrent_jobs` in the open Advanced list (`ADVANCED_NUMERICS`), which made the page *worse* than before it started: the UI now looked like it gated operator-only settings while one of the three stayed editable, and because the PUT is whole-object a non-operator who nudged it lost **every other edit in the draft** to a 403 whose message — "only the operator may change budgets and caps" — never names the field responsible. Closed inside A5 as a deliberate scope call by the orchestrator: the field stays in Advanced and editable for an operator, and renders read-only with "Only the operator can change this." otherwise (`ProjectSettingsPage.tsx:302-320`, `ReadOnlyNumericSetting` at `:471`), on the same fail-closed `useWhoami` default as everywhere else. `briefing_max_bytes` and `snapshot_ttl_days` are untouched — the server does not guard them. **General rule: a UI gate that covers a subset of a server's guarded set is worse than no gate, because it teaches the reader that ungated fields are safe.**
+
+**20. Two "Why?" fields now coexist on the settings page, and that is fine.** (orchestrator, 2026-09-12) Since `BudgetPanel` shares the page's settings instance, its rationale input binds to `settings.rationale` (`BudgetPanel.tsx:310`) — the very value the main form's field binds to. So there is one reason per save and the config log cannot be handed a reason belonging to the other form, which was the thing worth checking given how much this repo rests on the changelog being true. Two inputs onto one field is a presentational wart, not a defect; tests disambiguate with `getAllByLabelText('Why?')`. Recorded rather than fixed.
