@@ -98,8 +98,32 @@ GCP_AR_REPO=agent-bob
 `agent-bob-runtime` service account key mounted at `/gcp/key.json` is the credential that does
 the pull.
 
-⚠️ This is thread 01's file to edit, not this thread's. Hand it over; do not edit
-`/srv/apps/bob/src/.env` from here.
+✅ **Already folded into `docs/ops.md` by thread 01** — commit `3ddce38` on `thread/01-ovh`, these
+exact four lines. Nothing for this thread to do; the note stays because the two documents must
+keep agreeing.
+
+🔴 **Do NOT set `AGENTKIT_REGISTRY_ALWAYS_PULL=true` on the box.** It is correct on a laptop, where
+`:dev` is a stable tag with drifting contents, and wrong here. `EnsurePresent` skips the pull when
+the image already inspects locally — **but only when always-pull is off**
+(`go/imageregistry/ociregistry/ociregistry.go`, the `if !r.alwaysPull` guard). With it on, agentd
+force-pulls *every* image including the sandbox and core images the box built for itself, which
+exist in no registry, and they fail. Raised by thread 01; verified here by reading that function.
+
+🔴 **Switching to `ociregistry` turns snapshot reclamation off, and nobody is told.** On this
+backend an idle session's snapshot is a **layer push to Artifact Registry**, and
+`Registry.Remove` returns `nil` without deleting anything — deletion is explicitly out of band
+(`go/imageregistry/ociregistry/ociregistry.go:268-274`). The reaper still calls it
+(`go/snapshot_reaper.go:272`), so `AGENTKIT_SNAPSHOT_REAP_INTERVAL` clears the database row and
+leaves the bytes. Archived sessions therefore accumulate **forever** — slow and deduplicated, but
+unbounded.
+
+This matters more for Wolf than for Bob: § 9's daily researcher creates a session per live
+hypothesis per day, every one of which is eventually archived. The fix is a cleanup policy on the
+`agent-bob` Artifact Registry repository, which thread 01 has recorded in
+`design/2026-09-12-gke-to-box-migration.md` § 6 item 2, pending Kai's yes. 💰 Not this thread's to
+approve or apply.
+
+⚠️ `/srv/apps/bob/src/.env` is thread 01's file to edit, not this thread's.
 
 ## 5. Bob's side: the `wolf` project
 
@@ -274,6 +298,11 @@ not with page visits. Sessions each hold a container and one of Bob's 100 host p
 finished or idle for 30 minutes. Do **not** set a fast cron on the box: `*/15 * * * *` is roughly
 96 billable sessions a day *per hypothesis* (`README-stack.md` § "Cost").
 
+There is a **second, quieter cost** and § 4 names it: every one of those sessions is eventually
+archived, archiving pushes a snapshot to Artifact Registry, and on this backend nothing ever
+deletes it. Storage grows monotonically with the number of researcher ticks the box has ever run.
+The Artifact Registry cleanup policy is the control, and it does not exist yet.
+
 ## 10. Caddy and DNS
 
 Append to `/srv/apps/caddy/Caddyfile` (pattern from `docs/ops.md:645`):
@@ -379,5 +408,7 @@ one check `docker compose config` cannot make, and the one an nginx bug survived
 - **The box itself** — thread 01. Nothing above can run until it reports.
 - **A verified Bob** — thread 02. Wolf runs on Bob; five unverified branches is not a base to
   ship on.
-- **§ 4's four lines in Bob's `.env`** — thread 01's file.
+- **§ 4's four lines in Bob's `.env`** — thread 01's file; **done**, commit `3ddce38`.
+- **An Artifact Registry cleanup policy** (§ 4, § 9) — thread 01 is holding it for Kai's yes.
+  Without it Wolf's daily researcher grows registry storage without bound.
 - **§ 8 step 3, the Google console** — Kai only.
