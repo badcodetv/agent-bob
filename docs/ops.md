@@ -937,8 +937,11 @@ mv /tmp/gcp-key.json /srv/apps/bob/secrets/ && chmod 600 /srv/apps/bob/secrets/g
 > **Recommended: point Bob at the box's Postgres.** A fresh Bob on a new box **has no data**, so the
 > PG16 → PG18 move costs nothing today; in six months it means migrating live sessions. It also puts
 > Bob's conversations under pgBackRest from the first message rather than leaving a second,
-> separately-handled database on the box. The risk is that `agentdb`'s migrations must run clean on
-> PG18 — testable locally before the box exists, and worth doing first.
+> separately-handled database on the box. ~~The risk is that `agentdb`'s migrations must run clean
+> on PG18.~~ ✅ **Tested 2026-09-12 and they do**: `go test ./agentdb/` against a throwaway
+> PostgreSQL 18.6 returns `ok … 232.342s`, all 49 migrations apply, and the HNSW pgvector index and
+> the jsonb label indexes are all created — `design/2026-09-12-postgres-native-backups.md` §9.6a.
+> **The recommendation is no longer a judgement call.**
 >
 > The alternative (keep Bob's bundled PG16 for round one) is lower risk on day one and higher cost
 > later, and it means pgBackRest needs a second stanza or Bob's database is unbacked.
