@@ -28,6 +28,13 @@ interface InlineArtifactPreviewProps {
   apiBaseUrl?: string
   /** Auth header value. */
   authHeader?: string
+  /**
+   * Resolves the Authorization header at fetch time, for hosts that hold a
+   * token rather than a header (the embed page's `getAuthToken`). Wins over
+   * `authHeader`. Without it, every preview inside the embed went out with no
+   * credential and rendered "Failed to load: HTTP 401" (2026-09-12).
+   */
+  getAuthHeader?: () => Promise<string | undefined> | string | undefined
   /** Optional callback for publish/share action on webapp artifacts. */
   onPublishWebapp?: (sessionId: string, artifact: ArtifactInfo) => void
 }
@@ -59,6 +66,7 @@ export default function InlineArtifactPreview({
   dataUrl,
   apiBaseUrl = '',
   authHeader,
+  getAuthHeader,
   onPublishWebapp,
 }: InlineArtifactPreviewProps) {
   const [content, setContent] = useState<{ text?: string; error?: string } | null>(null)
@@ -70,9 +78,10 @@ export default function InlineArtifactPreview({
   // the file (which re-fetches) works.
   const fetchedKeyRef = useRef<string | null>(null)
 
-  function makeHeaders(): Record<string, string> {
+  async function makeHeaders(): Promise<Record<string, string>> {
     const h: Record<string, string> = {}
-    if (authHeader) h['Authorization'] = authHeader
+    const value = getAuthHeader ? await getAuthHeader() : authHeader
+    if (value) h['Authorization'] = value
     return h
   }
 
@@ -86,7 +95,8 @@ export default function InlineArtifactPreview({
     const url = artifact.id
       ? `${apiBaseUrl}/agent/artifacts/${artifact.id}/download`
       : `${apiBaseUrl}/agent/session/${sessionId}/workspace/files/${artifact.filePath.replace(/^\//, '')}`
-    fetch(url, { headers: makeHeaders() })
+    makeHeaders()
+      .then(headers => fetch(url, { headers }))
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.text()
@@ -109,8 +119,14 @@ export default function InlineArtifactPreview({
     const downloadUrl = artifact.id
       ? `${apiBaseUrl}/agent/artifacts/${artifact.id}/download`
       : `${apiBaseUrl}/agent/session/${sessionId}/workspace/files/${artifact.filePath.replace(/^\//, '')}`
-    fetch(downloadUrl, { headers: makeHeaders() })
-      .then(res => res.blob())
+    makeHeaders()
+      .then(headers => fetch(downloadUrl, { headers }))
+      .then(res => {
+        // Without this check a refused download saved a file containing the
+        // word "unauthorized" under the artifact's name, and looked like success.
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        return res.blob()
+      })
       .then(blob => {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
@@ -120,7 +136,7 @@ export default function InlineArtifactPreview({
         URL.revokeObjectURL(url)
       })
       .catch(err => console.error('Download failed:', err))
-  }, [artifact, sessionId, apiBaseUrl, authHeader])
+  }, [artifact, sessionId, apiBaseUrl, authHeader, getAuthHeader])
 
   const handleClick = useCallback(() => {
     onOpenPreview(artifact)

@@ -282,3 +282,31 @@ test('AgentChat hides input when readOnly is true', () => {
   expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull()
   expect(screen.queryByRole('button', { name: /send/i })).toBeNull()
 })
+
+// ---------------------------------------------------------------------------
+// narrow host: the artifacts panel is an overlay, not a 320px column (2026-09-12)
+// ---------------------------------------------------------------------------
+
+test('AgentChat below 900px hides the artifacts column behind a button and opens it as an overlay', () => {
+  const original = window.matchMedia
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width:899.95px'),
+    media: query, onchange: null,
+    addListener: () => {}, removeListener: () => {},
+    addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+  try {
+    render(
+      <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+        <AgentChat artifacts={[{ filePath: 'report.html', fileName: 'report.html', label: 'report', artifactType: 'report', source: 'registered', status: 'extracted', id: 'a1' }]} />
+      </AgentChatProvider>
+    )
+    expect(screen.queryByTestId('artifact-panel')).toBeNull()
+    fireEvent.click(screen.getByTestId('artifact-panel-open'))
+    expect(screen.getByTestId('artifact-panel')).toHaveAttribute('data-overlay', 'true')
+    fireEvent.click(screen.getByTestId('artifact-panel-close'))
+    expect(screen.queryByTestId('artifact-panel')).toBeNull()
+  } finally {
+    window.matchMedia = original
+  }
+})

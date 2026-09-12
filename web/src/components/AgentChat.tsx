@@ -11,7 +11,7 @@
 // See ../../docs/09-frontend-components.md and ../../docs/90-provenance-map.md.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Button, Typography, Alert, Switch, Chip, Divider } from '@mui/material'
+import { Box, Button, Typography, Alert, Switch, Chip, Divider, useMediaQuery } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ActivityStatus, AgentMessage, ArtifactInfo, AskUserQuestionInfo, CreatedDashboardInfo, RenderedTableInfo, RenderedChartInfo, TodoItem } from '../types.js'
 import { getToolCategory, getToolIcon } from '../tool-formatters.js'
@@ -170,6 +170,18 @@ export default function AgentChat(props: AgentChatProps) {
   const pluginEvents    = props.pluginEvents    ?? ctx?.pluginEvents   ?? []
   const apiBaseUrl      = props.apiBaseUrl      ?? ctx?.config.apiBaseUrl ?? ''
   const authHeader      = props.authHeader
+  // The embed page (and the console) hand AgentChatProvider a TOKEN getter, not
+  // a header — and this component used to read `props.authHeader` only, so
+  // every artifact preview inside the embed went out with no credential and
+  // failed with HTTP 401 (found on the box, 2026-09-12). Resolved at fetch time
+  // because a host's getter may refresh.
+  const getAuthToken    = ctx?.config.getAuthToken
+  const getAuthHeader   = useCallback(async (): Promise<string | undefined> => {
+    if (authHeader) return authHeader
+    if (!getAuthToken) return undefined
+    const token = await getAuthToken()
+    return token ? `Bearer ${token}` : undefined
+  }, [authHeader, getAuthToken])
   const transcribeEndpoint = props.transcribeEndpoint
   const uploadEndpoint  = props.uploadEndpoint
   const onPinToDashboard = props.onPinToDashboard
@@ -179,6 +191,12 @@ export default function AgentChat(props: AgentChatProps) {
   const projectId = props.projectId ?? ''
 
   const [input, setInput] = useState('')
+  // Below 900px — which inside an iframe is the IFRAME's width — the artifacts
+  // panel stops being a fixed 320px column and becomes an overlay behind a
+  // button. In a ~550px embed rail the column left the conversation ~230px
+  // (reported from Agent Wolf on the box, 2026-09-12).
+  const narrow = useMediaQuery('(max-width:899.95px)')
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [, setViewerArtifact] = useState<ArtifactInfo | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -415,7 +433,7 @@ export default function AgentChat(props: AgentChatProps) {
     // two halves of the same flexbox rule, and only the height half was ever
     // written down. This component is embedded in a narrow rail by design
     // (docs/19-embedding.md), so it must survive any width.
-    <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
+    <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
       {/* Chat area */}
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
         <AboutThisScreen surface="chat" projectId={projectId} sx={{ mx: 2, mt: 2, mb: 0 }} />
@@ -511,6 +529,7 @@ export default function AgentChat(props: AgentChatProps) {
                         onOpenPreview={handleOpenPreview}
                         apiBaseUrl={apiBaseUrl}
                         authHeader={authHeader}
+                        getAuthHeader={getAuthHeader}
                       />
                     </Box>
                   ))}
@@ -581,6 +600,7 @@ export default function AgentChat(props: AgentChatProps) {
                           onOpenPreview={handleOpenPreview}
                           apiBaseUrl={apiBaseUrl}
                           authHeader={authHeader}
+                          getAuthHeader={getAuthHeader}
                         />
                       </Box>
                     )
@@ -594,6 +614,7 @@ export default function AgentChat(props: AgentChatProps) {
                         onOpenPreview={handleOpenPreview}
                         apiBaseUrl={apiBaseUrl}
                         authHeader={authHeader}
+                        getAuthHeader={getAuthHeader}
                       />
                     </Box>
                   ))}
@@ -844,9 +865,20 @@ export default function AgentChat(props: AgentChatProps) {
         )}
       </Box>
 
-      {/* Artifact Panel */}
-      {!readOnly && (
+      {/* Artifact Panel — a column when there is room, an overlay when narrow */}
+      {!readOnly && narrow && !artifactsOpen && (artifacts.length > 0 || (todos?.length ?? 0) > 0) && (
+        <Chip
+          data-testid="artifact-panel-open"
+          label={artifacts.length > 0 ? `Artifacts (${artifacts.length})` : `Tasks (${todos?.length ?? 0})`}
+          onClick={() => setArtifactsOpen(true)}
+          size="small"
+          sx={{ position: 'absolute', top: 8, right: 16, zIndex: 1, boxShadow: 2, bgcolor: 'background.paper' }}
+        />
+      )}
+      {!readOnly && (!narrow || artifactsOpen) && (
         <ArtifactPanel
+          overlay={narrow}
+          onClose={() => setArtifactsOpen(false)}
           artifacts={artifacts}
           todos={todos}
           sessionId={sessionId}
