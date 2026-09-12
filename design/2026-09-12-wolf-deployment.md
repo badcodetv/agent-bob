@@ -5,9 +5,16 @@ writing no server exists (thread 01 owns building it). The local rehearsal that 
 derived from is recorded in § "What the local rehearsal proved".
 
 This turns `README-stack.md` § "What is real here, and what still differs from a deployment" —
-a four-row table — into steps for the box described in `docs/ops.md`. It follows that document's
-Part 3 "Add a new app" (`docs/ops.md:849`) and assumes Step 11 (Agent Bob) is already done and
-green.
+a four-row table — into steps for the box. It follows that box guide's Part 3 § "Add a new app"
+and assumes its Step 11 (Agent Bob) is already done and green.
+
+> 📍 **The box guide moved on 2026-09-12.** It now lives in the private **`ops`** repository
+> (`binocarlos/ops`, checked out at `~/projects/badcode/ops`) as **`docs/build-the-box.md`** —
+> what used to be `agent-bob/docs/ops.md`. The copy still in agent-bob carries a banner saying it
+> will drift; **do not follow or edit it.** Sections are cited by name below rather than by line
+> number, because the file has already moved once. Anything this thread adds to the *box's* ops
+> steps belongs in the `ops` repo, not here — coordinate with thread 01 (`ovh-servers`) first, it
+> is their repository.
 
 Audience: whoever is at the terminal. Every command is meant to be pasted.
 
@@ -42,31 +49,34 @@ Two consequences, both load-bearing:
 | Decision | Value | Why |
 | --- | --- | --- |
 | Domain | `wolf.badcode.tv` | Kai, 2026-09-12. Matches `bob.badcode.tv`. |
-| Internal port | `8120` | Already reserved for Agent Wolf in the port table, `docs/ops.md:190`. |
+| Internal port | `8120` | Already reserved for Agent Wolf in the port table, `ops/docs/build-the-box.md` § 1.6's port table. |
 | First allowlist | `kaiyadavenport@gmail.com` | Kai, 2026-09-12: "for the moment it's just me". Others added later by § 6. |
 | Disk size | 10G | It holds a `.env` and nothing else (§ 0). |
 | Session image tag | a commit sha, never `:dev` | `:dev` is a stable tag with drifting contents (`README-stack.md` § "Registry mode"). A box should run bytes you can name. |
 | Researcher schedule | Wolf's own default, daily 06:00 UTC | Cost. See § 9. |
 
-## 2. The disk and the folder
+## 2. The folder — and no disk, because there is no longer such a thing
 
 ```bash
-new-app-volume wolf 10G          # /srv/apps/wolf, backed up hourly
 mkdir -p /srv/apps/wolf/src
 cd /srv/apps/wolf
-git clone https://github.com/badcodetv/agent-wolf.git src
+git clone git@github.com:badcodetv/agent-wolf.git src
 ```
 
-🟡 **`new-app-volume` may not exist by the time this runs.** Thread 01 is evaluating replacing the
-LVM thin-pool + restic design with pgBackRest and WAL archiving to GCS (`942a2f9` on
-`thread/01-ovh`, pending Kai). If that is accepted, the thin pool, `new-app-volume` and the five
-backup scripts go away, and **this step collapses to the `mkdir` and the `git clone`** — no volume,
-no line to change anywhere else.
+That is the whole step. **`new-app-volume` no longer exists**: Kai adopted pgBackRest with WAL
+archiving in place of the LVM thin pool on 2026-09-12, which deleted the thin pool, the per-app
+volumes and the five bespoke backup scripts (`ops/docs/build-the-box.md` § 1.5, Step 4). An
+earlier draft of this section flagged that as a risk; it has now happened.
 
-That is not a loss, and § 0 is why: Wolf holds no server-side state, so its disk was only ever
-carrying a `.env`. What protects a tester's work is Bob's Postgres, which is exactly what
-pgBackRest would protect better. **Add nothing else here that depends on a per-app thin volume
-until thread 01's status file says the backup design is settled.**
+Nothing is lost, and § 0 is why. Wolf holds no server-side state, so its volume was only ever
+carrying a `.env` — and `/srv/apps/<app>/`'s config files are covered by the box's nightly restic
+pass regardless. What protects a tester's work is the continuous backup of the one Postgres, which
+is strictly better than what the old design gave it.
+
+🔴 **Wolf needs no database and no Postgres role.** The box guide's "Add a new app" step 2 says to
+create a database and role in the shared Postgres; **skip it for Wolf.** Wolf reaches Postgres only
+through Bob's API and holds no schema of its own, so an `app_wolf` role would be an unused
+credential with a password to look after. Bob's `app_bob` role is the one that matters.
 
 ## 3. The networking rule that must survive the move
 
@@ -83,14 +93,14 @@ Wolf's compose file expects two names from Bob's stack:
 
 **Both hold on the box unchanged.** Bob's compose file pins its project name explicitly
 (`docker-compose.yml:4`, `name: agent-bob`), so the names do not follow the directory — even
-though `docs/ops.md:737` starts Bob from a directory called `src`. Nothing to configure. *This
+though `ops/docs/build-the-box.md` Step 11c starts Bob from a directory called `src`. Nothing to configure. *This
 was checked rather than assumed; a compose project that took its name from the directory would
 have produced `src_default` / `src-dind-1` and a `wolf-api` that never starts.*
 
-## 4. 🔴 A gap in `docs/ops.md` Step 11 that blocks Wolf
+## 4. 🔴 A gap in `build-the-box.md` Step 11 that blocks Wolf
 
 **Bob as Step 11d configures it cannot pull Wolf's session image.** Step 11d's `.env`
-(`docs/ops.md:745-800`) sets the *blob* backend to GCS but says nothing about the *registry*
+(`ops/docs/build-the-box.md` Step 11d) sets the *blob* backend to GCS but says nothing about the *registry*
 backend, and the default is `blobarchive`, not Artifact Registry
 (`go/cmd/agentd/backends.go:92`). Wolf's sessions launch from `session-wolf:<tag>` **in Artifact
 Registry**; with the default backend `EnsurePresent` is a local no-op and every Wolf session fails
@@ -109,9 +119,9 @@ GCP_AR_REPO=agent-bob
 `agent-bob-runtime` service account key mounted at `/gcp/key.json` is the credential that does
 the pull.
 
-✅ **Already folded into `docs/ops.md` by thread 01** — commit `3ddce38` on `thread/01-ovh`, these
-exact four lines. Nothing for this thread to do; the note stays because the two documents must
-keep agreeing.
+✅ **Resolved upstream and verified here.** All four lines are present in
+`ops/docs/build-the-box.md` Step 11d, and the always-pull warning below is there too. Nothing for
+this thread to do; the note stays so the two documents keep agreeing.
 
 🔴 **Do NOT set `AGENTKIT_REGISTRY_ALWAYS_PULL=true` on the box.** It is correct on a laptop, where
 `:dev` is a stable tag with drifting contents, and wrong here. `EnsurePresent` skips the pull when
@@ -131,7 +141,7 @@ unbounded.
 This matters more for Wolf than for Bob: § 9's daily researcher creates a session per live
 hypothesis per day, every one of which is eventually archived. The fix is a cleanup policy on the
 `agent-bob` Artifact Registry repository, which thread 01 has recorded in
-`design/2026-09-12-gke-to-box-migration.md` § 6 item 2, pending Kai's yes. 💰 Not this thread's to
+`ops/design/2026-09-12-gke-to-box-migration.md` § 6 item 2, pending Kai's yes. 💰 Not this thread's to
 approve or apply.
 
 ⚠️ `/srv/apps/bob/src/.env` is thread 01's file to edit, not this thread's.
@@ -141,7 +151,7 @@ approve or apply.
 Three things must be true inside Bob before Wolf will talk to it.
 
 **5a. The project map gains a `wolf` entry.** On the box that file is
-`/srv/apps/bob/secrets/projects.json` (`docs/ops.md:759-768`), and agentd re-reads it on SIGHUP
+`/srv/apps/bob/secrets/projects.json` (`ops/docs/build-the-box.md` Step 11d), and agentd re-reads it on SIGHUP
 or every 60 seconds — no restart:
 
 ```json
@@ -316,7 +326,7 @@ The Artifact Registry cleanup policy is the control, and it does not exist yet.
 
 ## 10. Caddy and DNS
 
-Append to `/srv/apps/caddy/Caddyfile` (pattern from `docs/ops.md:645`):
+Append to `/srv/apps/caddy/Caddyfile` (pattern from `ops/docs/build-the-box.md` Step 10):
 
 ```
 wolf.badcode.tv {
@@ -374,7 +384,7 @@ cd /srv/apps/wolf/src && npx --yes tsx scripts/bootstrap-project.ts
 ## 13. ✅ Done when
 
 - `ss -tlnp` shows port 8120 bound to **127.0.0.1 only**. Never `0.0.0.0` — Docker punches
-  straight through the firewall (`docs/ops.md:177`).
+  straight through the firewall (`ops/docs/build-the-box.md` § 1.6).
 - `https://wolf.badcode.tv` serves the sign-in page over HTTPS.
 - Kai signs in with Google and reaches the board.
 - Kai states a hypothesis and completes the interview.
