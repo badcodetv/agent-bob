@@ -144,8 +144,28 @@ test.describe('onboarding', () => {
     // change the project on a clock without asking.
     await expect(page.getByText(/runs on this schedule from now on/i)).toBeVisible()
 
+    // ── A2 / design §3 G1: the interview survives navigation ────────────────
+    //
+    // Clicking away from the onboarding view used to clear the only path back
+    // to the charter and Approve (`App.tsx:393-396` before this fix). "In
+    // interview" is now derived from the server, so Desk offers a way back in,
+    // and the topology seed — the architect's designed alternative — is
+    // withheld on both Desk and Workers while the interview is still running.
+    await page.getByTestId('nav-desk').click()
+    await expect(page.getByTestId('finish-onboarding')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Start from an org chart' })).toHaveCount(0)
+    await page.getByTestId('nav-workers').click()
+    await expect(page.getByRole('button', { name: /start from a topology/i })).toHaveCount(0)
+
+    // Back to Desk, and in through the door this fix adds.
+    await page.getByTestId('nav-desk').click()
+    await page.getByTestId('finish-onboarding').click()
+    await expect(page.getByTestId('charter-panel')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('charter-approve')).toBeVisible()
+
     await page.getByTestId('charter-approve').click()
     await expect(page.getByTestId('charter-applied')).toBeVisible({ timeout: 60_000 })
+
 
     // ── what approving actually did ─────────────────────────────────────────
     const workers = await client.listWorkers()
@@ -175,8 +195,23 @@ test.describe('onboarding', () => {
     expect(await labelled(client, 'kind=registry'), 'the label registry seed').not.toHaveLength(0)
     expect(await labelled(client, 'kind=project-goal'), 'the goal seed').not.toHaveLength(0)
 
-    // The button that wakes it — an event, never a chat.
+    // The button that wakes it — an event, never a chat. It lives on the
+    // onboarding view (`OnboardingPage.tsx:166`), so this assertion requires
+    // the page to still BE there. A2's navigation checks used to be spliced in
+    // above and ended on Workers, which left this looking for a control that
+    // is not mounted on that view — the pre-existing assertion failed because
+    // of where the new one had walked the browser to, not because anything was
+    // broken. Hence the order here: view-dependent assertions last, each one
+    // on the view that owns it. See DI30.
     await expect(page.getByTestId('run-architect')).toBeVisible()
+
+    // A2, post-approval: the topology seed is offered again once the interview
+    // is over (the architect worker now exists — see `useInterviewState`'s
+    // comment on why that is the signal). Last, because it navigates away.
+    await page.getByTestId('nav-workers').click()
+    await expect(page.getByRole('button', { name: /start from a topology/i })).toBeVisible({
+      timeout: 30_000,
+    })
   })
 })
 

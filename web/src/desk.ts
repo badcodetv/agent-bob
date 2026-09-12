@@ -151,7 +151,11 @@ export interface DeskAsk {
   /** `email-answerer · awaiting_human · 2h 40m`. */
   headline: string
   glyph: DeskGlyph
+  /** Unix SECONDS — attention requests stamp seconds, not milliseconds (J1). */
   createdAt: number
+  /** Always `'first-ask'`: every ask is a candidate, and `firsts.ts` picks
+   *  whichever is chronologically earliest. See `DeskFirstRecord`. */
+  firstKind: DeskFirstKind
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +186,91 @@ export interface DeskChange {
   glyph: DeskGlyph
   /** Unix MILLISECONDS. */
   createdAt: number
+  /**
+   * Which "first of a kind" (design §3 G4, `firsts.ts`) this record would
+   * narrate as, or `null` when it is not one of the seven — most changes
+   * aren't. Set on every matching record, not only the project's actual
+   * first; `firsts.ts` is the one that decides which is earliest.
+   */
+  firstKind: DeskFirstKind | null
+}
+
+// ---------------------------------------------------------------------------
+// "Firsts" — the Desk narrating the first of a kind (design §3 G4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seven kinds G4 narrates. Closed on purpose: `firsts.ts` writes one
+ * sentence per kind, once, and a kind that is not in this list can never
+ * narrate — there is no "8th first" a stray action string could smuggle in.
+ */
+export const DESK_FIRST_KINDS = [
+  'first-worker',
+  'first-memory',
+  'first-schedule',
+  'first-subscription',
+  'first-rewrite',
+  'first-ask',
+  'first-revert',
+] as const
+export type DeskFirstKind = (typeof DESK_FIRST_KINDS)[number]
+
+/**
+ * One candidate for `firsts.ts` to consider: a record of a given kind, and
+ * when it happened.
+ *
+ * `createdAtMs` is ALWAYS milliseconds, regardless of what the underlying
+ * table stamps — this is the J1 hazard made harmless at the one seam that
+ * has to compare timestamps of different kinds against each other to find
+ * "the earliest". Asks are the case that matters: `attention_requests` (and
+ * therefore `DeskAsk.createdAt`) stamp unix SECONDS, so it is multiplied by
+ * 1000 here. Do not remove that multiplication because a record "looks like"
+ * it is already in milliseconds — check the source table.
+ */
+export interface DeskFirstRecord {
+  kind: DeskFirstKind
+  createdAtMs: number
+  /** The id of the row that should carry the sentence (a `DeskChange.id`, a
+   *  `DeskAsk.id`, or a synthetic `memory:<created_at>` id). */
+  id: string
+}
+
+/**
+ * A config action's kind, or `null` when it is not one of the seven.
+ *
+ * Reverts are not their own action in the engine — §D's design reuses the
+ * ordinary mutation verbs and the compensating write's rationale is the only
+ * place a revert says what it is. The engine defaults that rationale to
+ * `revert of <action> (seq <n>, event <id>)` when the caller supplies none
+ * (`go/agentdb/config_revert.go`); the console's own revert control requires
+ * a human-typed reason, so this match is necessarily a heuristic; a revert
+ * whose rationale does not start this way narrates under its underlying
+ * action's kind instead (e.g. a reverted worker rewrite still narrates as
+ * `first-rewrite`), never as nothing.
+ */
+const REVERT_RATIONALE_RE = /^revert of /i
+
+export function looksLikeRevertRationale(rationale: string): boolean {
+  return REVERT_RATIONALE_RE.test(rationale.trim())
+}
+
+export function deskFirstKindForChange(
+  entry: Pick<ChangelogEntry, 'action' | 'rationale'>,
+): DeskFirstKind | null {
+  if (looksLikeRevertRationale(entry.rationale)) return 'first-revert'
+  switch (entry.action) {
+    case 'worker_create':
+      return 'first-worker'
+    case 'subscription_create':
+      return 'first-subscription'
+    case 'schedule_create':
+      return 'first-schedule'
+    case 'worker_prompt_write':
+    case 'project_prompt_write':
+      return 'first-rewrite'
+    default:
+      return null
+  }
 }
 
 /** The short verb §11.6 wants in a sentence, per config action. */
@@ -311,6 +400,14 @@ export interface BuildDeskInput {
    * stacks; the halted-schedule line simply never appears.
    */
   schedules?: Schedule[]
+  /**
+   * Memory rows, read only for `created_at` (design §3 G4). Optional because a
+   * host that has not wired the Memory read route into the Desk still gets
+   * the other six firsts; `first-memory` simply never fires. Unix
+   * MILLISECONDS — the `memories` table stamps milliseconds, like config
+   * events (`go/agentdb/memories.go`'s own comment on the column).
+   */
+  memories?: { created_at: number }[]
   /** The clock, in unix seconds. */
   nowSeconds: number
   /**
@@ -343,6 +440,14 @@ export interface Desk {
    */
   earlierChanges: DeskChange[]
   trouble: DeskTrouble[]
+  /**
+   * Every "first of a kind" candidate the fold found (design §3 G4),
+   * UNWINDOWED — built from the whole changelog and every open ask, not just
+   * `changes`/`earlierChanges`'s capped tail, so a project older than the
+   * `earlierChangesLimit` window still gets its firsts right. `firsts.ts`
+   * reduces this list against a seen-set to decide what narrates.
+   */
+  firsts: DeskFirstRecord[]
 }
 
 /**
@@ -365,13 +470,48 @@ export interface Desk {
  * is a signal rather than a fault.
  */
 export function buildDesk(input: BuildDeskInput): Desk {
-  const { fresh, earlier } = buildDeskChangeStacks(input)
+  const { fresh, earlier, all } = buildDeskChangeStacks(input)
+  const asks = buildDeskAsks(input)
   return {
-    asks: buildDeskAsks(input),
+    asks,
     changes: fresh,
     earlierChanges: earlier,
     trouble: buildDeskTrouble(input),
+    firsts: buildDeskFirstRecords(all, asks, input.memories ?? []),
   }
+}
+
+/**
+ * The fold's own tagged records, collapsed into the one flat list `firsts.ts`
+ * reduces (design §3 G4). Every unit here is normalised to milliseconds
+ * (`DeskFirstRecord.createdAtMs`) — see its doc comment for why that matters.
+ *
+ * `asks` here is `buildDeskAsks`'s output — OPEN asks only, joined to a live
+ * attention request. That is deliberate, not an oversight: an ask that has
+ * already been answered has no row left on the Desk to carry the sentence,
+ * so `first-ask` can only ever narrate on a still-open one. The practical
+ * consequence is that "first ask" means "the earliest ask that is STILL
+ * open" rather than "the literal first ask this project ever asked" — the
+ * same thing for a project narrating this in real time as records land, but
+ * an approximation if this feature is switched on for the first time on a
+ * project whose actual first ask has already been answered and closed.
+ */
+function buildDeskFirstRecords(
+  changes: DeskChange[],
+  asks: DeskAsk[],
+  memories: { created_at: number }[],
+): DeskFirstRecord[] {
+  const out: DeskFirstRecord[] = []
+  for (const change of changes) {
+    if (change.firstKind) out.push({ kind: change.firstKind, createdAtMs: change.createdAt, id: change.id })
+  }
+  for (const ask of asks) {
+    out.push({ kind: ask.firstKind, createdAtMs: ask.createdAt * 1000, id: ask.id })
+  }
+  for (const memory of memories) {
+    out.push({ kind: 'first-memory', createdAtMs: memory.created_at, id: `memory:${memory.created_at}` })
+  }
+  return out
 }
 
 /**
@@ -460,6 +600,7 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
       headline: `${worker === '' ? 'a worker' : worker} · ${delivery.status} · ${formatDuration(waitingSeconds)}`,
       glyph: 'attention',
       createdAt: request.created_at,
+      firstKind: 'first-ask',
     })
   }
 
@@ -474,15 +615,22 @@ export const DESK_EARLIER_CHANGES_LIMIT = 10
 function buildDeskChangeStacks(input: BuildDeskInput): {
   fresh: DeskChange[]
   earlier: DeskChange[]
+  /** The full, unwindowed list — `buildDeskFirstRecords` needs every record,
+   *  not just what the waterline currently shows. */
+  all: DeskChange[]
 } {
   const { lastSeenMs, earlierChangesLimit = DESK_EARLIER_CHANGES_LIMIT } = input
   const all = buildDeskChanges(input)
   const fresh = all.filter((change) => change.createdAt > lastSeenMs)
   // Never looked ⇒ everything is "new", so there is nothing for a line to
   // separate and no tail to show. Same rule `waterlineIndex` applies.
-  if (lastSeenMs <= 0) return { fresh: all, earlier: [] }
+  if (lastSeenMs <= 0) return { fresh: all, earlier: [], all }
   const earlier = all.filter((change) => change.createdAt <= lastSeenMs)
-  return { fresh, earlier: earlierChangesLimit <= 0 ? [] : earlier.slice(0, earlierChangesLimit) }
+  return {
+    fresh,
+    earlier: earlierChangesLimit <= 0 ? [] : earlier.slice(0, earlierChangesLimit),
+    all,
+  }
 }
 
 function buildDeskChanges(input: BuildDeskInput): DeskChange[] {
@@ -509,6 +657,7 @@ function buildDeskChanges(input: BuildDeskInput): DeskChange[] {
         diffLabel: entry.diff ? `+${entry.diff.added} −${entry.diff.removed} lines` : '',
         glyph: byAgent ? 'agent' : 'human',
         createdAt: entry.createdAt,
+        firstKind: deskFirstKindForChange(entry),
       }
     })
 }

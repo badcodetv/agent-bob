@@ -1,21 +1,21 @@
 // Left sidebar: project switcher + "New session" + the library's
 // ChatHistoryDrawer (session rows with the filter-by-user select).
+//
+// The "+ New project…" dialog's form is CreateProjectForm (web G6), shared
+// with ProjectPicker.tsx — this file's copy (the interview sentence, the
+// "Project id" label) is the one that won.
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Box,
   Button,
   Dialog,
-  DialogActions,
   DialogContent,
-  DialogContentText,
   DialogTitle,
   Select,
-  TextField,
   Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import { ChatHistoryDrawer, useAgentChat, useAgentSessions } from "@agentkit/chat-ui";
+import { ChatHistoryDrawer, CreateProjectForm, useAgentChat, useAgentSessions } from "@agentkit/chat-ui";
 import { AuthState } from "./auth";
 
 const NEW_PROJECT_SENTINEL = "__new-project__";
@@ -26,14 +26,35 @@ export default function Sidebar({
   onSwitchProject,
   onCreateProject,
   onSignOut,
+  onboardSessionId = null,
+  inInterview = false,
+  onOpenOnboarding,
 }: {
   auth: AuthState;
   project: string;
   onSwitchProject: (projectID: string) => void;
   onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
+  /** The `onboard` session's id, while known (design §3 G1 / A2). */
+  onboardSessionId?: string | null;
+  /** True while this project's interview is unresolved. */
+  inInterview?: boolean;
+  /** Opens the onboarding view — used instead of resuming plain chat when the
+   *  `onboard` session is clicked while `inInterview` is true. */
+  onOpenOnboarding?: () => void;
 }) {
   const { sessions, refresh, select } = useAgentSessions();
+
+  // While a project is in interview, its `onboard` session is not a chat like
+  // any other: clicking it should return the person to the onboarding view
+  // (charter and all), not to a bare transcript (design §3 G1).
+  const selectSession = (id: string) => {
+    if (inInterview && onboardSessionId !== null && id === onboardSessionId && onOpenOnboarding) {
+      onOpenOnboarding();
+      return;
+    }
+    select(id);
+  };
   const { createSession, session, isCreating } = useAgentChat();
   const [userFilter, setUserFilter] = useState<string>("me");
   const [searchQuery, setSearchQuery] = useState("");
@@ -41,26 +62,6 @@ export default function Sidebar({
   // only ask for one. It also cannot mark a field required, cannot show the
   // server's refusal, and cannot say what the goal is FOR.
   const [newProjectOpen, setNewProjectOpen] = useState(false);
-  const [newProjectId, setNewProjectId] = useState("");
-  const [newProjectGoal, setNewProjectGoal] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-
-  const submitNewProject = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreating(true);
-    setCreateError(null);
-    try {
-      await onCreateProject(newProjectId.trim(), newProjectGoal.trim());
-      setNewProjectOpen(false);
-      setNewProjectId("");
-      setNewProjectGoal("");
-    } catch (err) {
-      setCreateError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setCreating(false);
-    }
-  };
 
   useEffect(() => {
     void refresh({ userEmail: userFilter === "me" ? undefined : userFilter });
@@ -86,7 +87,6 @@ export default function Sidebar({
           value={project}
           onChange={(e) => {
             if (e.target.value === NEW_PROJECT_SENTINEL) {
-              setCreateError(null);
               setNewProjectOpen(true);
               return;
             }
@@ -120,56 +120,16 @@ export default function Sidebar({
           </Button>
         </Box>
       </Box>
-      <Dialog open={newProjectOpen} onClose={() => (creating ? undefined : setNewProjectOpen(false))} fullWidth maxWidth="sm">
+      <Dialog open={newProjectOpen} onClose={() => setNewProjectOpen(false)} fullWidth maxWidth="sm">
         <DialogTitle>New project</DialogTitle>
-        <Box component="form" onSubmit={submitNewProject}>
-          <DialogContent sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <DialogContentText sx={{ fontSize: 14 }}>
-              Creating a project starts an interview. It asks what the project is for and how you
-              would know it is working, then writes that down for you to approve.
-            </DialogContentText>
-            <TextField
-              size="small"
-              fullWidth
-              autoFocus
-              required
-              label="Project id"
-              placeholder="apples-oranges"
-              helperText="Kebab-case. This is the namespace everything in the project lives under."
-              value={newProjectId}
-              onChange={(e) => setNewProjectId(e.target.value)}
-              slotProps={{ htmlInput: { "data-testid": "new-project-input" } }}
-            />
-            <TextField
-              size="small"
-              fullWidth
-              multiline
-              minRows={2}
-              required
-              label="What is this project for?"
-              helperText="Your goal — the interview starts from this."
-              placeholder="e.g. send a weekly newsletter that brings people back into the shop"
-              value={newProjectGoal}
-              onChange={(e) => setNewProjectGoal(e.target.value)}
-              slotProps={{ htmlInput: { "data-testid": "new-project-goal" } }}
-            />
-            {createError !== null && <Alert severity="error">{createError}</Alert>}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setNewProjectOpen(false)} disabled={creating} sx={{ textTransform: "none" }}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              variant="contained"
-              disabled={creating || !newProjectId.trim() || !newProjectGoal.trim()}
-              data-testid="new-project-create"
-              sx={{ textTransform: "none" }}
-            >
-              {creating ? "Creating…" : "Create project"}
-            </Button>
-          </DialogActions>
-        </Box>
+        <DialogContent>
+          <CreateProjectForm
+            onCreate={onCreateProject}
+            onCreated={() => setNewProjectOpen(false)}
+            onCancel={() => setNewProjectOpen(false)}
+            autoFocus
+          />
+        </DialogContent>
       </Dialog>
 
       <ChatHistoryDrawer
@@ -177,7 +137,7 @@ export default function Sidebar({
         onClose={() => {}}
         sessions={sessions}
         activeSessionId={session?.id}
-        onSelectSession={select}
+        onSelectSession={selectSession}
         users={users}
         selectedUserEmail={userFilter}
         onUserFilterChange={setUserFilter}

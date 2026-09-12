@@ -22,6 +22,7 @@ import AskUserCard from './AskUserCard.js'
 import ArtifactPanel from './ArtifactPanel.js'
 import ThinkingBlock from './ThinkingBlock.js'
 import ChatInputToolbar from './ChatInputToolbar.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import useFileAttachments from '../hooks/useFileAttachments.js'
 import useVoiceDictation from '../hooks/useVoiceDictation.js'
 import type { RenderPlugin, AgentSSEEvent } from '../plugins.js'
@@ -126,6 +127,16 @@ interface AgentChatProps {
   /** Optional callback to open the full artifact viewer. */
   onOpenArtifactViewer?: (artifact: ArtifactInfo | null) => void
   forkedMessageCount?: number
+  /**
+   * Name of the worker this session is chatting with, if any (spec §6.4).
+   * Absent/empty for a plain base-agent chat. Drives the empty-state copy and
+   * suggestions (design 2026-09-11-onboarding-and-the-guide.md §3 G3): a
+   * worker chat gets sentences and suggestions about that worker; a base
+   * chat gets ones about the project.
+   */
+  workerName?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 export default function AgentChat(props: AgentChatProps) {
@@ -164,6 +175,8 @@ export default function AgentChat(props: AgentChatProps) {
   const onPinToDashboard = props.onPinToDashboard
   const onOpenArtifactViewer = props.onOpenArtifactViewer
   const forkedMessageCount = props.forkedMessageCount
+  const workerName = props.workerName
+  const projectId = props.projectId ?? ''
 
   const [input, setInput] = useState('')
   const [, setViewerArtifact] = useState<ArtifactInfo | null>(null)
@@ -323,6 +336,24 @@ export default function AgentChat(props: AgentChatProps) {
 
   const displayMessages = messages
 
+  // G3 (design 2026-09-11-onboarding-and-the-guide.md §3): an empty
+  // transcript is the most-used surface in the product and used to teach
+  // nothing — zero rows and a bare composer. `isWorkerChat` distinguishes
+  // the two fixed suggestion sets; both are plain text, chosen per context,
+  // never sent automatically — clicking one only fills the composer.
+  const isWorkerChat = !!workerName
+  const emptyStateSuggestions = isWorkerChat
+    ? [
+        'Show me your instructions.',
+        'What did you do last time you ran?',
+        'What would you do if I sent you: …',
+      ]
+    : [
+        'What is in this project’s memory?',
+        'Which workers exist and what wakes them?',
+        'Write a memory that records …',
+      ]
+
   if (messages.length !== prevMsgLenRef.current) {
     prevMsgLenRef.current = messages.length
   }
@@ -387,8 +418,38 @@ export default function AgentChat(props: AgentChatProps) {
     <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
       {/* Chat area */}
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+        <AboutThisScreen surface="chat" projectId={projectId} sx={{ mx: 2, mt: 2, mb: 0 }} />
         {/* Messages */}
         <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
+          {displayMessages.length === 0 && (
+            <Box data-testid="chat-empty-state" sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {isWorkerChat
+                  ? `This is a chat with ${workerName}.`
+                  : 'This is a chat with the base agent.'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                A chat is not a job: it gets none of the project&rsquo;s briefing, and nothing it
+                says is remembered unless a worker writes a memory.
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start', mt: 1 }}>
+                {emptyStateSuggestions.map((suggestion) => (
+                  <Button
+                    key={suggestion}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setInput(suggestion)
+                      textareaRef.current?.focus()
+                    }}
+                    sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+                  >
+                    {suggestion}
+                  </Button>
+                ))}
+              </Box>
+            </Box>
+          )}
           {displayMessages.map((message, index) => {
             const hasContent = message.role === 'user' || message.content.trim()
             const hasThinking = !!message.thinking

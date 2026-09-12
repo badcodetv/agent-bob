@@ -215,3 +215,142 @@ export function useOnboardingSession(opts: {
 
   return { sessionId, error };
 }
+
+// ---------------------------------------------------------------------------
+// Deriving "in interview" from the server (A2 / design §3 G1, §6 PR1)
+// ---------------------------------------------------------------------------
+
+/** How often to re-check while the interview is still unresolved. Matches
+ *  `useCharter`'s own default poll (`web/src/useCharter.ts`): both are waiting
+ *  on the same event, the interview ending, which arrives from outside the
+ *  browser with nothing in the chat stream announcing it. */
+const INTERVIEW_POLL_MS = 4_000;
+
+/**
+ * The engine's default `architect_name` (`go/charter/charter.go:41`, mirrored
+ * as `DEFAULT_ARCHITECT_NAME` in `web/src/charter.ts`). The interviewer worker
+ * itself exists for the WHOLE interview — it is what runs it — so worker
+ * existence in general cannot stand in for "applied"; only the architect's
+ * arrival can. A charter that sets a custom `architect_name` defeats this
+ * check (this project would read as still-in-interview after it is actually
+ * done); that gap is inherent to using a name as the observable for a fact
+ * the API does not expose, and is out of scope for A2 — see the Discovered
+ * Issues Log.
+ */
+const ARCHITECT_WORKER_NAME = "architect";
+
+export interface InterviewState {
+  /**
+   * True while the project's onboarding interview is unresolved: an
+   * `onboard` session exists and the charter it deposited has not been
+   * applied. Undefined (both fields false/null) before the first check
+   * settles.
+   */
+  inInterview: boolean;
+  /** The `onboard` session's id, once known — null if none exists (or the
+   *  check has not settled yet). Used to route a sidebar click at it to the
+   *  onboarding view instead of plain chat while `inInterview` is true. */
+  onboardSessionId: string | null;
+  /** True once the first check has settled. Distinguishes "not yet known"
+   *  from "confirmed not in interview" — the difference matters because
+   *  acting on the latter (e.g. forgetting a stale onboarding goal) before
+   *  the former would race the very first render. */
+  resolved: boolean;
+}
+
+/**
+ * A project is "in interview" when its `onboard` session exists and its
+ * charter has not been applied — the server-derived replacement for the
+ * `localStorage`-only gate this used to be (design §3 G1: "the interview is a
+ * state of the project, not a state of the browser").
+ *
+ * `GET /agent/charter/current` carries no `applied` field (`web/src/charter.ts`'s
+ * `CharterCurrent` has none, and `useCharter`'s own `applied` is only "this
+ * screen has seen an apply succeed", not a server fact a fresh mount can read
+ * back — see its doc comment). So this uses the observable design §3 G1
+ * names instead: approving a charter's only immediate roster effect is the
+ * architect worker — so "does a worker named `architect` exist yet" stands in
+ * for "has the charter been applied" (see `ARCHITECT_WORKER_NAME`'s comment
+ * for the one case this misses).
+ */
+export function useInterviewState(opts: {
+  apiBase: string;
+  token: string;
+  refreshMs?: number;
+}): InterviewState {
+  const { apiBase, token, refreshMs = INTERVIEW_POLL_MS } = opts;
+  const [state, setState] = useState<InterviewState>({
+    inInterview: false,
+    onboardSessionId: null,
+    resolved: false,
+  });
+  // Stops polling once the interview is provably OVER — which means the
+  // architect exists, and nothing un-applies a charter.
+  //
+  // It must not mean "inInterview is false". Those are different states and
+  // conflating them is what made this hook unable to do its job: the FIRST
+  // check runs at mount, typically before the `onboard` session exists, so
+  // `inInterview` is false for the ordinary reason that the interview has not
+  // started yet. Latching there stopped the interval permanently and the Desk
+  // could never learn that an interview had begun — the exact failure A2 was
+  // written to prevent. Caught by D2 (the stack e2e), not by a unit test:
+  // `examples/web` has no test runner, and A2's 59 tests all fed `inInterview`
+  // in as a prop rather than computing it. See DI29.
+  const settled = useRef(false);
+
+  useEffect(() => {
+    if (token === "") return;
+    let cancelled = false;
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const check = async () => {
+      try {
+        const [sessionRes, workersRes] = await Promise.all([
+          fetch(`${apiBase}/agent/sessions/by-name/${ONBOARD_SESSION_NAME}`, { headers }),
+          fetch(`${apiBase}/agent/workers`, { headers }),
+        ]);
+        if (cancelled) return;
+
+        let onboardSessionId: string | null = null;
+        if (sessionRes.ok) {
+          const row = (await sessionRes.json()) as { id?: string };
+          if (typeof row.id === "string" && row.id !== "") onboardSessionId = row.id;
+        }
+
+        let hasArchitect = false;
+        if (workersRes.ok) {
+          const body = (await workersRes.json()) as { workers?: { name?: unknown }[] };
+          hasArchitect =
+            Array.isArray(body.workers) &&
+            body.workers.some((w) => w != null && w.name === ARCHITECT_WORKER_NAME);
+        }
+
+        const inInterview = onboardSessionId !== null && !hasArchitect;
+        if (cancelled) return;
+        setState({ inInterview, onboardSessionId, resolved: true });
+        // Only the architect's existence ends the watch. A project that never
+        // onboards therefore keeps polling two cheap GETs every
+        // INTERVIEW_POLL_MS for as long as its console tab is open — the same
+        // order as the Desk's own live refresh, and the price of not being
+        // wrong in the direction that strands a human mid-interview.
+        if (hasArchitect) settled.current = true;
+      } catch {
+        // A transient failure leaves the previous state — the same posture as
+        // useCharter's "a 404 is the empty state, not an error": a shell-level
+        // gate flickering off because one request dropped would hide "Finish
+        // setting up this project" for the one navigation that needed it.
+      }
+    };
+
+    void check();
+    const id = setInterval(() => {
+      if (!settled.current) void check();
+    }, refreshMs);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [apiBase, token, refreshMs]);
+
+  return state;
+}

@@ -17,6 +17,10 @@ let memories: Record<string, unknown>[]
 let status: number
 let body: string
 let urls: string[]
+let posted: { url: string; body: unknown }[]
+/** What POST /agent/memories answers with — a test overrides it to return the
+ *  row the write should be seen to have created. */
+let postResponse: () => Record<string, unknown>
 
 const memory = (over: Record<string, unknown> = {}) => ({
   id: 'm1',
@@ -34,10 +38,26 @@ beforeEach(() => {
   status = 200
   body = ''
   urls = []
+  posted = []
+  postResponse = () => ({
+    id: 'new-1',
+    labels: {},
+    content: '',
+    created_by_worker: '',
+    created_by_session: '',
+    created_at: MS,
+  })
   originalFetch = globalThis.fetch
-  globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
+  globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
     urls.push(u)
+    if (init?.method === 'POST' && u.includes('/agent/memories')) {
+      posted.push({ url: u, body: JSON.parse(String(init.body)) })
+      return new Response(JSON.stringify(postResponse()), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
     if (u.includes('/agent/memories')) {
       if (status !== 200) return new Response(body, { status })
       return new Response(JSON.stringify({ memories }), {
@@ -193,5 +213,118 @@ describe('failures are told apart', () => {
     renderBrowser()
     expect(await screen.findByText(/relation "memories" not found/)).toBeInTheDocument()
     expect(screen.queryByText(/Memory is not available on this host/)).toBeNull()
+  })
+
+  it('the empty state invites the first note rather than shrugging', async () => {
+    memories = []
+    renderBrowser()
+    expect(await screen.findByText(/Nothing has been remembered in this project yet/)).toBeInTheDocument()
+    expect(screen.getByText(/write the first one yourself with Write a note/)).toBeInTheDocument()
+  })
+})
+
+describe('writing a note (G8 / work plan C4)', () => {
+  it('opens a form, and a malformed label line blocks submit with the reason', async () => {
+    renderBrowser()
+    await screen.findByText(/Quote the ticket reference/)
+    await userEvent.click(screen.getByTestId('write-a-note'))
+
+    await userEvent.type(screen.getByTestId('note-content'), 'A note.')
+    await userEvent.type(screen.getByTestId('note-why'), 'testing')
+    await userEvent.type(screen.getByTestId('note-labels'), 'not a label line')
+
+    expect(screen.getByText(/expected key=value/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Write it' })).toBeDisabled()
+  })
+
+  it('requires content and a reason before Write it is enabled', async () => {
+    renderBrowser()
+    await screen.findByText(/Quote the ticket reference/)
+    await userEvent.click(screen.getByTestId('write-a-note'))
+    expect(screen.getByRole('button', { name: 'Write it' })).toBeDisabled()
+    await userEvent.type(screen.getByTestId('note-content'), 'A note.')
+    expect(screen.getByRole('button', { name: 'Write it' })).toBeDisabled()
+    await userEvent.type(screen.getByTestId('note-why'), 'because')
+    expect(screen.getByRole('button', { name: 'Write it' })).toBeEnabled()
+  })
+
+  it('sends exactly {labels, content} — no provenance field, ever', async () => {
+    postResponse = () => ({
+      id: 'new-1',
+      labels: { kind: 'lesson' },
+      content: 'Always say thanks.',
+      created_by_worker: '',
+      created_by_session: '',
+      created_at: MS + 1,
+    })
+    renderBrowser()
+    await screen.findByText(/Quote the ticket reference/)
+    await userEvent.click(screen.getByTestId('write-a-note'))
+    await userEvent.type(screen.getByTestId('note-content'), 'Always say thanks.')
+    await userEvent.type(screen.getByTestId('note-labels'), 'kind=lesson')
+    await userEvent.type(screen.getByTestId('note-why'), 'a human noticed a pattern')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Write it' }))
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]!.url).toContain('/agent/memories')
+    expect(posted[0]!.body).toEqual({ labels: { kind: 'lesson' }, content: 'Always say thanks.' })
+    const keys = Object.keys(posted[0]!.body as object)
+    expect(keys.sort()).toEqual(['content', 'labels'])
+    expect(keys).not.toContain('created_by_worker')
+    expect(keys).not.toContain('created_by_session')
+    // The "Why?" text is required by the form but has no wire home (no
+    // rationale field on this route, no config event for a memory append) —
+    // it must never leak into the body either.
+    expect(JSON.stringify(posted[0]!.body)).not.toContain('a human noticed a pattern')
+  })
+
+  it('after a successful write the list refreshes and the new row is highlighted', async () => {
+    postResponse = () => ({
+      id: 'new-1',
+      labels: { kind: 'note' },
+      content: 'Freshly written.',
+      created_by_worker: '',
+      created_by_session: '',
+      created_at: MS + 1,
+    })
+    renderBrowser()
+    await screen.findByText(/Quote the ticket reference/)
+
+    // The reload after the write answers with the new row included — the
+    // route really would, since it just appended it.
+    await userEvent.click(screen.getByTestId('write-a-note'))
+    await userEvent.type(screen.getByTestId('note-content'), 'Freshly written.')
+    await userEvent.type(screen.getByTestId('note-labels'), 'kind=note')
+    await userEvent.type(screen.getByTestId('note-why'), 'because')
+    memories = [
+      ...memories,
+      memory({ id: 'new-1', labels: { kind: 'note' }, snippet: 'Freshly written.', created_at: MS + 1 }),
+    ]
+    await userEvent.click(screen.getByRole('button', { name: 'Write it' }))
+
+    expect(await screen.findByText('Freshly written.')).toBeInTheDocument()
+    // The dialog closes on success (MUI unmounts it after its exit transition).
+    await waitFor(() => expect(screen.queryByTestId('note-content')).not.toBeInTheDocument())
+  })
+
+  it('"Publish a new version" pre-fills the form from the current label-registry row', async () => {
+    memories = [
+      memory({
+        id: 'reg-1',
+        labels: { name: 'label-registry', kind: 'registry' },
+        snippet: 'kind: lesson\nworker: email-answerer',
+      }),
+    ]
+    renderBrowser()
+    await screen.findByText('name=label-registry')
+    await userEvent.click(screen.getByTestId('publish-registry-version'))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Publish a new version')).toBeInTheDocument()
+    expect(screen.getByTestId('note-content')).toHaveValue('kind: lesson\nworker: email-answerer')
+    expect(screen.getByTestId('note-labels')).toHaveValue('kind=registry\nname=label-registry')
+    // Still gated on a reason, same as a blank note.
+    expect(screen.getByRole('button', { name: 'Publish it' })).toBeDisabled()
   })
 })

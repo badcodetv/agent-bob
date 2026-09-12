@@ -10,13 +10,14 @@
 // "nothing to show", it is shown the two ways in: the org chart the topology
 // flow builds, and chat.
 
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Alert, Box, Button, Chip, Link, Paper, Stack, Typography } from '@mui/material'
 import useDesk, { type UseDeskOptions } from '../useDesk.js'
 import {
   DESK_ASKS_CAVEAT,
   type DeskAsk,
   type DeskChange,
+  type DeskFirstRecord,
   type DeskTrouble,
 } from '../desk.js'
 import { formatTimestamp } from '../events.js'
@@ -32,7 +33,14 @@ import {
 import { ageEscalation, coarseAgeLabel } from '../useElapsedTicker.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
+import useMemories from '../useMemories.js'
+import useFirsts from '../useFirsts.js'
+import type { FirstToNarrate } from '../firsts.js'
+import { buildGuideHash } from '../guide/guideRoute.js'
+import { useGuideParagraph } from '../guide/GuideProvider.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
+import AboutThisScreen from './AboutThisScreen.js'
+import BudgetPanel from './BudgetPanel.js'
 
 export interface DeskPageProps extends UseDeskOptions {
   /**
@@ -49,6 +57,18 @@ export interface DeskPageProps extends UseDeskOptions {
   onStartFromTopology?: () => void
   /** Take the operator to chat — the other first-run door. */
   onOpenChat?: () => void
+  /**
+   * True while this project's onboarding interview is unresolved (design §3
+   * G1 / PR1): an `onboard` session exists and no charter has been applied
+   * yet. While true, the first-run panel offers "Finish setting up this
+   * project" instead of the two ordinary doors — the interview is the
+   * designed default, not one of several starting points, while it is still
+   * running (topology seeds are hidden by the same rule).
+   */
+  inInterview?: boolean
+  /** Opens the onboarding view. Renders the "Finish setting up this project"
+   *  row only when this is given. */
+  onOpenOnboarding?: () => void
   /** Heading. Pass '' for none. */
   title?: string
   /**
@@ -80,6 +100,8 @@ export default function DeskPage({
   onOpenSession,
   onStartFromTopology,
   onOpenChat,
+  inInterview,
+  onOpenOnboarding,
   title = 'Desk',
   showPauseToggle,
   onAsksCount,
@@ -110,6 +132,36 @@ export default function DeskPage({
     onAsksCount?.(askCount)
   }, [askCount, onAsksCount])
 
+  // "First memory" (design §3 G4) is the one kind `desk.ts`'s fold cannot tag
+  // on its own: a memory write is not a config event, so it never appears in
+  // `configEvents` at all (`docs/product/17-product-spec.md` §7 — memory is
+  // append-only content, not a configuration mutation). A cheap, separate
+  // read stands in for it; the newest row's own timestamp is a stand-in for
+  // "the project's first memory ever" rather than the true earliest one —
+  // exactly right for a NEW project (there is only one row to be newest),
+  // approximate for a project already old when this feature first ran on it.
+  const memories = useMemories({ ...deskOptions, limit: 1 })
+  const memoryFirsts: DeskFirstRecord[] = useMemo(() => {
+    const newest = memories.memories[0]
+    return newest ? [{ kind: 'first-memory' as const, createdAtMs: newest.created_at, id: `memory:${newest.id}` }] : []
+  }, [memories.memories])
+  const firstRecords = useMemo(
+    () => [...desk.firsts, ...memoryFirsts],
+    [desk.firsts, memoryFirsts],
+  )
+  const { toNarrate } = useFirsts({ projectId, records: firstRecords })
+  const narrationByRecordId = useMemo(
+    () => new Map(toNarrate.map((f) => [f.recordId, f] as const)),
+    [toNarrate],
+  )
+  const memoryNarration = toNarrate.find((f) => f.kind === 'first-memory')
+  // Whether a guide page exists to link to at all (§3 G7's "no GuideProvider
+  // mounted" degradation) — reusing the Desk's own About-screen signal (C2)
+  // rather than inventing a second "is the guide here" mechanism: if this
+  // very page's own disclosure paragraph resolved, a `GuideProvider` is
+  // mounted and pages exist to link to.
+  const guideAvailable = useGuideParagraph('desk') !== undefined
+
   const polling = (deskOptions.refreshMs ?? 0) > 0
   const showPause = showPauseToggle ?? polling
 
@@ -124,6 +176,13 @@ export default function DeskPage({
   // replaced wholesale by "start from a topology" (RD28). The banner above says
   // what went wrong; the panel would say something confident and false.
   const firstRun = !loading && error === null && workerCount === 0
+  // A project mid-interview already has one worker — the interviewer itself
+  // (`go/topology/onboarding.go`'s `renderOnboarding`), so `firstRun` above is
+  // false for the WHOLE interview and never fires on its own here. The panel
+  // still has to show while `inInterview` is true, gated by the same failed-
+  // load protection `firstRun` uses (RD28): a broken fetch must never read as
+  // "still in interview".
+  const showFirstRunPanel = firstRun || (inInterview === true && !loading && error === null)
   // Same gate, same reason: "the fleet ran and nobody needed you" is a claim
   // about the fleet, and three empty lists from three failed fetches are not
   // evidence for it.
@@ -148,14 +207,34 @@ export default function DeskPage({
         </Stack>
       </Stack>
 
+      <AboutThisScreen surface="desk" projectId={projectId} />
+
+      {memoryNarration && (
+        <FirstNarrationLine first={memoryNarration} guideAvailable={guideAvailable} sx={{ mb: 2 }} />
+      )}
+
       {error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
         </Alert>
       )}
 
-      {firstRun ? (
-        <FirstRun onStartFromTopology={onStartFromTopology} onOpenChat={onOpenChat} />
+      <Box sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        <BudgetPanel
+          title="Budget"
+          collapsible
+          apiBaseUrl={deskOptions.apiBaseUrl}
+          getAuthToken={deskOptions.getAuthToken}
+        />
+      </Box>
+
+      {showFirstRunPanel ? (
+        <FirstRun
+          onStartFromTopology={onStartFromTopology}
+          onOpenChat={onOpenChat}
+          inInterview={inInterview}
+          onOpenOnboarding={onOpenOnboarding}
+        />
       ) : (
         <Stack spacing={4}>
           <Section
@@ -193,6 +272,8 @@ export default function DeskPage({
                 onOpenSession={onOpenSession}
                 arrived={asksFeed.arrivals.has(ask.id)}
                 reduced={reduced}
+                firstNarration={narrationByRecordId.get(ask.id)}
+                guideAvailable={guideAvailable}
               />
             ))}
             {desk.asks.length > 0 && (
@@ -215,7 +296,13 @@ export default function DeskPage({
                   <FeedWaterline label={waterlineLabel(lastSeenMs, nowMs)} />
                   <SpineRail component="ol">
                     {desk.earlierChanges.map((change) => (
-                      <ChangeRow key={change.id} change={change} onOpenSession={onOpenSession} />
+                      <ChangeRow
+                        key={change.id}
+                        change={change}
+                        onOpenSession={onOpenSession}
+                        firstNarration={narrationByRecordId.get(change.id)}
+                        guideAvailable={guideAvailable}
+                      />
                     ))}
                   </SpineRail>
                 </>
@@ -240,6 +327,8 @@ export default function DeskPage({
                 onOpenSession={onOpenSession}
                 arrived={changesFeed.arrivals.has(change.id)}
                 reduced={reduced}
+                firstNarration={narrationByRecordId.get(change.id)}
+                guideAvailable={guideAvailable}
               />
             ))}
           </Section>
@@ -257,8 +346,8 @@ export default function DeskPage({
 
           {nothingAtAll && (
             <Typography variant="body2" color="text.secondary">
-              A quiet Desk means the fleet ran and nobody needed you — the Events view has the jobs
-              it ran, and Automation has what will wake it next.
+              A quiet Desk means the fleet ran and nobody needed you — Activity has the jobs it
+              ran, and each worker's Triggers tab has what will wake it next.
             </Typography>
           )}
         </Stack>
@@ -322,11 +411,16 @@ function AskRow({
   onOpenSession,
   arrived = false,
   reduced = false,
+  firstNarration,
+  guideAvailable = false,
 }: {
   ask: DeskAsk
   onOpenSession?: (id: string) => void
   arrived?: boolean
   reduced?: boolean
+  /** design §3 G4: set only on the project's first ask, once, ever. */
+  firstNarration?: FirstToNarrate
+  guideAvailable?: boolean
 }) {
   // §4.2: an ask's age ticks, and escalates — the number is an SLA on the
   // operator, not a progress bar. The escalation is a word AND a colour on top
@@ -373,6 +467,7 @@ function AskRow({
       <Box sx={{ mt: 0.5 }}>
         <ThreadLink sessionId={ask.sessionId} url={ask.sessionUrl} onOpenSession={onOpenSession} />
       </Box>
+      {firstNarration && <FirstNarrationLine first={firstNarration} guideAvailable={guideAvailable} />}
     </SpineRow>
   )
 }
@@ -382,11 +477,16 @@ function ChangeRow({
   onOpenSession,
   arrived = false,
   reduced = false,
+  firstNarration,
+  guideAvailable = false,
 }: {
   change: DeskChange
   onOpenSession?: (id: string) => void
   arrived?: boolean
   reduced?: boolean
+  /** design §3 G4: set only on the project's first record of that kind. */
+  firstNarration?: FirstToNarrate
+  guideAvailable?: boolean
 }) {
   // Authorship decides the tint, exactly as it decides the glyph (§3.2).
   const tone: HighlightTone = change.byAgent ? 'agent' : 'human'
@@ -430,7 +530,42 @@ function ChangeRow({
           />
         </Box>
       )}
+      {firstNarration && <FirstNarrationLine first={firstNarration} guideAvailable={guideAvailable} />}
     </SpineRow>
+  )
+}
+
+/**
+ * One sentence (design §3 G4) plus a link to the guide, or just the sentence
+ * when no guide is mounted (§3 G7's degradation). Not a checklist, not a
+ * badge — one line, once, on the row (or, for `first-memory`, which has no
+ * row of its own on the Desk today, on its own).
+ */
+function FirstNarrationLine({
+  first,
+  guideAvailable,
+  sx,
+}: {
+  first: FirstToNarrate
+  guideAvailable: boolean
+  sx?: object
+}) {
+  return (
+    <Typography
+      variant="body2"
+      sx={{ mt: 0.5, fontWeight: 600, ...sx }}
+      data-testid={`first-${first.kind}`}
+    >
+      {first.narration.sentence}
+      {guideAvailable && (
+        <>
+          {' '}
+          <Link href={buildGuideHash(first.narration.slug)} variant="caption">
+            Read more in the guide →
+          </Link>
+        </>
+      )}
+    </Typography>
   )
 }
 
@@ -514,28 +649,54 @@ function ThreadLink({
 function FirstRun({
   onStartFromTopology,
   onOpenChat,
+  inInterview,
+  onOpenOnboarding,
 }: {
   onStartFromTopology?: () => void
   onOpenChat?: () => void
+  inInterview?: boolean
+  onOpenOnboarding?: () => void
 }) {
   return (
     <Paper variant="outlined" sx={{ p: 3, maxWidth: 620 }}>
       <Typography variant="subtitle1" sx={{ mb: 0.5 }}>
-        This project has no workers yet
+        {inInterview ? 'This project is being set up' : 'This project has no workers yet'}
       </Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        The Desk answers three questions every morning — what wants you, what changed, what broke.
-        It stays quiet until something is running. Start from an org chart, which hires a set of
-        workers and wires them to each other in one step, or just talk to the agent.
-      </Typography>
-      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-        <Button size="small" variant="contained" onClick={onStartFromTopology} disabled={!onStartFromTopology}>
-          Start from an org chart
-        </Button>
-        <Button size="small" onClick={onOpenChat} disabled={!onOpenChat}>
-          Open chat
-        </Button>
-      </Stack>
+      {inInterview ? (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            An interview is setting this project up. Answer its questions and approve the charter
+            it writes, and the architect it creates will build the roster.
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Button
+              size="small"
+              variant="contained"
+              onClick={onOpenOnboarding}
+              disabled={!onOpenOnboarding}
+              data-testid="finish-onboarding"
+            >
+              Finish setting up this project
+            </Button>
+          </Stack>
+        </>
+      ) : (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            The Desk answers three questions every morning — what wants you, what changed, what broke.
+            It stays quiet until something is running. Start from an org chart, which hires a set of
+            workers and wires them to each other in one step, or just talk to the agent.
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+            <Button size="small" variant="contained" onClick={onStartFromTopology} disabled={!onStartFromTopology}>
+              Start from an org chart
+            </Button>
+            <Button size="small" onClick={onOpenChat} disabled={!onOpenChat}>
+              Open chat
+            </Button>
+          </Stack>
+        </>
+      )}
       <Stack direction="row" spacing={2}>
         <Legend glyph="agent" text="a worker did it" />
         <Legend glyph="human" text="you did it" />

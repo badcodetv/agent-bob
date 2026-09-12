@@ -228,7 +228,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 316ce03 merged to main. `RevertControl` exported from ChangelogView and mounted on `kind === 'change'` rows of ActivityPage; revert blocks computed from the seq-ordered config log (`useActivity.ts`), not the rail's time sort; 3 unit tests; new `e2e/features/revert.stack.spec.ts` (revert newest from Activity, then 409 on the superseded entry). web typecheck green; full `npm test` 1546/1548 with 2 unrelated timeout flakes (DI 2). Stack e2e pending D2.
 
-### A2: the interview survives navigation, and hides the seeds while it runs   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### A2: the interview survives navigation, and hides the seeds while it runs   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Replace the `localStorage`-only gate on the onboarding view (`examples/web/src/App.tsx:36`,
   `:56-62`, `:290-294`, `:393-396`, `:446`) with a server-derived state: a project is **in
   interview** when `GET /agent/sessions/by-name/onboard` returns a session **and** no charter has
@@ -253,8 +253,8 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused before the agent's commit; WIP committed by orchestrator as da9471b on worktree-agent-aa205520f26ade00b. Agent's last words: 59 tests pass, re-checking typecheck after a DeskPage change. Files: App.tsx, Sidebar.tsx, onboarding.ts, DeskPage(+test), WorkersPage(+test), onboarding.stack.spec.ts. (2026-09-12) Resumed: the WIP diff needed no fixes; amended to 6dcbcbf "A2: the interview survives navigation, and the seeds stay hidden until a charter lands" and merged as 05a41f1. Orchestrator re-ran the Validation on the merged tree: `npm run typecheck` clean, `npx vitest run --testTimeout=20000` 1552/1552 pass in 81 files, `npm run build` clean, `examples/web` `yarn typecheck` clean (the timeout flag is the DI8 flake, not the ticket). 'No onboard session behaves as today' and 'charter applied hides the row' are code traces, not tests — the e2e scenario at e2e/features/onboarding.stack.spec.ts:147-172 is written and waits on D2. Known gap logged as DI10.
 
 ### A3: operator claim, budget write guard, default budgets, whoami   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** Exactly §1.1, §1.2 and §1.3 above. The claim is added where project tokens are
@@ -283,7 +283,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 2d5ea9e merged to main. Claim name `operator` (devclaims.OperatorClaim, IssueOperator); 403 body `only the operator may change budgets and caps`; `/agent/whoami` mounted through httpapi.Endpoints (not main.go, see DI 4); defaults via package-level `agentdb.SetDefaultBudgets` because compose.go:389 calls DefaultProjectSettings outside any Store (DI 5); compose + .env.example updated. All Go gates green on the branch.
 
-### A4: the usage route   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### A4: the usage route   [Status: merged, live-PG verified | Model: sonnet]
 - **Scope:** Exactly §1.4. Add `usageCostSQL` beside the two token expressions in
   `go/agentdb/token_usage.go` and one store method `ProjectUsageSince(ctx, project, since) (Usage, error)`
   returning input, output, cost and query count for `created_at >= since`, reusing
@@ -302,10 +302,10 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test ./...`; `./stack test-go` if
   a live database is available (say in Notes whether it was).
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go.
+- [x] done
+- Notes: (2026-09-11) Paused mid `go test`; WIP committed as 375b313 on worktree-agent-a31d868c69d559f1e. Files: token_usage.go, new agentdb/usage.go(+test), new httpapi/usage.go(+test), main.go, router.go, httpapi.go. (2026-09-12) Resumed: the WIP diff needed no code changes; amended to 5dd6d5f and merged as a12755f. The agent's `go test ./...` was green but it reported honestly that the one acceptance criterion about the midnight boundary rested on a SKIPPED live-Postgres test, so the orchestrator closed that gap: a throwaway `pgvector/pgvector:pg16` on port 55432 (never the stack's shared database — CLAUDE.md warns a sibling branch's migration has broken other agents' runs), then `AGENTKIT_TEST_POSTGRES_URL=... go test ./agentdb/... -run Usage -v -count=1` → **all four `TestLivePG_GetProjectUsageSince_*` PASS**, including `ExcludesRowsBeforeSince`. Then the whole suite on the merged tree WITH the live database attached: `go build`/`go vet` clean, `go test ./... -count=1` → 34 packages ok, 0 FAIL, exit 0. So A4 is the one ticket here proven against real Postgres, not just sqlite.
 
-### A5: the budget panel in the console   [Status: todo | Model: sonnet]
+### A5: the budget panel in the console   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** A `BudgetPanel` component in `web/src/components/`: today's tokens against the hard
   limit as one hairline bar (no colour unless over the soft tier — `steel` for the bar, `rose`
   when a stop is in force, per the design palette), today's cost, last 7 and 30 days as two lines,
@@ -330,8 +330,31 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && bash scripts/verify-package.sh`
 - **Depends on:** A3, A4 (build against their branches merged into main by the orchestrator)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Built, then sent back **twice**, then merged as `03142ec` (branch commit
+  `f032ee2`). Round 1 delivered the panel, `usage.ts`, `whoami.ts` and the G5 split, green. Round 2
+  fixed **DI18** — the lost-update defect the agent found itself and mis-framed as pre-existing;
+  `BudgetPanel` now takes an optional `settings` prop so the settings page supplies its single
+  instance (`ProjectSettingsPage.tsx:219`) while the Desk mount keeps its own. The agent improved on
+  the fix asked for: instead of an `onSaved` callback it watches a genuine `saving` true→false with
+  no error, which refreshes the numbers whichever button saved — right, because on a shared instance
+  either can change the budget, and `settings.save()` never rejects so a `.then()` would also have
+  fired on validation early-returns. **Its regression test is proven both ways**: it reverted the fix,
+  saw `expected +0 to be 9000`, restored it, saw it pass. Round 3 closed **DI19**, the third guarded
+  field. Orchestrator re-ran the Validation on the merged tree: typecheck clean, `vitest
+  --testTimeout=20000` **1684/1684 in 91 files**, `verify-package.sh` PASS, web build clean,
+  `examples/web` build and typecheck clean at 18 guide pages — and re-ran
+  `ProjectSettingsPage.test.tsx` alone to confirm the three tests that matter survived the merge
+  rather than inferring it from a rising total: the shared-instance regression and both
+  `max_concurrent_jobs` gate cases pass (32/32 in that file).
+  On the field moves: the design's "No field moves or changes; only the grouping" reads like a
+  prohibition on what A5 did, and is not — you cannot build two tiers without moving fields between
+  them, so the grouping *is* the move. What it forbids is a field renamed, revalidated, rewired or
+  dropped, and none was: `s.update`, `s.draft`, `s.fieldErrors` still flow through one instance.
+  Removing the two token budgets from the open numeric list was **necessary**, for a better reason
+  than the ticket text the agent cited: left there, a non-operator could edit them and the
+  whole-object PUT would 403, so taking them out is what makes the operator gate real at the point
+  of use rather than only at the wire.
 
 ### A6: the project map reloads without a restart   [Status: merged, live check pending | Model: sonnet]
 - **Scope:** When `AGENTKIT_PROJECT_MAP_FILE` is set, re-read and re-parse it on `SIGHUP` **and**
@@ -354,7 +377,7 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - [ ] done
 - Notes: (2026-09-11) Commit 32b28cc merged to main (rebased on cd44582). `projectSettingsHolder` (atomic.Pointer; SIGHUP + `AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) and `projectKeysHolder`; login handlers take a `userDirectory`; git-token-env closure reads the holder per call; embed-CSP origin list still a boot snapshot (DI 6); docs/ops.md switched to a mounted `projects.json` (DI 7). Gates incl. `-race` green on the branch.
 
-### A7: the operator's story, written down   [Status: todo | Model: sonnet]
+### A7: the operator's story, written down   [Status: merged | Model: sonnet]
 - **Scope:** Update `docs/ops.md` (§11d and wherever credentials are set) so the OVH box runs in
   **API-key mode** with the subscription token blank, states why (the budget can only bound a
   metered key; the subscription carries only so many bots), sets the two default-budget env vars,
@@ -372,8 +395,21 @@ compile error, the same trick `navReveal.ts:48-53` uses.
 - **TDD:** n/a (docs)
 - **Validation:** `grep -n AGENTKIT_DEFAULT_DAILY_TOKENS_HARD go/cmd/agentd/main.go docs/ops.md .env.example` all non-empty
 - **Depends on:** A3, A6
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Written and merged as 3aa9bef → merge of `fleet/A7`; no conflict. `docs/ops.md`
+  §11d now runs API-key mode with `CLAUDE_CODE_OAUTH_TOKEN` blank and says why, and a new §11f is the
+  OM-8 spend-brake check. New `docs/guide/for-operators/inviting-someone.md`, plus env/route updates
+  to `README-stack.md` and `docs/15-standalone-stack.md`. **The agent declined to call its own
+  Validation green, correctly** — see DI14; `grep` on `main.go` returns nothing because A3 put the
+  var names in `defaultbudgets.go` (DI5), so the command as written cannot pass and the ticket's own
+  text is what is wrong. Orchestrator verified on the merged tree: the guide build goes **17 → 18
+  page(s)**, so the new page's front matter parses and the generator does walk `for-operators/`
+  (`build-guide.mjs:94-104`); there is genuinely no `DELETE /agent/project` route
+  (`grep -rn "DELETE /agent/project\|deleteProject" go/httpapi go/cmd/agentd` → empty), which the
+  page documents rather than papering over; and **`docs/guide/` now has zero broken relative links**
+  (scanned all 18 pages), closing the one the RESUME block named. The two budget numbers are left as
+  `FILL-BEFORE-FIRST-INVITE` at `docs/ops.md:783-784` and no number is stated anywhere in the new
+  page — `money.md`'s hole is untouched. Kai has still not chosen them.
 
 ### Stream B — the guide
 
@@ -526,7 +562,7 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 
 ### Stream C — console wiring
 
-### C1: the guide route and renderer   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### C1: the guide route and renderer   [Status: merged, browser check pending D2 | Model: sonnet]
 - **Scope:** G7. `examples/web` gains a `guide` view reachable at `#/guide/<slug>` (the shell has
   no router; follow how views are selected in `App.tsx` and add a hash-based deep link that also
   survives reload — read `web/src/permalink.ts` first, it may already do this) and a sidebar
@@ -552,10 +588,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** `cd web && npm ci && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn build && yarn typecheck`; `docker build -f deploy/web.Dockerfile . -t guide-check` succeeds.
 - **Depends on:** — (uses placeholder pages until B lands; write two throwaway pages in a temp dir
   for the unit test, not in `docs/guide/`)
-- [ ] done
-- Notes: (2026-09-11) Paused after a successful `docker build -f deploy/web.Dockerfile`; WIP committed as ecdcc79 on worktree-agent-a336db1df724ecdb8. Files: examples/web/scripts/, GuidePage.tsx, web/src/guide/, App.tsx, package.json + yarn.lock, .gitignore(s), web/src/index.ts + pure.ts, deploy/web.Dockerfile.
+- [x] done
+- Notes: (2026-09-11) Paused after a successful `docker build -f deploy/web.Dockerfile`; WIP committed as ecdcc79 on worktree-agent-a336db1df724ecdb8. Files: examples/web/scripts/, GuidePage.tsx, web/src/guide/, App.tsx, package.json + yarn.lock, .gitignore(s), web/src/index.ts + pure.ts, deploy/web.Dockerfile. (2026-09-12) Resumed: no code changes needed; amended to 7b5ba44 and merged as cce006f. The agent's own gates were green (`src/guide` 45/45, `pure.test.ts` 14/14 so the `./pure` tier line still holds, `docker build -f deploy/web.Dockerfile` EXIT=0) **but every one of them ran on a branch that predates `docs/guide/`**, so its build logged "docs/guide does not exist yet — writing an empty guide" and the whole generator-plus-COPY path — the step this ticket calls the one most likely to be wrong — was never exercised with content. The orchestrator closed that on the merged tree: `yarn build` → `[build-guide] wrote 17 page(s).`, all 17 slugs present including `the-desk`, `firstParagraphs.generated.json` emitted (5992 bytes), and **the docker build repeated it inside the image** (`wrote 17 page(s)`, EXIT=0) which is the real proof the Dockerfile's COPY reaches `docs/guide/`. Both generated files confirmed still ignored (`git check-ignore -v` matches `examples/web/.gitignore:8` and `.gitignore:10`; `git status` clean after the build). Merge conflict and its resolution: see DI13 — it is the important one. Still owed: the two rendering criteria (a slug renders after reload, a missing slug lists the pages) are code reads, not browser observations; D2 owes them. The ticket says "sidebar entry after Settings" but the element is the horizontal `ViewNav` bar, where Settings is last in `NAV_ALWAYS` — visually the same place, different component; `Sidebar.tsx` was not touched.
 
-### C2: "About this screen" on eleven surfaces   [Status: todo | Model: sonnet]
+### C2: "About this screen" on eleven surfaces   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** G2. `web/src/components/AboutThisScreen.tsx`: props `{surface: SurfaceId, projectId}`;
   reads the first paragraph for that surface from `firstParagraphs.generated.json` (injected by
   the shell through a provider so `web/` stays free of build-time files — a `GuideProvider` with a
@@ -579,10 +615,25 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && bash scripts/verify-package.sh`
 - **Depends on:** C1 (surfaces.ts and the generated JSON), B1–B6 (real paragraphs; until then use
   the generated file from whatever pages exist)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Built and merged as 2357287 → merge `bc73998`; **no conflict at all**, which
+  the agent earned by keeping its `App.tsx` edits to six numbered additive regions and telling me
+  which they were, plus what it did *not* touch (`onChange`, `ViewNav`, `RevealNotice`, the
+  onboarding effects) — the direct answer to DI13. The provider seam is keyed by **surface, not
+  slug** (`web/src/guide/GuideProvider.tsx`), the shell builds the map from C1's `GUIDE_PAGES` in
+  `examples/web/src/App.tsx`, and the default context is `{}` so a consumer with no guide gets
+  `undefined` and the component renders nothing — asserted with `toBeEmptyDOMElement()` for both an
+  empty map and no provider at all. `surfaces.ts` untouched, so `SurfaceId` is still C1's closed set.
+  Orchestrator re-ran the Validation on the merged tree: typecheck clean, `vitest
+  --testTimeout=20000` **1647/1647 in 88 files**, `verify-package.sh` PASS (consumer theme honoured),
+  web build clean, `examples/web` build **and** typecheck clean at 18 guide pages.
+  **The finding worth keeping is its own:** MUI `Collapse` leaves children in the DOM at height zero
+  unless given `unmountOnExit`, so "renders nothing" and "collapsed shows only the toggle" would have
+  been true to the eye and false to a test — the agent caught it with its own test and fixed it at
+  `AboutThisScreen.tsx:127`. That is OM-9 (storage is not delivery) in a new costume. DI17 records
+  the `projectId` prop it had to add to five components.
 
-### C3: chat empty state, create-form parity, the four copy defects   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### C3: chat empty state, create-form parity, the four copy defects   [Status: merged | Model: sonnet]
 - **Scope:** G3, G6 and G9 from the design. **G3:** `AgentChat.tsx` renders, when the transcript is
   empty, one sentence of what this session is, the sentence *"A chat is not a job: it gets none of
   the project's briefing, and nothing it says is remembered unless a worker writes a memory."*, and
@@ -604,10 +655,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused while typechecking examples/web; WIP committed as b1a700c on worktree-agent-a165e672dbaeb7334. 19 files incl. AgentChat(+test), ProjectPicker, Sidebar, DeskPage, OrgChartPage(+test), ProjectSettingsPage, ScheduleEditor, SubscriptionEditor, console.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused while typechecking examples/web; WIP committed as b1a700c on worktree-agent-a165e672dbaeb7334. 19 files incl. AgentChat(+test), ProjectPicker, Sidebar, DeskPage, OrgChartPage(+test), ProjectSettingsPage, ScheduleEditor, SubscriptionEditor, console.stack.spec.ts. (2026-09-12) Resumed: the agent found and fixed one real defect — the empty-state sentence read "unless **it** writes a memory" where this ticket quotes "unless **a worker** writes a memory" (`web/src/components/AgentChat.tsx:428` now matches). Amended to 348220a, merged as a merge of worktree-agent-a165e672dbaeb7334. **It shares DeskPage.tsx and Sidebar.tsx with A2 and git merged both cleanly — no conflict at all**, so the orchestrator checked the semantics rather than trusting the textual merge: A2's `showFirstRunPanel` (`DeskPage.tsx:147`) and `finish-onboarding` button (`:568`) are both still present, and C3's Activity/Triggers wording survived at `:286-287`. Both acceptance greps re-run on the MERGED tree and both still empty. Web gates on the merged tree: typecheck clean, `npx vitest run --testTimeout=20000` → 1563/1563 in 83 files, build clean, `examples/web` typecheck clean. Residue the agent flagged: the two `e2e/features` hits for `Rationale`/`Project name` are a history comment, not a selector — left as found. DI11 records the ticket-vs-design wording split.
 
-### C4: write a note from the Memory page   [Status: WIP branch, unverified (paused) | Model: sonnet]
+### C4: write a note from the Memory page   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** G8. On `MemoryBrowserPage.tsx`: a **Write a note** button opening a small form
   (content, multiline; labels as one `key=value` per line in the identifier face, validated with
   the same parser the selector field uses if one is exposed, else a strict regex with a helpful
@@ -627,10 +678,10 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test`
 - **Depends on:** —
-- [ ] done
-- Notes: (2026-09-11) Paused at 'about to commit'; WIP committed as 3e5e92b on worktree-agent-a8928fdf78ef2c1d3. Files: MemoryBrowserPage(+test), memories.ts(+test), new e2e/features/memory-write.stack.spec.ts.
+- [x] done
+- Notes: (2026-09-11) Paused at 'about to commit'; WIP committed as 3e5e92b on worktree-agent-a8928fdf78ef2c1d3. Files: MemoryBrowserPage(+test), memories.ts(+test), new e2e/features/memory-write.stack.spec.ts. (2026-09-12) Resumed: the WIP diff needed no code changes; amended to 39a709b and merged as b0f759a with no conflict. The orchestrator re-read the provenance claim rather than taking the agent's word, because it is the one thing this ticket exists to guarantee: `memoryWriteBody` returns exactly `{labels, content}` (`web/src/memories.ts:230-240`), `web/src/memories.test.ts:342-353` pins that key set and asserts neither provenance key is present, and the server refuses a body carrying either — even as "" or null — at `go/httpapi/memories.go:480-492`. So the client cannot send provenance and the server would reject it if it did. Malformed label lines block submit via `canSubmit` and surface the reason as `helperText` (`MemoryBrowserPage.tsx:453-455,513-514`); the registry action pre-fills from the newest `name=label-registry` row via `foldNamedMemories`' descending fold (`memories.ts:451-476`). DI9 records the gap the agent found: on a project with zero memories the Memory nav entry never reveals, so this button is unreachable until something else writes one.
 
-### C5: the Desk narrates firsts   [Status: todo | Model: sonnet]
+### C5: the Desk narrates firsts   [Status: merged, e2e pending D2 | Model: sonnet]
 - **Scope:** G4. In `web/src/desk.ts`'s fold (pure, `now` passed in), tag each record with its
   kind: `first-worker`, `first-memory`, `first-schedule`, `first-subscription`, `first-rewrite`,
   `first-ask`, `first-revert`. A pure `web/src/firsts.ts` takes the folded records and a
@@ -650,22 +701,45 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 - **TDD:** yes
 - **Validation:** `cd web && npm ci && npm run typecheck && npm test`
 - **Depends on:** C1 (the link target), C2 (the `GuideProvider`)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Built and merged as `5e4f6bc` → merge with **no conflict at all**, which its
+  region discipline earned: it stayed clear of the top of `DeskPage.tsx` where A5 had just mounted
+  the budget panel, and listed what it did not touch. Orchestrator re-ran the Validation on the
+  merged tree: typecheck clean, `vitest --testTimeout=20000` **1711/1711 in 93 files**, web build
+  clean, `verify-package.sh` PASS, `examples/web` build and typecheck clean, `go build`/`go vet`
+  clean. Verified all three wave-2 features coexist on the Desk: `AboutThisScreen` at
+  `DeskPage.tsx:210`, `BudgetPanel` at `:223`, the firsts wiring at `:146-157` and
+  `FirstNarrationLine` at `:470`/`:533`.
+  Two things it got right that are worth naming. The fold is built from the **unwindowed** changelog,
+  so a first older than `earlierChangesLimit` still narrates — pinned by its own test. And it found,
+  mid-build, that naively recomputing from storage made a narration vanish in the same paint as the
+  mark-as-seen effect; it split `seenAtMount` from `shown` so a sentence survives the visit. It also
+  reused C2's `useGuideParagraph('desk') !== undefined` as the "is a guide mounted" signal rather
+  than inventing a second one. Its report claimed it had left the open-ask caveat out of the source;
+  it had not — the reasoning is at `desk.ts:484-498`. Four findings: **DI22** (the sentences), and
+  **DI23–DI25** below.
 
 ### Stream D — integration
 
-### D1: merge and the full gates   [Status: todo | Model: orchestrator]
+### D1: merge and the full gates   [Status: done | Model: orchestrator]
 - **Scope:** Merge each `fleet/*` branch into `main` in dependency order (A3 and A4 before A5;
   C1 before C2 and C5), resolving conflicts in `main.go`, `App.tsx`, `DeskPage.tsx`,
   `ProjectSettingsPage.tsx` by hand. Run the three gates from §0 plus `bash web/scripts/verify-package.sh`
   and `docker build -f deploy/web.Dockerfile .`. Commit `docs/guide/` once B8 has passed.
 - **Validation:** all gates green on `main`.
 - **Depends on:** the stream's tickets
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Done incrementally rather than as one batch at the end: every ticket merged in
+  dependency order with the gates re-run on the merged tree immediately after, so a failure could
+  only ever belong to the merge just made. Final state of `main`: `go build`/`go vet` clean;
+  `go test ./...` 34 packages ok **and separately green with a live Postgres attached** (throwaway
+  `pgvector:pg16` on :55432 — never the stack's shared database); `web` typecheck clean,
+  `vitest --testTimeout=20000` **1711/1711 in 93 files**; `web/scripts/verify-package.sh` PASS;
+  `examples/web` build and typecheck clean at 18 guide pages; `docker build -f
+  deploy/web.Dockerfile` EXIT=0. Conflicts resolved by hand in `App.tsx` (twice), `DeskPage.tsx`,
+  `ProjectSettingsPage.tsx` and `components/index.ts` — DI13 is the one that mattered.
 
-### D2: the stack e2e for everything new   [Status: todo | Model: sonnet]
+### D2: the stack e2e for everything new   [Status: DONE — 5 defects found and fixed | Model: orchestrator]
 - **Scope:** `./e2e/run-stack-e2e.sh up` (mock), then `./e2e/run-stack-e2e.sh test` for:
   `revert`, `onboarding`, `budget`, `memory-write`, `console` (the appended assertions), and the
   whole existing suite once. Fix what fails **inside the ticket that owns it** (append to its
@@ -674,8 +748,47 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   a whole host").
 - **Validation:** the run's summary line, pasted into Notes; `e2e/stack-e2e-logs-mock.txt` captured.
 - **Depends on:** D1
-- [ ] done
-- Notes:
+- [x] done
+- Notes: **(2026-09-12) RUN, and it earned its place: five real defects every offline gate missed —
+  DI29 the worst, DI27/DI28/DI30/DI31 the rest, fixed in `1a60902` and `3649e3e`.** Mock mode was
+  proved from the boot log before anything ran (`[agentd] ANTHROPIC_API_KEY unset → MOCK model
+  proxy`) and the two lines that would mean billing — `real model proxy →`, `subscription mode →` —
+  were absent. That mattered: this checkout has a REAL `.env` (108-char `ANTHROPIC_API_KEY` **and**
+  a real `CLAUDE_CODE_OAUTH_TOKEN`), and the only reason a stack run did not bill is that
+  `e2e/run-stack-e2e.sh:44-45` blanks both and `docker-compose.stack-e2e.yml:36-43` forces the local
+  backends with no `override.yml` — README-stack's traps (a) and (b) are closed on that path by
+  construction, not by anyone's discipline.
+  **Targeted specs, all green:** `revert` 1/1, `budget` 2/2, `memory-write` 2/2, `console` 8/8, and
+  `onboarding` 1/1 — the last needs its own invocation, `--mock-script
+  e2e/mock-scripts/onboarding.json`, or it SKIPS, and A2's entire scenario lives inside it, so A2
+  was unproven until that run.
+  **Whole suite:** `78 passed, 1 failed, 39 skipped (8.9m)`. The 39 skip by design (each wants a
+  particular mock script). The 1 is DI32, load flake, proven by a 9.8s isolated pass.
+  `--trace on` is what made three of the five diagnosable: the trace's `resources/` holds request
+  and response bodies by sha, which is how the budget defect was pinned on the spec rather than the
+  server — the PUT carried `daily_tokens_hard: 5000` and the 200 echoed it back, so the product was
+  right and the poll was reading a different project.
+  Earlier pre-flight, still true: `e2e/` has no typecheck, so `playwright --list` is how the specs
+  get compiled — 115 tests in 21 files parsed, every selector in A2's new scenario verified.
+  **Superseded pre-flight note:** Two things done
+  ahead of D2 so it does not burn a whole stack cycle on them. **(1) Every spec parses.** `e2e/` has
+  no `typecheck` script and no `tsconfig.json`, so nothing had ever compiled the specs A2 and C4
+  wrote; `npx playwright test --config playwright.stack.config.ts --list` does it without a stack
+  and reports **115 tests in 21 files**, including `memory-write.stack.spec.ts` (2 tests) and A2's
+  addition, which is appended *inside* the existing `onboarding.stack.spec.ts` test rather than as a
+  new one — which is why the listing still shows one test there. **(2) Every selector A2's scenario
+  uses exists.** `finish-onboarding` (`web/src/components/DeskPage.tsx:568`), `charter-panel`
+  (`CharterPanel.tsx:89`), `charter-approve` (`CharterPanel.tsx:194`); `nav-desk`/`nav-workers` are
+  generated as `` `nav-${key}` `` (`examples/web/src/App.tsx:612`) from `NAV_ALWAYS =
+  ['desk','chat','workers','settings']` (`web/src/navReveal.ts:43`), so both are always present. The
+  two seed-button assertions are sound in both directions: while in interview `DeskPage.tsx:556-589`
+  renders the finish button *instead of* "Start from an org chart" (mutually exclusive branches), and
+  `WorkersPage.tsx:219-251` withholds both "Start from a topology" buttons and swaps the surrounding
+  prose so the phrase is not even present as text — and the assertion is `getByRole('button', …)`
+  anyway, which would not match prose. After approval the architect worker makes the project
+  non-empty, so the populated branch at `:247-251` renders the seed again, which is what the last
+  assertion wants. **None of this substitutes for D2**: it proves the specs compile and their
+  selectors exist, not that the behaviour happens.
 
 ---
 
@@ -708,3 +821,53 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **6. Embed-CSP origin list is still a boot-time snapshot.** (A6, 2026-09-11) `embedcsp.go:79-88` documents "computed once, at wiring time" and `main.go` passes a `[]string`; making it live means a `func() []string` per request. Small, separate change; not done.
 
 **7. `docs/ops.md` §11d had no invite walkthrough and used the inline map.** (A6, 2026-09-11) Switched the OVH example to `AGENTKIT_PROJECT_MAP_FILE` at `/srv/apps/bob/secrets/projects.json` and added a one-paragraph "adding someone later"; A7 still owes the full invitation prose.
+
+**8. The `web/` suite's 5000ms flake is a timeout, not a race — and it has a one-flag proof.** (orchestrator, 2026-09-12) Confirms **2** with the measurement that file was missing. On untouched `main`, `cd web && npm test` → 6 failed / 1542 passed across `AutomationPage.test.tsx`, `ProjectSettingsPage.test.tsx`, `WorkersPage.test.tsx`; re-running exactly those three files alone on the same tree → **71 passed, 0 failed**. A2's agent went further on its branch: the *whole* suite with `npx vitest run --testTimeout=20000` → **1549/1549 pass**. So every one of these is `@testing-library/user-event` typing past a wall-clock deadline under CPU contention, and the fleet's own parallelism is what causes it. Two consequences: (a) no agent should judge a web ticket by the full suite while siblings are running — re-run the ticket's own files in isolation; (b) raising `testTimeout` in `web/vitest.config.ts` would make the gate honest, but it is a shared file five tickets were editing, so it is **not** done here and wants its own ticket. D1 still re-runs the suite on a quiet machine.
+
+**9. A brand-new project has no UI path to its own first memory.** (C4, 2026-09-12) The Memory nav entry only reveals once the project has ≥1 memory (K9, `examples/web/src/App.tsx:296-298`), so the "Write a note" button C4 adds is unreachable on a project that has never had one — `e2e/features/memory-write.stack.spec.ts:20-26` routes around it by seeding a memory over the API. Harmless today because onboarding seeds two memories at charter approval, but it makes the zero-memory case a dead end. Wants its own ticket if the first note ever matters before a charter.
+
+**10. "Charter applied" is inferred from a worker's name, not reported by the API.** (A2, 2026-09-12) `useInterviewState` in `examples/web/src/onboarding.ts` decides an interview is over when `GET /agent/workers` contains a worker named `architect` (`ARCHITECT_WORKER_NAME`). The ticket text sanctioned this and the code documents it, but a charter that sets a custom `architect_name` defeats it and the project stays "in interview" forever. The real fix is an `applied` flag on the charter-current response; out of scope here.
+
+**11. The ticket and the design doc quote the empty-chat sentence differently.** (C3, 2026-09-12) This plan's C3 scope quotes "nothing it says is remembered unless **a worker** writes a memory"; design §3 G3 writes "unless **it** writes a memory". The agent followed this plan, as the ticket is the authority for its own text, and `web/src/components/AgentChat.tsx:428` now reads "a worker". The design doc is the one out of step; reconcile it there, not in the code.
+
+**12. Nothing in this wave was proven against real Postgres until it was asked for.** (orchestrator, 2026-09-12) A4's agent ran a full green `go test ./...` and still reported, correctly, that one of its four acceptance criteria rested on a test that had SKIPPED — `TestLivePG_GetProjectUsageSince_ExcludesRowsBeforeSince` needs `AGENTKIT_TEST_POSTGRES_URL`. That is CLAUDE.md's standing warning behaving exactly as advertised: a green suite does not prove the pgvector/jsonb paths. Closed here with a throwaway `pgvector/pgvector:pg16` on port 55432 (all four live cases PASS, and the whole suite re-run with it attached: 34 ok, 0 FAIL). Two things worth keeping: the fleet's Go gate should carry a live database whenever a ticket touches `agentdb`, and the throwaway must never be the compose stack's own `agent-bob-postgres-1` — a sibling branch's unmerged migration has broken other agents' runs before.
+
+**13. C1's merge would have silently reverted A2, and no test would have caught it.** (orchestrator, 2026-09-12) The only conflict in the whole wave was one hunk of `examples/web/src/App.tsx` — `ViewNav`'s `onChange`. A2's side deleted `if (view === "onboarding") onOnboardingDone()`, because ending the interview on a nav click *is* the defect A2 exists to fix. C1's branch predates A2, so its side still carried that line, plus its own new guide-hash cleanup. Taking C1's side — which is what "keep the incoming change" habitually means, and what a merge tool's default would offer — reverts A2 completely while leaving every unit test green, because nothing offline asserts that clicking away *keeps* an interview alive; only A2's stack e2e does, and that waits on D2. Resolved by keeping A2's deletion and C1's cleanup, with the reason written at the site so the next person does not re-add it. The general lesson for the fleet: **a branch that predates a merged ticket carries that ticket's old behaviour as its conflict side, and the danger is inverse to the conflict's size.** Every other file in the wave auto-merged, including two that A2 and C3 shared — and those needed a semantic check too (done: A2's `showFirstRunPanel`/`finish-onboarding` and C3's Activity/Triggers wording both verified present on the merged tree).
+
+**14. A7's Validation command cannot pass as written, and the agent said so instead of fudging it.** (A7, 2026-09-12) The ticket asks for `grep -n AGENTKIT_DEFAULT_DAILY_TOKENS_HARD go/cmd/agentd/main.go docs/ops.md .env.example` to be non-empty for all three. `main.go` has no match and cannot have one: A3 resolved the defaults in `go/cmd/agentd/defaultbudgets.go` (constant `defaultDailyTokensHardVar`), reached from `main.go` only through `resolveDefaultBudgets(os.Getenv)` — which DI5 already recorded. So the literal string never appears in `main.go`. The ticket text is the thing that is wrong; the code is fine. Worth keeping as a pattern: a Validation line written from a design doc can outlive the layout it assumed, and the right move is the one taken here — report it, do not edit code to satisfy a stale grep.
+
+**15. The repo already contained a guessed default daily budget, and it is 5× lower than the orchestrator's own recommendation.** (A7, 2026-09-12) `.env.example:189-190` carries commented `AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT=50000` / `_HARD=100000`, added by A3, beside a comment stating the design intent plainly: *"A low value here is what keeps an invited friend's first project braked before anyone visits the console to raise it."* The orchestrator had independently recommended 250,000/500,000 to Kai, reasoning from "a normal working day should not be strangled" — which is the **opposite** intent to the one already written down. On re-reading, the repo's intent is the better one: the default is a brake the operator raises deliberately, not an allowance, and chat is exempt from the budget (`go/cmd/agentd/router.go:699-702`) so no budget can ever lock a human out of talking to their workers. Measured floor for the arithmetic: the core preamble alone is ~1.5 KB ≈ 380 tokens (`go/compose.go:623`), before project background, briefing, worker prompt, tool definitions and per-turn re-sending, and **no real-API token observation is recorded anywhere in this repo** — the only captured usage envelope is a mock row of 10 in / 6 out (`go/agentdb/token_usage.go:15-45`). So any number here is a judgment, not a measurement, and the honest recommendation is to adopt the low one already written: **50,000 soft / 100,000 hard**. Kai's call, still open.
+
+**16. Removing a project does not purge it.** (A7, 2026-09-12) There is no `DELETE /agent/project` route. OM-8's "delete the throwaway project" can only mean removing it from `projects.json`, which revokes login but leaves its sessions, workers and memory in the database. A7 documented that in `docs/ops.md` §11f and in the new guide page rather than implying a clean delete exists. If a real tenant ever needs erasing, that route does not exist yet.
+
+**17. Five page components had no `projectId` prop at all.** (C2, 2026-09-12) `ProjectSettingsPage`, `MemoryBrowserPage`, `WorkerEditor`, `WorkerTriggers` and `OnboardingPage` never took one; only `WorkersPage`, `DeskPage`, `ActivityPage`, `OrgChartPage` and `WorkerHistory` did. C2 needs it to key per-project dismissal, so it added the prop to each as optional defaulting to `''`. That is the right shape for a published package — no consumer breaks — and our shell passes it everywhere, so nothing is wrong today. The residue: a host that omits it gets dismissal scoped to the empty-string project, which only matters to a multi-project embedder, and none exists. Worth a follow-up only if one appears.
+
+**18. A5 mounted a second, independent settings loader inside the settings page, and a save from the main form silently reverted the budget.** (A5 → orchestrator, 2026-09-12) A5 reported this itself, which is how it was caught — but framed it as "a pre-existing shape of risk ... not something A5 introduced structurally". That framing is wrong and the orchestrator rejected it. Before A5, `ProjectSettingsPage` held exactly one `useProjectSettings` instance; A5 mounts `BudgetPanel` *inside* that page (`ProjectSettingsPage.tsx:204`) and `BudgetPanel.tsx:62` gives it its own. Two independent GETs and two whole-object PUTs then render on one page — and the write path makes the consequence certain, not merely possible: `projectSettings.ts:311-313` builds the body by spreading the whole settings object minus `project`/`updated_at`, and `useProjectSettings.ts:9-13` states the route has no patch semantics. So the main form always sends `daily_tokens_soft`/`_hard` as read at mount. An operator who raises the hard limit in the panel and then saves anything in Advanced reverts it, with a success message and a changelog entry asserting the opposite. For the one control in this wave whose purpose is to be a trustworthy brake on spend, that is a defect, not a footnote. Sent back to A5 with the narrow fix: an optional `settings` prop on `BudgetPanel` so the parent supplies the single instance on the settings page while the Desk mount keeps its own, plus a test that saves from the main form and asserts the PUT carries the **new** limit — a behaviour switch, not a storage round-trip. **General lesson: two independent readers of one whole-object PUT on the same screen is a lost-update bug by construction, and the second one is always the one that introduced it.**
+
+**19. The console gated two of the three fields the server calls operator-only.** (orchestrator, 2026-09-12) `go/httpapi/project_settings.go:96-106` refuses a non-operator whose body differs from the stored row on `DailyTokensSoft`, `DailyTokensHard` **or `MaxConcurrentJobs`** — three fields. A5 moved the two token budgets into its operator-gated panel and left `max_concurrent_jobs` in the open Advanced list (`ADVANCED_NUMERICS`), which made the page *worse* than before it started: the UI now looked like it gated operator-only settings while one of the three stayed editable, and because the PUT is whole-object a non-operator who nudged it lost **every other edit in the draft** to a 403 whose message — "only the operator may change budgets and caps" — never names the field responsible. Closed inside A5 as a deliberate scope call by the orchestrator: the field stays in Advanced and editable for an operator, and renders read-only with "Only the operator can change this." otherwise (`ProjectSettingsPage.tsx:302-320`, `ReadOnlyNumericSetting` at `:471`), on the same fail-closed `useWhoami` default as everywhere else. `briefing_max_bytes` and `snapshot_ttl_days` are untouched — the server does not guard them. **General rule: a UI gate that covers a subset of a server's guarded set is worse than no gate, because it teaches the reader that ungated fields are safe.**
+
+**20. Two "Why?" fields now coexist on the settings page, and that is fine.** (orchestrator, 2026-09-12) Since `BudgetPanel` shares the page's settings instance, its rationale input binds to `settings.rationale` (`BudgetPanel.tsx:310`) — the very value the main form's field binds to. So there is one reason per save and the config log cannot be handed a reason belonging to the other form, which was the thing worth checking given how much this repo rests on the changelog being true. Two inputs onto one field is a presentational wart, not a defect; tests disambiguate with `getAllByLabelText('Why?')`. Recorded rather than fixed.
+
+**21. The Desk's "About this screen" was showing the wrong page, and nothing could have failed.** (orchestrator, 2026-09-12) Found while integrating C2, by asking a question no ticket owned: *which page does each surface actually get?* Three pages declared `surfaces: [desk]` — `the-desk` (part 2, order 8), `when-a-worker-asks-you` (part 1, order 7) and `the-architect` (part 3, order 12) — and the consumer resolves a collision by taking the first page in part/order (`buildGuideParagraphs`, `examples/web/src/App.tsx:98-106`). So the Desk's About line was the paragraph about *a worker asking you a question*. Design **§4.4** is the authority and it is unambiguous: Desk → `the-desk`; `when-a-worker-asks-you` and `the-architect` are **Desk ROW links, fired by G4 (ticket C5) on the first ask and the first rewrite** — a different mechanism that reads slugs from `firsts.ts`, not front matter. Both pages were claiming a G2 surface they were never assigned. Fixed by setting both to `surfaces: []` with the reason in the front matter. Then checked every surface against §4.4: **12 of 12 now match, 0 mismatches** (`memory` → `the-rulebook` and `onboarding` → `your-first-hour` are both collisions the table sanctions, and the winner matches the order §4.4 lists). Three things make this worth recording. **(a) No test could have caught it.** C2's acceptance criteria are "a surface with no paragraph renders nothing" and "dismissal is per surface" — both true, both green, while the content was wrong; the unit tests use fixtures, and "first wins" is deterministic, so there was nothing flaky to notice. **(b) It sat in the gap between three tickets** — B wrote the front matter, C1 built the generator, C2 built the consumer, and none of them owned "the mapping is right". **(c) The silence was the defect.** Added `reportSurfaceCollisions` to `examples/web/scripts/build-guide.mjs`, which now prints every contested surface and names the winner on each build. It reports rather than throws, because §4.4 sanctions two of them — a hard failure would break a build the design blesses.
+
+**22. The ticket claimed the seven sentences were in the design. Six of them were not.** (C5 → orchestrator, 2026-09-12) C5's scope says "the seven sentences are in design §3 G4 and its table §4.4; write them once in `firsts.ts`", and the orchestrator's brief repeated it as "use those, verbatim; do not invent your own wording". Checked: design §3 G4 (`design/2026-09-11-onboarding-and-the-guide.md:237-258`) gives **one** worked sentence, for `first-worker`, and then specifies a shape — "Seven kinds, seven sentences, one link each. Not a checklist, not a progress bar." §4.4 is the surface-wiring table, not copy. So the instruction was impossible as written, the same class of defect as **DI14**. C5 neither invented prose nor blocked: it took, for each remaining kind, the closest **already-shipped verbatim phrase** for that concept — `WorkerTriggers.tsx`'s own two sentences for schedule and subscription, and the §4.2 guide table's own trap lines for rewrite, ask, revert and memory — and sourced every one in a comment at `web/src/firsts.ts:10-24`. That is the right move under the plan's fixture rule, and the result reads consistently ("This is the project's first X. <the thing it is> — read …"). **But it means six of the seven sentences are effectively authored here rather than specified, and they are the first words a new human reads about each concept.** One is worth a second look: `first-rewrite` reads "A quiet architect is the alarm — read about its loop", which is a warning about the architect going *silent*, not an explanation of what a rewrite is — sound as a guide-table trap line, oblique as a first encounter. It is one object to edit (`FIRST_NARRATIONS`), so this is a copy review for Kai and Jack, not a code change. Not blocking.
+
+**23. `first-revert` will essentially never fire for a human revert, and that is a Go-side limitation.** (C5, 2026-09-12) A revert is not its own action: `go/cmd/agentd/mcp_config_log.go` says a revert "is an ordinary `worker_prompt_write`/… whose rationale names the event being restored", and `go/agentdb/config_revert.go:90-92` only *defaults* the rationale to `revert of <action> (seq <n>, event <id>)` when the caller supplies none. The console's own `RevertControl` (`ChangelogView.tsx`) **requires** a human-typed rationale — so a revert done through the shipped UI never matches the pattern, and only a worker- or API-driven revert with no rationale would. C5 detects on `/^revert of /i` and falls back to the underlying action's kind, so such a revert narrates as `first-rewrite` rather than as nothing. Correctly left alone: the real fix is a marker field on `ConfigEvent` set by `RevertEvent`, which is `go/agentdb` migration territory and not an M-sized web ticket. Consequence to be honest about: **one of the seven sentences is close to dead copy until that field exists.**
+
+**24. `first-memory` needed a second fetch, and its timestamp is the newest memory, not the earliest.** (C5, 2026-09-12) Memory writes are not config events — confirmed in `go/agentdb/memories.go` and `go/cmd/agentd/mcpserver.go`, neither emits one — so the fold has no route to them and `useDesk` was not in the ticket's file list. C5 merged a synthetic record client-side from `useMemories({limit:1})` in `DeskPage.tsx`. The read route returns newest-first, so on a project that already has memory history the synthetic record carries the *newest* row's timestamp, not the first. Harmless where it matters (a brand-new project has one row, which is both) and self-limiting (once the kind fires it is locked forever, so the cost is firing on the wrong visit, never twice). The clean fix is a route into the fold, which means touching `useDesk`.
+
+**25. `first-ask` narrates the earliest still-OPEN ask, not the earliest ask ever.** (C5, 2026-09-12) Deliberate and documented at `web/src/desk.ts:484-498`: an answered ask has no row left on the Desk to carry the sentence, so the record it narrates on must still be open. The residue is retrofit-only — switch this on for a project whose true first ask was already answered and whatever is oldest-and-still-open gets labelled "the first ask". Nothing to do for a new project, which is what this wave is for.
+
+**26. Two client helpers, one word apart in meaning, and the wrong one fails silently.** (D2, 2026-09-12) `projectClient(request, project)` binds to the project you name; `newProjectClient(request, prefix)` takes a **prefix** and mints a brand-new project of its own (`e2e/helpers/api.ts:803-813` vs `:821-829`). A5's `budget.stack.spec.ts` passed the page's project into `newProjectClient`, so it polled a different, empty project — where `GET /agent/project-settings` answers with `DefaultProjectSettings`, i.e. `0/0`, forever. Nothing errors, because the wrong project is a *valid* project and its settings read back as plausible zeros. What settled it was the Playwright trace's stored bodies: the PUT sent `daily_tokens_hard: 5000` and the 200 echoed it back for `e2e-budget-mtycxcve-sn0wz`, proving the product right and the spec wrong. Worth renaming one of the two, or giving `newProjectClient` an options object; a helper whose argument means something different from its neighbour's is a trap that will be re-sprung.
+
+**27. An assertion that can pass without the thing under test happening.** (D2, 2026-09-12) `memory-write.stack.spec.ts` proved "the new registry version landed" with `expect(page.getByText(NEW_RULES)).toBeVisible()` — but `NEW_RULES` is also the text sitting in the form's own textarea, so it matches whether or not the POST completed. The test then read `/agent/memories/current` once and got the seed. It failed in a serial run and passed in isolation, the signature of a race rather than a broken route: `NewestMemory` orders `created_at DESC, id DESC` (`go/agentdb/memories.go:646`) and is correct. Fixed by polling the route for the expected content. Second defect in the same spec: it asserted `content` on the LIST route, which returns `MemorySearchResult` carrying **`snippet`** (`memories.go:180-197`), so it compared `undefined` to the note. Full content has its own route and the spec now reads it.
+
+**28. `getByLabel` matches a substring, and the budget bar's label contains the input's.** (D2, 2026-09-12) `page.getByLabel('Hard limit')` resolved to two elements: the `<input aria-label="Hard limit">` and the progress bar labelled *"Today's tokens against the hard limit"*. A locator artefact, not an accessibility defect — a screen reader hears two clear, distinct names — so the spec changed, to `getByRole('spinbutton', { name: 'Hard limit' })`. Worth distinguishing from DI20/DI29, where the ambiguity was real.
+
+**29. A2 shipped unable to do the one thing it existed for, and no offline gate could have known.** (D2, 2026-09-12) The worst finding of the wave. `useInterviewState` (`examples/web/src/onboarding.ts`) stopped polling the instant `inInterview` was false — and the FIRST check runs at mount, before the `onboard` session exists, which is exactly that state, for the ordinary reason that the interview has not begun. `settled.current` latched there, the interval never fired again, the Desk could never learn an interview had started, and **"Finish setting up this project" never appeared** — the precise defect A2 was written to prevent. Its comment said the flag meant "the interview is confirmedly over"; the code could not tell "over" from "not started" — the same conflation as DI21 and DI23. Now only `hasArchitect` ends the watch, at the cost of a project that never onboards polling two cheap GETs every 4s while its tab is open: the same order as the Desk's own live refresh, and the right side to err on. **Why nothing caught it:** `examples/web` has no test runner at all — no `test` script, no test files — so the app shell's logic is only ever covered by stack e2e, and A2's 59 unit tests all fed `inInterview` in as a prop rather than computing it. A2's own e2e scenario would have caught it, and it was written; it never ran, because `onboarding.stack.spec.ts` SKIPS without `--mock-script`. Three gaps had to line up, and they did.
+
+**30. A2's e2e insertion broke the assertion that followed it.** (D2, 2026-09-12) A2 spliced its navigation checks into the middle of the existing onboarding test and ended on the Workers view; the pre-existing assertion two lines later expects `run-architect`, mounted only on the onboarding view (`OnboardingPage.tsx:166`). The old assertion failed because of where the new one had walked the browser, not because anything was broken. Reordered so view-dependent assertions run last, each on the view that owns it. General rule for appending to a long browser test: **the browser has one position, and it is shared state.**
+
+**31. A UI reorganisation must grep the specs that select the fields it moves.** (D2, 2026-09-12) A5's G5 split moved `base_image` into the collapsed "Advanced" tier. `product-ui.stack.spec.ts:42` has filled that field since long before, and spent **four minutes** timing out on a field that is now one click away. Neither A5's Files list nor the orchestrator's review checked which existing specs select the moved fields. Fixed by opening Advanced first; a grep of `e2e/features` for the other moved fields found no further UI locators, the remaining hits being API-level.
+
+**32. The full stack suite has its own load flake, distinct from the web unit suite's.** (D2, 2026-09-12) `product-ui.stack.spec.ts:114` ("a session permalink opens that session directly") waited out its 120s for an assistant turn during the full run and **passes in isolation in 9.8s**. No `port pool is exhausted` line appears anywhere in the run, so this is not the documented port ceiling; it is a full suite standing up many session containers in DinD on a machine also running several other threads' work. Same shape as DI8 (the web suite's `user-event` timeouts) and the same remedy: judge a stack failure by an isolated re-run before believing it.

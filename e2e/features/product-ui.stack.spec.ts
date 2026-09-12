@@ -39,6 +39,13 @@ test.describe('product UI', () => {
     const prompt = page.getByLabel('Project system prompt')
     await expect(prompt).toBeVisible({ timeout: 15_000 })
     await prompt.fill('Answer customer email. Be brief.')
+    // Base image lives in the collapsed "Advanced" tier since A5's G5 split —
+    // open it first. This spec timed out for four minutes hunting a field that
+    // was on screen before that ticket and is one click away after it, which
+    // is the cost of reorganising a page without grepping the specs that
+    // select its fields. See DI31.
+    await page.getByRole('button', { name: /^Advanced/ }).click()
+    await expect(page.getByTestId('advanced-settings')).toBeVisible({ timeout: 15_000 })
     await page.getByLabel('Base image').fill('acme/base:v1')
     // Every human edit carries a required one-line reason (decision K2): the
     // Save button stays disabled until "Why?" is non-empty. A test that skips

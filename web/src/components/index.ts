@@ -121,6 +121,10 @@ export { default as WorkerEditor } from './WorkerEditor.js'
 
 export type { WorkerEditorProps } from './WorkerEditor.js'
 
+export { default as CreateProjectForm } from './CreateProjectForm.js'
+
+export type { CreateProjectFormProps } from './CreateProjectForm.js'
+
 export { default as WorkerJobHistory } from './WorkerJobHistory.js'
 
 export type { WorkerJobHistoryProps } from './WorkerJobHistory.js'
@@ -218,3 +222,15 @@ export type { RunArchitectControlProps } from './RunArchitectControl.js'
 export { default as OnboardingPage } from './OnboardingPage.js'
 
 export type { OnboardingPageProps } from './OnboardingPage.js'
+
+export { default as AboutThisScreen } from './AboutThisScreen.js'
+
+export type { AboutThisScreenProps } from './AboutThisScreen.js'
+
+export { GuideProvider, useGuideParagraph } from '../guide/GuideProvider.js'
+
+export type { GuideProviderProps, GuideParagraph, GuideParagraphMap } from '../guide/GuideProvider.js'
+
+export { default as BudgetPanel } from './BudgetPanel.js'
+
+export type { BudgetPanelProps } from './BudgetPanel.js'

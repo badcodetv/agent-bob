@@ -376,6 +376,20 @@ func main() {
 	// fallback, where the route answers 501 rather than pretending.
 	gitBootstrap := newGitBootstrapWiring(log.Printf)
 
+	// The daily token budget (§5, §8.4 step 6). Built HERE, before httpapi.New,
+	// so GET /agent/usage (A4) and the dispatcher's gate can be handed the
+	// SAME *tokenBudget — the route reads its Location() (router.go) rather
+	// than defaulting time.Local independently, so the console's "today" and
+	// the gate's midnight can never silently disagree. nil on the sqlite
+	// fallback, same as every other product-layer piece below.
+	var tokenBudgetInstance *tokenBudget
+	if agentDB != nil {
+		tokenBudgetInstance = newTokenBudget(tokenBudgetConfig{
+			Store:  agentDB,
+			Notify: softBudgetNotifier(os.Getenv, log.Printf),
+		})
+	}
+
 	api, err := httpapi.New(httpapi.Config{
 		Runner:    runner,
 		Store:     store,
@@ -383,6 +397,11 @@ func main() {
 		Identity:  identityFromRequest,
 		AgentDB:   agentDB, // nil on the SQLite fallback → legacy read paths
 		CoreMCP:   coreMCP,
+		// GET /agent/usage (A4). Usage itself auto-fills from AgentDB in
+		// httpapi.New (nil on sqlite → 501); Location and CredentialMode are
+		// the two pieces of context httpapi cannot derive on its own.
+		UsageLocation:  usageLocationFrom(tokenBudgetInstance),
+		CredentialMode: credentialMode(apiKey, oauthToken),
 		// GET /agent/memories borrows the same embedder the memory tools use,
 		// on the same READ-path terms: EmbedOrDegrade swallows a provider
 		// outage, so one query loses its semantic leg rather than its answer.
@@ -502,10 +521,9 @@ func main() {
 			// The briefing read seam (§6.2 step 2.4, §7.4) — the rolling summary
 			// and each of the worker's own selectors.
 			Memories: agentDB,
-			Budget: newTokenBudget(tokenBudgetConfig{
-				Store:  agentDB,
-				Notify: softBudgetNotifier(os.Getenv, log.Printf),
-			}),
+			// The same instance GET /agent/usage reads Location() from — see
+			// where tokenBudgetInstance is built, above httpapi.New.
+			Budget: tokenBudgetInstance,
 			// Composition step 1 (§6.2, §13.5): `worker.image > project
 			// base_image > global`. The SAME resolver the Runner holds, so the
 			// composed image and a launch-time resolution cannot disagree.

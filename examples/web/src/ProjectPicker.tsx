@@ -1,8 +1,12 @@
 // Project picker: shown after login when the account maps to more than one
 // project (or has a wildcard grant). A project is a pure namespace over
 // sessions (the customer claim); wildcard users can mint a brand-new one here.
-import { useState } from "react";
-import { Alert, Box, Button, Paper, TextField, Typography } from "@mui/material";
+//
+// The "new project" form itself is CreateProjectForm (web G6): this picker
+// and Sidebar.tsx's "+ New project…" dialog used to carry two independent
+// copies, and only the Sidebar's said what creating a project actually does.
+import { Box, Button, Paper, Typography } from "@mui/material";
+import { CreateProjectForm } from "@agentkit/chat-ui";
 import { AuthState } from "./auth";
 
 export default function ProjectPicker({
@@ -16,26 +20,11 @@ export default function ProjectPicker({
   onCreate: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
-  const [newProject, setNewProject] = useState("");
-  const [goal, setGoal] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const create = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    try {
-      await onCreate(newProject.trim(), goal.trim());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create project");
-    }
-  };
-
   return (
     <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", bgcolor: "#f8fafc" }}>
       <Paper sx={{ p: 4, width: 360, display: "flex", flexDirection: "column", gap: 2 }} data-testid="project-picker">
         <Typography variant="h6" sx={{ fontWeight: 600 }}>Choose a project</Typography>
         <Typography variant="body2" color="text.secondary">{auth.email}</Typography>
-        {error && <Alert severity="error">{error}</Alert>}
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
           {auth.projects.map((p) => (
             <Button
@@ -52,39 +41,7 @@ export default function ProjectPicker({
             <Typography variant="body2" color="text.secondary">No projects for this account.</Typography>
           )}
         </Box>
-        {auth.wildcard && (
-          <Box component="form" onSubmit={create} sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-            <TextField
-              size="small"
-              fullWidth
-              label="Project name"
-              placeholder="new-project-name"
-              value={newProject}
-              onChange={(e) => setNewProject(e.target.value)}
-              slotProps={{ htmlInput: { "data-testid": "new-project-input" } }}
-            />
-            {/* Required, and labelled for what it DOES. Agent Wolf's scar: the
-                equivalent field was once marked "optional", nothing read it,
-                and it became the single most confusing thing in the product.
-                Here it is the interview's first message. */}
-            <TextField
-              size="small"
-              fullWidth
-              multiline
-              minRows={2}
-              required
-              label="What is this project for?"
-              helperText="Your goal — the interview starts from this."
-              placeholder="e.g. send a weekly newsletter that brings people back into the shop"
-              value={goal}
-              onChange={(e) => setGoal(e.target.value)}
-              slotProps={{ htmlInput: { "data-testid": "new-project-goal" } }}
-            />
-            <Button type="submit" variant="contained" disabled={!newProject.trim() || !goal.trim()} data-testid="new-project-create" sx={{ textTransform: "none" }}>
-              Create
-            </Button>
-          </Box>
-        )}
+        {auth.wildcard && <CreateProjectForm onCreate={onCreate} />}
         <Button size="small" onClick={onSignOut} sx={{ alignSelf: "flex-start", textTransform: "none" }}>
           Sign out
         </Button>

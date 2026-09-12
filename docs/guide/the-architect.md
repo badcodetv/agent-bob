@@ -3,7 +3,7 @@ title: The architect
 slug: the-architect
 part: 3            # 0 start here · 1 levers · 2 reading · 3 architect · 4 field notes · 9 reference
 order: 12
-surfaces: [desk]
+surfaces: []   # Desk ROW link (G4/C5), not the Desk's About line — design §4.4
 ---
 
 The architect is the one worker in your project that isn't there to do the work itself. It designs who does the work, wires them to the clocks and events that wake them, and keeps changing that design as evidence comes in. Approving the charter creates just this one worker; it builds the rest.

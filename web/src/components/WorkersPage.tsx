@@ -21,6 +21,7 @@ import WorkerPromptVersion, { restoreRationale } from './WorkerPromptVersion.js'
 import WorkerChatPanel from './WorkerChatPanel.js'
 import TopologyOnboarding from './TopologyOnboarding.js'
 import BriefingPreview from './BriefingPreview.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 /** Sentinel for "the create-a-worker form is open". Not a legal worker name
  *  (names are kebab-case), so it can never collide with a real selection. */
@@ -53,6 +54,14 @@ export interface WorkersPageProps extends ConfigApiOptions {
   /** Render the "Chat" tab. Requires an <AgentChatProvider> ancestor. */
   enableChat?: boolean
   /**
+   * Withhold the "Start from a topology" seed door — true while this
+   * project's onboarding interview is unresolved (design §3 G1 / decision
+   * "topology seed buttons are hidden while a project is in its interview"):
+   * the architect is the designed default, and the seeds are for people who
+   * already know what team they want.
+   */
+  hideTopologySeed?: boolean
+  /**
    * Which tab to open on. Applied once, on mount and whenever it CHANGES, so a
    * deep link (the chart's clock → this worker's triggers) lands where it meant
    * to without pinning the human there afterwards.
@@ -79,6 +88,7 @@ export default function WorkersPage({
   onOpenSession,
   enableChat = true,
   initialTab,
+  hideTopologySeed = false,
   ...apiOptions
 }: WorkersPageProps) {
   const { workers, loading, error, loadError, save, remove, reload } = useWorkers(apiOptions)
@@ -173,6 +183,7 @@ export default function WorkersPage({
   return (
     <Stack direction="row" sx={{ height: '100%', minHeight: 0 }}>
       <Box sx={{ width: 280, flexShrink: 0, borderRight: 1, borderColor: 'divider', overflowY: 'auto' }}>
+        <AboutThisScreen surface="workers" projectId={projectId} sx={{ px: 2, pt: 2 }} />
         <WorkerList
           workers={workers}
           selected={selected}
@@ -207,15 +218,19 @@ export default function WorkersPage({
                   This project has no workers yet
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  Start from a topology — a pre-built org chart of workers, subscriptions and
-                  schedules, applied in one step — or create a single worker by hand.
+                  {hideTopologySeed
+                    ? 'An interview is setting this project up — the roster arrives once you approve the charter it writes. You can still create a single worker by hand.'
+                    : 'Start from a topology — a pre-built org chart of workers, subscriptions and schedules, applied in one step — or create a single worker by hand.'}
                 </Typography>
                 <Stack direction="row" spacing={1}>
-                  <Button size="small" variant="contained" onClick={() => select(FROM_TOPOLOGY)}>
-                    Start from a topology
-                  </Button>
+                  {!hideTopologySeed && (
+                    <Button size="small" variant="contained" onClick={() => select(FROM_TOPOLOGY)}>
+                      Start from a topology
+                    </Button>
+                  )}
                   <Button
                     size="small"
+                    variant={hideTopologySeed ? 'contained' : 'text'}
                     onClick={() => {
                       select(NEW_WORKER)
                       setTab('config')
@@ -232,9 +247,11 @@ export default function WorkersPage({
                 </Typography>
                 {/* The flow stays reachable in a populated project: collisions
                     are the guard, and the preview shows them. */}
-                <Button size="small" sx={{ mt: 1 }} onClick={() => select(FROM_TOPOLOGY)}>
-                  Start from a topology
-                </Button>
+                {!hideTopologySeed && (
+                  <Button size="small" sx={{ mt: 1 }} onClick={() => select(FROM_TOPOLOGY)}>
+                    Start from a topology
+                  </Button>
+                )}
               </>
             )}
           </Box>
@@ -246,6 +263,7 @@ export default function WorkersPage({
             saving={saving}
             imageOptions={images}
             projectBaseImage={projectBaseImage}
+            projectId={projectId}
           />
         ) : (
           <>
@@ -281,6 +299,7 @@ export default function WorkersPage({
                   saving={saving}
                   imageOptions={images}
                   projectBaseImage={projectBaseImage}
+                  projectId={projectId}
                 />
               ))}
             {/* The briefing preview sits under the Configuration form because
@@ -303,6 +322,7 @@ export default function WorkersPage({
               <WorkerTriggers
                 workerName={current.name}
                 workerOptions={workers.map((w) => w.name)}
+                projectId={projectId}
                 {...apiOptions}
               />
             )}

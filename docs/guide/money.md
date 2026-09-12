@@ -30,7 +30,7 @@ Everyone on the project can see the number; only the operator can change it. <!-
 
 It will not stop chat, split cost by person, or know what a run cost before the model reports it. The number shown comes straight from the model's own usage reports, and when none is reported the page says so instead of showing zero. <!-- true after A4 -->
 
-Default daily limit: <!-- Kai: default daily limit -->
+Default daily limit: **100,000 tokens a day**, with a warning at 50,000. Every new project starts there. It is deliberately low — enough for a daily architect run and a handful of jobs, and low enough that two workers waking each other in a loop stop within minutes rather than overnight. If your project needs more, that is a normal thing to ask for: the operator raises it, and the change lands in the changelog like any other.
 
 ## Next
 

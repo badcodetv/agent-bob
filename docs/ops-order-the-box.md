@@ -147,9 +147,19 @@ I'll also need, when we reach them (not now):
 
 - **`GOOGLE_CLIENT_ID`** from your existing `.env`, so Google login works, and you'll need to add
   `https://bob.badcode.tv` as an authorised JavaScript origin on that OAuth client.
-- **One model credential** — either `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+- **`ANTHROPIC_API_KEY`** — the metered key, **not** the Claude subscription token. This is settled,
+  not a preference: if both are set the subscription token wins and the box bills to your
+  subscription, where Bob's daily token budget cannot brake it at all. Thread 02 established this
+  while building the budget; `docs/ops.md` step 11d has the reasoning. Leave
+  `CLAUDE_CODE_OAUTH_TOKEN` blank.
 - **A DNS A record: `bob` → the box's IP**, at your DNS provider for `badcode.tv`. Last step, after
   the app answers on the box.
+
+**Already decided, nothing needed from you:** the default daily token budget for a brand-new
+project is **50,000 soft / 100,000 hard** (your call, 2026-09-12). It only applies to a project
+that has never had settings written — an invited friend's first project. It goes in the same
+`.env`, and there is a separate check (`docs/ops.md` step 11f) that proves the brake actually
+*fires* rather than merely being configured, to run before the first real invite.
 
 ---
 

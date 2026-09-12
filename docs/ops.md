@@ -1017,9 +1017,21 @@ AGENTKIT_PROJECT_MAP_FILE=/secrets/projects.json
 # ── Database password (Postgres only listens inside the stack) ──
 POSTGRES_PASSWORD=$(openssl rand -hex 24)
 
-# ── Model: one of these ──
+# ── Model: API-key mode. Leave CLAUDE_CODE_OAUTH_TOKEN blank — see below ──
 CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
+
+# ── Default daily token budget for a BRAND NEW project (onboarding-work-plan
+# §1.3, go/cmd/agentd/defaultbudgets.go). Applies only to a project that has
+# never had a settings row written — an invited friend's first project, not
+# an existing one. Unset or 0 = off, i.e. NOT braked — fill both numbers in
+# before inviting anyone (see "Why API-key mode" below and OM-8 further down).
+# Kai chose these on 2026-09-12, deliberately low: the default is a brake he
+# raises per project once he can see what one actually costs, not an allowance.
+# Raising it is one console edit by the operator; starting high and discovering
+# the number later is the mistake that cannot be undone.
+AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT=50000
+AGENTKIT_DEFAULT_DAILY_TOKENS_HARD=100000
 
 # ── Google Cloud Storage: artifacts, datasets, session snapshots ──
 AGENTKIT_BLOB_BACKEND=gcs
@@ -1039,7 +1051,7 @@ GCP_REGION=europe-west1
 GCP_AR_REPO=agent-bob
 EOF
 chmod 600 /srv/apps/bob/src/.env
-nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
+nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and the two budget numbers
 ```
 
 **Two consequences of the registry lines, worth knowing before you set them:**
@@ -1061,7 +1073,20 @@ nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
   (`design/2026-09-12-wolf-deployment.md`); Kai has declined to design it yet. Setting a cleanup
   policy is itself a decision about how far back a session can be restored, so ask first.
 
-**Three rules for this file:**
+**Why API-key mode, and the subscription token stays blank.** The box runs on
+`ANTHROPIC_API_KEY` (a metered key), never `CLAUDE_CODE_OAUTH_TOKEN` (the Claude subscription
+token from `claude setup-token`) — if both are set, the OAuth token wins and the box would be
+billed to the subscription instead (`go/cmd/agentd/main.go:220-235`). Two reasons this box stays
+on the key:
+- **The daily budget above only bounds a metered key.** `daily_tokens_hard` stops new
+  non-interactive jobs and is read against usage the store can price
+  (`go/agentdb/token_usage.go`); a subscription's own usage is not something Bob's ledger meters
+  or caps, so a guest project on the subscription would have no brake at all.
+- **The subscription authenticates one login, not one guest per project.** It carries only so
+  many concurrently-authenticated sessions before something else using the same login gets
+  signed out; a shared API key has no such ceiling.
+
+**Four rules for this file:**
 - **Keep a login mode set.** With no `GOOGLE_CLIENT_ID` (and no test login), Bob runs with **no
   authentication at all**.
 - **Add Bob's address to Google login.** In the Google Cloud console, open the OAuth client
@@ -1071,11 +1096,31 @@ nano /srv/apps/bob/src/.env     # fill GOOGLE_CLIENT_ID and ONE model credential
   has an unauthenticated route that spends the Anthropic key (`docs/19-embedding.md`, hazard
   H6). It is safe only while `agentd` is unreachable from outside, which this setup guarantees.
   Never publish another port.
+- **Set the default daily budget before the first invite.** Without it, a brand-new guest
+  project starts with no spend brake at all (`daily_tokens_hard=0` is off) — see OM-8 below for
+  how to check the brake actually fires, not just that a number is set.
 
 **Adding someone later** is editing `/srv/apps/bob/secrets/projects.json` and either waiting for
 the next reload (`AGENTKIT_PROJECT_MAP_RELOAD`, default 60s) or sending SIGHUP for an immediate
 one: `docker compose --project-directory /srv/apps/bob/src -f /srv/apps/bob/src/docker-compose.yml
--f /srv/apps/bob/compose.ovh.yml kill -s SIGHUP agentd`. No restart, no downtime.
+-f /srv/apps/bob/compose.ovh.yml kill -s SIGHUP agentd`. No restart, no downtime — this box never
+needs a restart to add a user, whichever way the map is edited.
+
+**The message you send them.** One paragraph, every time, no exceptions
+(`design/2026-09-11-ovh-compose-hosting.md:288` is the isolation caveat in the third sentence):
+
+> This runs on my own Anthropic key with a small daily token budget, so an unattended job that
+> goes wrong stops itself rather than running up an unbounded bill — tell me if you need more
+> room. Once you approve your project's charter, an automatic "architect" edits it once a day on
+> its own: it creates workers, writes memories and wires triggers without asking either of us
+> first, and what it did shows up afterwards for you to keep, edit or revert. Your project's
+> containers run on a shared box without the isolation a system holding customer data would need,
+> so I'm only sending this to people I trust with that. If that's all fine, here's your link:
+> `<url>`.
+
+Send it to people you trust, not a general invite link — see
+`docs/guide/for-operators/inviting-someone.md` for the operator's runbook this paragraph lives
+in.
 
 ### 11e. Start it
 
@@ -1093,6 +1138,37 @@ The first start takes a few minutes: it builds the images and the sandbox.
 - `curl` returns `200`;
 - Bob's tables exist in the `bob` database on the box's Postgres, so pgBackRest already covers them;
 - `ss -tlnp` shows nothing but `127.0.0.1` for ports 8100 and up **and for 5432**.
+
+### 11f. Verify the spend brake actually fires (OM-8)
+
+Setting the two env vars above only proves a number is stored. It does not prove a hard-stopped
+project's jobs actually stop — the ledger that budgets read against was itself broken for a
+month before it was fixed (`go/agentdb/token_usage.go:6-9`), so "it's configured" is not the same
+claim as "it fires." Do this once, before the first real invite, on a project nobody depends on:
+
+1. **Create a throwaway project.** Log in as the wildcard account and create a new project from
+   the console (e.g. `brake-test`).
+2. **Set a tiny hard limit.** In that project's Settings, set `daily_tokens_hard` to a very small
+   number — small enough that one job's normal usage crosses it (a few hundred tokens, not the
+   real default). `PUT /agent/project-settings` is the route underneath, if you'd rather script
+   it than click it.
+3. **Run a job.** Approve the project's charter and run the architect once (or trigger any
+   worker's schedule) so at least one non-interactive job runs and spends tokens against the
+   project.
+4. **Watch the delivery queue.** Trigger a second job for the same project — run the architect
+   again, or wait for its daily schedule — and check `GET /agent/deliveries?status=pending` (or
+   the Activity page). With the hard limit already crossed, the delivery should sit at
+   **`pending`** rather than dispatching: `go/cmd/agentd/router.go` (`tokenBudget.Allow`) is what
+   is refusing it, and it goes out again automatically once the day rolls over stack-local
+   midnight, or once you raise the limit.
+5. **Delete the throwaway project.** There is no dedicated delete-project route (grep confirms:
+   `grep -rn "DELETE /agent/project" go/httpapi go/cmd/agentd` is empty) — remove
+   `brake-test` from `/srv/apps/bob/secrets/projects.json` instead. That revokes login access;
+   its sessions, workers and data are not separately purged, so don't put anything in a
+   throwaway project you'd mind existing.
+
+✅ **Done when:** a delivery for the throwaway project actually shows `pending` while the hard
+limit is in force, not just a number sitting in Settings.
 
 ## Step 12 — DNS and your manual test (15 min)
 
