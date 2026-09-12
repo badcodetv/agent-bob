@@ -778,10 +778,12 @@ ANTHROPIC_API_KEY=
 # never had a settings row written — an invited friend's first project, not
 # an existing one. Unset or 0 = off, i.e. NOT braked — fill both numbers in
 # before inviting anyone (see "Why API-key mode" below and OM-8 further down).
-# Kai has not chosen these numbers yet, so this heredoc leaves them as a
-# placeholder rather than guessing.
-AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT=FILL-BEFORE-FIRST-INVITE
-AGENTKIT_DEFAULT_DAILY_TOKENS_HARD=FILL-BEFORE-FIRST-INVITE
+# Kai chose these on 2026-09-12, deliberately low: the default is a brake he
+# raises per project once he can see what one actually costs, not an allowance.
+# Raising it is one console edit by the operator; starting high and discovering
+# the number later is the mistake that cannot be undone.
+AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT=50000
+AGENTKIT_DEFAULT_DAILY_TOKENS_HARD=100000
 
 # ── Google Cloud Storage for session snapshots ──
 AGENTKIT_BLOB_BACKEND=gcs
