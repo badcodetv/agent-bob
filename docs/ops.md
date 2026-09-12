@@ -9,6 +9,14 @@ Written 2026-09-11. The long-form reasoning, with sources, is in
 disagree, this file is newer.
 
 > **Status: nothing is built yet.** Every command below is still to be run.
+>
+> ⚠️ **Parts 1.5 and Step 4 and Step 9 are under review (2026-09-12).** Kai has proposed replacing
+> the LVM-thin-snapshot backup design with **Postgres-native backups** (pgBackRest, WAL archiving to
+> GCS, point-in-time recovery), on the grounds that the only local state worth protecting is a
+> Postgres data directory. The evaluation agrees and recommends it: see
+> **`design/2026-09-12-postgres-native-backups.md`**, whose §6 lists exactly what it deletes and
+> whose §7 holds the five decisions it needs. **Do not run Step 4 or Step 9 until that is settled** —
+> Steps 0–3 and 5–8 are unaffected.
 > Commands on the box run as root (`sudo -i`). Commands marked **💻 laptop** run on your own
 > machine, where `gcloud` is logged in.
 
