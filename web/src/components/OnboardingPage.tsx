@@ -30,6 +30,7 @@ import {
 import AgentChat from './AgentChat.js'
 import CharterPanel from './CharterPanel.js'
 import RunArchitectControl from './RunArchitectControl.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import useCharter from '../useCharter.js'
 import type { ConfigApiOptions } from '../configApi.js'
 
@@ -47,6 +48,10 @@ export interface OnboardingPageProps extends ConfigApiOptions {
   sessionError?: string | null
   /** Poll interval for the charter read; forwarded to useCharter. */
   refreshMs?: number
+  /** Scopes the "About this screen" disclosure's dismissal (C2). The project
+   *  being onboarded — not yet in `apiOptions`, since this screen predates a
+   *  usable project token for most of its life. */
+  projectId?: string
 }
 
 /** The waiting rail: a spinner and, more importantly, a reason. */
@@ -66,6 +71,7 @@ export default function OnboardingPage({
   sessionId,
   sessionError = null,
   refreshMs,
+  projectId = '',
   ...apiOptions
 }: OnboardingPageProps) {
   const charter = useCharter({ ...apiOptions, session: sessionId, refreshMs })
@@ -122,6 +128,8 @@ export default function OnboardingPage({
               written down. Nothing exists until you approve it.
             </Typography>
           </Box>
+
+          <AboutThisScreen surface="onboarding" projectId={projectId} />
 
           {charter.error !== null && (
             <Alert severity="error" data-testid="onboarding-charter-error">

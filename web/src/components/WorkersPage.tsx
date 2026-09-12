@@ -21,6 +21,7 @@ import WorkerPromptVersion, { restoreRationale } from './WorkerPromptVersion.js'
 import WorkerChatPanel from './WorkerChatPanel.js'
 import TopologyOnboarding from './TopologyOnboarding.js'
 import BriefingPreview from './BriefingPreview.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 /** Sentinel for "the create-a-worker form is open". Not a legal worker name
  *  (names are kebab-case), so it can never collide with a real selection. */
@@ -182,6 +183,7 @@ export default function WorkersPage({
   return (
     <Stack direction="row" sx={{ height: '100%', minHeight: 0 }}>
       <Box sx={{ width: 280, flexShrink: 0, borderRight: 1, borderColor: 'divider', overflowY: 'auto' }}>
+        <AboutThisScreen surface="workers" projectId={projectId} sx={{ px: 2, pt: 2 }} />
         <WorkerList
           workers={workers}
           selected={selected}
@@ -261,6 +263,7 @@ export default function WorkersPage({
             saving={saving}
             imageOptions={images}
             projectBaseImage={projectBaseImage}
+            projectId={projectId}
           />
         ) : (
           <>
@@ -296,6 +299,7 @@ export default function WorkersPage({
                   saving={saving}
                   imageOptions={images}
                   projectBaseImage={projectBaseImage}
+                  projectId={projectId}
                 />
               ))}
             {/* The briefing preview sits under the Configuration form because
@@ -318,6 +322,7 @@ export default function WorkersPage({
               <WorkerTriggers
                 workerName={current.name}
                 workerOptions={workers.map((w) => w.name)}
+                projectId={projectId}
                 {...apiOptions}
               />
             )}

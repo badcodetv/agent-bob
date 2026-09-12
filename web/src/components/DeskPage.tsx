@@ -33,6 +33,7 @@ import { ageEscalation, coarseAgeLabel } from '../useElapsedTicker.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 export interface DeskPageProps extends UseDeskOptions {
   /**
@@ -168,6 +169,8 @@ export default function DeskPage({
           )}
         </Stack>
       </Stack>
+
+      <AboutThisScreen surface="desk" projectId={projectId} />
 
       {error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>

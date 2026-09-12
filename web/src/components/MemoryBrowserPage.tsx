@@ -44,6 +44,7 @@ import {
 import useMemories, { type UseMemoriesOptions } from '../useMemories.js'
 import { useConfigApi, type ConfigApiOptions } from '../configApi.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import { highlightSx, highlightMarker, NEW_MARKER_LABEL } from '../feedhighlight.js'
 import {
   buildMemorySelector,
@@ -73,6 +74,8 @@ export interface MemoryBrowserPageProps extends UseMemoriesOptions {
   /** Override the write route (default MEMORY_ENDPOINTS.list — same path,
    *  POST). */
   createEndpoint?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 /** Identifiers are mono, content is prose (§3.4). */
@@ -82,6 +85,7 @@ export default function MemoryBrowserPage({
   onOpenSession,
   title = 'Memory',
   createEndpoint = MEMORY_ENDPOINTS.list,
+  projectId = '',
   ...options
 }: MemoryBrowserPageProps) {
   const { memories, selector, query, search, loading, selectorError, error, available, reload } =
@@ -151,6 +155,8 @@ export default function MemoryBrowserPage({
           {title}
         </Typography>
       )}
+
+      <AboutThisScreen surface="memory" projectId={projectId} />
 
       <Stack direction="row" spacing={1} sx={{ mb: 1 }} alignItems="flex-start">
         <TextField

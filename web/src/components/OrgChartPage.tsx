@@ -74,6 +74,7 @@ import useEventsOverview from '../useEvents.js'
 import useSchedules from '../useSchedules.js'
 import useSubscriptions from '../useSubscriptions.js'
 import EmitEventControl from './EmitEventControl.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import useWorkers from '../useWorkers.js'
 import { newSubscriptionDraft } from '../subscriptions.js'
 import { FROZEN_SENTENCE, type Worker } from '../workers.js'
@@ -400,6 +401,8 @@ export default function OrgChartPage({
           workers, the events that wake them, and the clocks that fire them
         </Typography>
       </Stack>
+
+      <AboutThisScreen surface="chart" projectId={projectId ?? ''} />
 
       {error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>
