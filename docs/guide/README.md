@@ -50,8 +50,14 @@ each page's own "Next" line is the path.
 ## The shape of every page
 
 Every page follows the same skeleton, in this order, so a reader learns to skim once and skims
-everywhere. Target **150–400 words**, hard cap **450** (`wc -w <page>.md`). No page exceeds one
+everywhere. Target **150–400 words**, hard cap **500** (`wc -w <page>.md`). No page exceeds one
 screen of prose plus one example.
+
+> The cap was **450** until 2026-09-12, and was set while every page's example was a
+> one-line placeholder. Real captured output — an actual worker prompt, an actual ask
+> message — costs 30–60 words, which put four finished pages at 452–475. Getting them
+> under 450 meant truncating a verbatim quote, which this file forbids two sections
+> below, so the cap moved instead of the quotes (DI35).
 
 1. **The one line and In the console**: what this is, in a sentence a person could repeat, and
    where it lives in the console with what the button says. These two together are the page's
