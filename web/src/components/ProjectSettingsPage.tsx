@@ -11,6 +11,20 @@
 // "0 = use the default" is the one thing about this screen a human can get
 // expensively wrong.
 //
+// **G5 (A5):** the screen is split into two tiers. "You may want to change
+// these" holds the project system prompt (the "background prose" §1 refers
+// to — `project_background` in the design doc never shipped as its own
+// field, `system_prompt` is the field that plays that role), the
+// project-wide briefing, and the budget panel. "Advanced" holds everything
+// else — base image, both JSON editors, the git projection fields, and the
+// remaining numeric caps (`daily_tokens_soft`/`daily_tokens_hard` moved out
+// of that list: `BudgetPanel` is now the one editor for those two fields,
+// keyed by `whoami.operator` rather than this page's own gate) — collapsed
+// by default, its open/closed state sticky in `localStorage` beside the
+// `navReveal` keys (`useNavReveal.ts`'s `navRevealKey`). Save/Discard and the
+// rationale field stay outside both tiers: they apply to the whole draft
+// regardless of which tier a human actually touched.
+//
 // Router-free by construction: it renders where the host puts it and owns no
 // URL. Mount it inside <AgentChatProvider> to inherit apiBaseUrl + auth, or
 // pass them as props to use it standalone.
@@ -23,6 +37,7 @@ import {
   Divider,
   FormHelperText,
   IconButton,
+  Link,
   Stack,
   TextField,
   Typography,
@@ -46,11 +61,54 @@ import {
 } from '../projectSettings.js'
 import JsonObjectEditor from './JsonObjectEditor.js'
 import AboutThisScreen from './AboutThisScreen.js'
+import BudgetPanel from './BudgetPanel.js'
+import useWhoami from '../whoami.js'
+
+/** `localStorage` key for whether a project's Advanced tier is expanded —
+ *  same shape as `useNavReveal.ts`'s `navRevealKey`, so the two sticky
+ *  settings this console keeps per-project live side by side. */
+export function advancedExpandedKey(projectId: string): string {
+  return `agentkit.settings.advancedExpanded.${projectId}`
+}
+
+/** Read the sticky Advanced state. Unreadable storage and rubbish both mean
+ *  "collapsed" — the section's default. */
+function readAdvancedExpanded(projectId: string): boolean {
+  try {
+    return window.localStorage.getItem(advancedExpandedKey(projectId)) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Write it. A storage that refuses is not an error the operator needs. */
+function writeAdvancedExpanded(projectId: string, expanded: boolean): void {
+  try {
+    window.localStorage.setItem(advancedExpandedKey(projectId), expanded ? '1' : '0')
+  } catch {
+    /* private mode, quota, SSR — Advanced simply re-collapses next time */
+  }
+}
+
+/** The numeric settings shown in Advanced's "Caps" block. The two token
+ *  budgets are excluded: `BudgetPanel`, mounted in the tier above, is now the
+ *  one editor for those two fields. */
+const ADVANCED_NUMERICS = PROJECT_SETTING_NUMERICS.filter(
+  (spec) => spec.key !== 'daily_tokens_soft' && spec.key !== 'daily_tokens_hard',
+)
 
 export interface ProjectSettingsPageProps extends UseProjectSettingsOptions {
   /** Heading text. Pass '' to render no heading (host supplies its own). */
   title?: string
-  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  /**
+   * Project id. Two things key off it, both added in the same wave and both
+   * per-project sticky state in `localStorage`: the "About this screen"
+   * disclosure's dismissal (C2) and the Advanced tier's expanded state (G5,
+   * `advancedExpandedKey`). Optional, because this is a published component
+   * and a host that never passes one must still render: the fallback is a
+   * single shared key rather than a per-project one, the same degradation
+   * `readRevealed`'s caller would hit if it forgot to pass a project id.
+   */
   projectId?: string
 }
 
@@ -75,6 +133,35 @@ export default function ProjectSettingsPage({
   })
   const projection = useGitProjectionStatus(options)
   refreshProjection.current = projection.refresh
+
+  // `max_concurrent_jobs` is the third field the server's operator guard
+  // covers (go/httpapi/project_settings.go:96-106, alongside the two token
+  // budgets `BudgetPanel` now owns) — a non-operator's PUT differing from the
+  // stored row on ANY of the three is refused whole-object. Read on the same
+  // fail-closed default as everywhere else: an unresolved or failed whoami
+  // read means "not the operator", never "assume yes".
+  const { whoami } = useWhoami(options)
+
+  // Render-phase re-read on a project change — the pattern `useNavReveal`
+  // uses for the same reason: switching project must not render one frame of
+  // another project's Advanced state.
+  const [advanced, setAdvanced] = useState(() => ({
+    key: projectId,
+    expanded: typeof window === 'undefined' ? false : readAdvancedExpanded(projectId),
+  }))
+  if (advanced.key !== projectId) {
+    setAdvanced({
+      key: projectId,
+      expanded: typeof window === 'undefined' ? false : readAdvancedExpanded(projectId),
+    })
+  }
+  const toggleAdvanced = useCallback(() => {
+    setAdvanced((prev) => {
+      const expanded = !prev.expanded
+      writeAdvancedExpanded(prev.key, expanded)
+      return { key: prev.key, expanded }
+    })
+  }, [])
 
   if (s.loading) {
     return (
@@ -101,19 +188,11 @@ export default function ProjectSettingsPage({
       )}
 
       <Stack spacing={3}>
-        <Box>
-          <TextField
-            label="Base image"
-            fullWidth
-            value={s.draft.base_image}
-            onChange={(e) => s.update({ base_image: e.target.value })}
-            placeholder="(unset — the global default image)"
-          />
-          <FormHelperText>
-            Default launch image for every session in this project. A worker&rsquo;s own image
-            overrides it; leaving it empty falls back to the global default.
-          </FormHelperText>
-        </Box>
+        {/* Tier 1 (G5): "You may want to change these" — background prose,
+            the project-wide briefing, and the budget panel. */}
+        <Typography variant="overline" color="text.secondary">
+          You may want to change these
+        </Typography>
 
         <Box>
           <TextField
@@ -131,78 +210,126 @@ export default function ProjectSettingsPage({
           </FormHelperText>
         </Box>
 
-        <JsonObjectEditor
-          id="project-mcp-config"
-          label="MCP servers (project-wide)"
-          value={s.mcpText}
-          onChange={s.setMcpText}
-          error={s.mcpError}
-          helperText={
-            'map of name → server config, granted to every worker in the project. ' +
-            'Secrets belong in ${VAR} references, never in this file.'
-          }
-        />
-
-        <JsonObjectEditor
-          id="project-attention-channel"
-          label="Attention channel"
-          value={s.attentionText}
-          onChange={s.setAttentionText}
-          error={s.attentionError}
-          rows={4}
-          helperText={
-            'Where request_human_attention notifications go, e.g. ' +
-            '{"kind":"webhook","url":"https://..."}. Unset: the tool still succeeds and only logs.'
-          }
-        />
-
-        <Divider />
-
-        <GitProjectionFields draft={s.draft} onChange={s.update} />
-
-        <Divider />
-
         <ProjectBriefing
           entries={s.draft.briefing}
           onChange={(briefing) => s.update({ briefing })}
         />
 
-        {/* A deployment with no projection route mounted gets no panel at
-            all, rather than an error about a feature it does not have. */}
-        {!projection.unwired && (
-          <>
-            <Divider />
-            <GitProjectionPanel
-              status={projection.status}
-              loading={projection.loading}
-              error={projection.error}
-              onRefresh={projection.refresh}
-            />
-          </>
-        )}
+        <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
+          <BudgetPanel settings={s} apiBaseUrl={options.apiBaseUrl} getAuthToken={options.getAuthToken} />
+        </Box>
 
         <Divider />
 
+        {/* Tier 2 (G5): "Advanced" — collapsed by default, sticky per project. */}
         <Box>
-          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-            Budgets and caps
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Both token budgets exempt interactive chat: a blown budget never locks you out of
-            talking to your workers.
-          </Typography>
-          <Stack spacing={2.5}>
-            {PROJECT_SETTING_NUMERICS.map((spec) => (
-              <NumericSetting
-                key={spec.key}
-                spec={spec}
-                value={s.draft[spec.key]}
-                error={s.fieldErrors[spec.key] ?? null}
-                onChange={(v) => s.update({ [spec.key]: v })}
-              />
-            ))}
-          </Stack>
+          <Link
+            component="button"
+            type="button"
+            variant="subtitle2"
+            underline="hover"
+            onClick={toggleAdvanced}
+            aria-expanded={advanced.expanded}
+          >
+            Advanced {advanced.expanded ? '▾' : '▸'}
+          </Link>
         </Box>
+
+        {advanced.expanded && (
+          <Stack spacing={3} data-testid="advanced-settings">
+            <Box>
+              <TextField
+                label="Base image"
+                fullWidth
+                value={s.draft.base_image}
+                onChange={(e) => s.update({ base_image: e.target.value })}
+                placeholder="(unset — the global default image)"
+              />
+              <FormHelperText>
+                Default launch image for every session in this project. A worker&rsquo;s own image
+                overrides it; leaving it empty falls back to the global default.
+              </FormHelperText>
+            </Box>
+
+            <JsonObjectEditor
+              id="project-mcp-config"
+              label="MCP servers (project-wide)"
+              value={s.mcpText}
+              onChange={s.setMcpText}
+              error={s.mcpError}
+              helperText={
+                'map of name → server config, granted to every worker in the project. ' +
+                'Secrets belong in ${VAR} references, never in this file.'
+              }
+            />
+
+            <JsonObjectEditor
+              id="project-attention-channel"
+              label="Attention channel"
+              value={s.attentionText}
+              onChange={s.setAttentionText}
+              error={s.attentionError}
+              rows={4}
+              helperText={
+                'Where request_human_attention notifications go, e.g. ' +
+                '{"kind":"webhook","url":"https://..."}. Unset: the tool still succeeds and only logs.'
+              }
+            />
+
+            <Divider />
+
+            <GitProjectionFields draft={s.draft} onChange={s.update} />
+
+            {/* A deployment with no projection route mounted gets no panel at
+                all, rather than an error about a feature it does not have. */}
+            {!projection.unwired && (
+              <>
+                <Divider />
+                <GitProjectionPanel
+                  status={projection.status}
+                  loading={projection.loading}
+                  error={projection.error}
+                  onRefresh={projection.refresh}
+                />
+              </>
+            )}
+
+            <Divider />
+
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                Caps
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                The daily token budgets moved to the panel above — this is the rest: job
+                concurrency and two housekeeping limits.
+              </Typography>
+              <Stack spacing={2.5}>
+                {ADVANCED_NUMERICS.map((spec) =>
+                  // `max_concurrent_jobs` is operator-gated at the wire same
+                  // as the two token budgets (project_settings.go:96-106) —
+                  // an editable control here for a non-operator would 403 the
+                  // WHOLE whole-object PUT the moment they touched it,
+                  // discarding every other edit in the draft on a save that
+                  // never named which field did it.
+                  spec.key === 'max_concurrent_jobs' && !whoami.operator ? (
+                    <ReadOnlyNumericSetting key={spec.key} spec={spec} value={s.draft[spec.key]} />
+                  ) : (
+                    <NumericSetting
+                      key={spec.key}
+                      spec={spec}
+                      value={s.draft[spec.key]}
+                      error={s.fieldErrors[spec.key] ?? null}
+                      onChange={(v) => s.update({ [spec.key]: v })}
+                    />
+                  ),
+                )}
+              </Stack>
+            </Box>
+          </Stack>
+        )}
+
+        <Divider />
 
         <Box>
           <TextField
@@ -334,6 +461,22 @@ function NumericSetting({
       <FormHelperText error={error !== null}>
         {error !== null ? error : describeNumericSetting(spec, value)}
       </FormHelperText>
+    </Box>
+  )
+}
+
+/** The read-only shape of a numeric setting the server operator-gates
+ *  (right now: `max_concurrent_jobs`) — same label and value, no input, and
+ *  the fixed sentence `BudgetPanel` already uses for its own gated fields. */
+function ReadOnlyNumericSetting({ spec, value }: { spec: NumericSettingSpec; value: number }) {
+  return (
+    <Box>
+      <Typography variant="body2">
+        {spec.label}: {value} {spec.unit}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        Only the operator can change this.
+      </Typography>
     </Box>
   )
 }

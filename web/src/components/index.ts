@@ -230,3 +230,7 @@ export type { AboutThisScreenProps } from './AboutThisScreen.js'
 export { GuideProvider, useGuideParagraph } from '../guide/GuideProvider.js'
 
 export type { GuideProviderProps, GuideParagraph, GuideParagraphMap } from '../guide/GuideProvider.js'
+
+export { default as BudgetPanel } from './BudgetPanel.js'
+
+export type { BudgetPanelProps } from './BudgetPanel.js'
