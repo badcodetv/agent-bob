@@ -210,6 +210,10 @@ For information — none of it needs you until the last line.
 6. **You** add the DNS record and test the chat at `https://bob.badcode.tv`.
 7. A real timed restore, proving a backup comes back **to a chosen moment** — then that drill runs
    itself weekly.
+8. Two checks that can only be done on a real box, before anyone is invited: that the daily spend
+   brake actually **fires** rather than merely being configured, and that **adding a friend to the
+   allowlist works without restarting Bob** (`docs/ops.md` steps 11f and 11g). The second one is a
+   ticket thread 02 could not close offline.
 
 ---
 

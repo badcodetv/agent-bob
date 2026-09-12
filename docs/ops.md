@@ -1170,6 +1170,79 @@ claim as "it fires." Do this once, before the first real invite, on a project no
 ✅ **Done when:** a delivery for the throwaway project actually shows `pending` while the hard
 limit is in force, not just a number sitting in Settings.
 
+### 11g. Prove you can add a friend without restarting Bob (A6)
+
+Thread 02 left ticket **A6** — *"the project map reloads without a restart"* — open on purpose,
+because it **cannot be proven offline**: the e2e stack supplies the map as **inline JSON**, and
+inline wins over the file (`go/cmd/agentd/googleauth.go:249-252`), so the mounted-file watch path
+is never exercised there. **The box is the only place this claim can be tested.** Do it once,
+before you invite anyone.
+
+🔴 **First, the trap that makes this worth testing at all.** `AGENTKIT_PROJECT_MAP` (inline JSON)
+**silently wins** over `AGENTKIT_PROJECT_MAP_FILE`, and `docker-compose.yml:168` passes it through
+from `.env`. So a leftover inline value in `.env` disables the whole reload mechanism **with no
+error at all** — adding a friend would then need a restart, and you would only find out while
+someone waited. Check it is empty:
+
+```bash
+grep -n '^AGENTKIT_PROJECT_MAP=' /srv/apps/bob/src/.env   # must print NOTHING
+```
+
+Then confirm from the boot log that the file is what got loaded:
+
+```bash
+cd /srv/apps/bob
+docker compose --project-directory src -f src/docker-compose.yml -f compose.ovh.yml \
+  logs agentd | grep -i 'project map'
+# want: "[agentd] project map: 1 mapped account(s), N configured project(s)"
+```
+
+**The test.** Add a second email to the mounted file, wait, and log in as it — no restart:
+
+```bash
+# 1. Add someone. This file is the allowlist; nothing else needs touching.
+cat > /srv/apps/bob/secrets/projects.json <<'EOF'
+{"kaiyadavenport@gmail.com":["*"],"friend@example.com":["testproject"]}
+EOF
+
+# 2. Either wait up to 60s for the timer (AGENTKIT_PROJECT_MAP_RELOAD, default 60s)…
+#    …or send SIGHUP for an immediate reload:
+docker compose --project-directory src -f src/docker-compose.yml -f compose.ovh.yml \
+  kill -s SIGHUP agentd
+
+# 3. Watch it happen. SIGHUP logs first, then the reload result.
+docker compose --project-directory src -f src/docker-compose.yml -f compose.ovh.yml \
+  logs --tail=20 agentd | grep -i 'project map'
+```
+
+You are looking for these two lines:
+
+```
+[agentd] project map: SIGHUP received, reloading /secrets/projects.json
+[agentd] project map reloaded from /secrets/projects.json: 2 mapped account(s), 1 configured project(s)
+```
+
+**`2 mapped account(s)` is the proof** — the count went up without a restart.
+
+**Then the part that actually matters:** have that second account log in at
+`https://bob.badcode.tv` and reach its project. A reload that updates a counter but not the login
+path would be a false pass.
+
+⚠️ **A malformed file changes nothing and keeps serving the old map**
+(`googleauth.go:395-400`, *"keeping the previous map"*). That is the safe behaviour, but it means
+**a typo looks like "the reload didn't happen"** rather than like an error. If the count doesn't
+move, check the log for `keeping the previous map` before assuming the mechanism is broken.
+
+✅ **Done when:**
+- `AGENTKIT_PROJECT_MAP=` is absent from `.env`;
+- the reload log line shows the account count going up;
+- the new account logs in successfully, **with no restart and no downtime**;
+- **tell thread 02 so it can tick A6.**
+
+Note: `api_key_env` and `allowed_origins` live in the same file's `projects` section, so a
+successful reload also refreshes the API-key index (`main.go:648-649`). Adding an embedding
+application's key is the same edit, with the same no-restart property.
+
 ## Step 12 — DNS and your manual test (15 min)
 
 1. At your DNS provider for `badcode.tv`, add an **A record: `bob` → the box's public IP**.
