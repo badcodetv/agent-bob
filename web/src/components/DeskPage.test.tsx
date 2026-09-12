@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AgentChatProvider } from '../AgentChatProvider.js'
 import DeskPage from './DeskPage.js'
 import { deskLastSeenKey, readDeskLastSeen, writeDeskLastSeen } from '../useDesk.js'
+import { firstsSeenKey, writeFirstsSeen } from '../useFirsts.js'
+import { GuideProvider, type GuideParagraphMap } from '../guide/GuideProvider.js'
 
 // A moment safely in the past: `markSeen` stamps the real wall clock, and a
 // fixture newer than today would never fall behind the mark.
@@ -24,6 +26,7 @@ let events: Record<string, unknown>[]
 let schedules: Record<string, unknown>[]
 let configEvents: Record<string, unknown>[]
 let attentionRequests: Record<string, unknown>[]
+let memories: Record<string, unknown>[]
 let attentionStatus: number
 let workersStatus: number
 let deliveriesStatus: number
@@ -133,6 +136,9 @@ beforeEach(() => {
       timed_out_at: 0,
     },
   ]
+  // Empty by default: most tests here predate `first-memory` and must see no
+  // change in behaviour from a route they never asked about.
+  memories = []
   attentionStatus = 200
   workersStatus = 200
   deliveriesStatus = 200
@@ -175,6 +181,7 @@ beforeEach(() => {
       }
       return json({ deliveries })
     }
+    if (u.includes('/agent/memories')) return json({ memories })
     if (u.includes('/agent/subscriptions')) return json({ subscriptions })
     if (u.includes('/agent/schedules')) return json({ schedules })
     if (u.includes('/agent/workers')) {
@@ -199,6 +206,21 @@ function renderDesk(props: Partial<React.ComponentProps<typeof DeskPage>> = {}) 
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
       <DeskPage projectId="acme" nowSeconds={NOW} {...props} />
     </AgentChatProvider>,
+  )
+}
+
+/** With a `GuideProvider` mounted above the Desk — the state in which a
+ *  first-narration line gains its "Read more in the guide →" link. */
+function renderDeskWithGuide(
+  props: Partial<React.ComponentProps<typeof DeskPage>> = {},
+  paragraphs: GuideParagraphMap = { desk: { slug: 'the-desk', text: 'The Desk answers three questions.' } },
+) {
+  return render(
+    <GuideProvider paragraphs={paragraphs}>
+      <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+        <DeskPage projectId="acme" nowSeconds={NOW} {...props} />
+      </AgentChatProvider>
+    </GuideProvider>,
   )
 }
 
@@ -501,3 +523,104 @@ describe('liveness', () => {
     expect(screen.getByText('waiting over 1h')).toBeInTheDocument()
   })
 })
+
+describe('firsts — the Desk narrates them once (design §3 G4)', () => {
+  it('narrates the first rewrite on its change row, and the first ask on its row', async () => {
+    renderDesk()
+    const changes = await screen.findByRole('region', { name: 'Changes' })
+    expect(
+      within(changes).getByTestId('first-first-rewrite'),
+    ).toHaveTextContent("This is the project's first rewrite.")
+
+    const asks = await screen.findByRole('region', { name: 'Asks' })
+    expect(within(asks).getByTestId('first-first-ask')).toHaveTextContent(
+      "This is the project's first ask.",
+    )
+  })
+
+  it('links to the guide when one is mounted, and omits the link when it is not', async () => {
+    const plainRender = renderDesk()
+    const plain = await screen.findByTestId('first-first-rewrite')
+    expect(within(plain).queryByRole('link')).toBeNull()
+    // A real fresh visit, not a second copy layered into the same DOM — the
+    // seen-set from the first render must not carry over either, so this is
+    // a different project.
+    plainRender.unmount()
+
+    renderDeskWithGuide({ projectId: 'acme-2' })
+    const linked = await screen.findByTestId('first-first-rewrite')
+    const link = within(linked).getByRole('link', { name: /Read more in the guide/ })
+    expect(link).toHaveAttribute('href', '#/guide/the-architect')
+  })
+
+  it('narrates the first worker on the worker_create row, and the sentence is written once (not in JSX)', async () => {
+    configEvents = [
+      {
+        id: 'w1',
+        project: 'acme',
+        actor_worker: '',
+        actor_session: '',
+        action: 'worker_create',
+        payload: { name: 'newsletter-writer' },
+        rationale: '',
+        created_at: NOW_MS - 5000,
+      },
+    ]
+    renderDesk()
+    const first = await screen.findByTestId('first-first-worker')
+    expect(first).toHaveTextContent(
+      "This is the project's first worker. A worker is a set of instructions and a trigger",
+    )
+  })
+
+  it('narrates first-memory even though a memory write is not a config event', async () => {
+    memories = [
+      {
+        id: 'm1',
+        project: 'acme',
+        labels: { kind: 'note' },
+        snippet: 'Ellen prefers the newsletter to go out on Fridays.',
+        score: 0,
+        created_by_worker: 'newsletter-writer',
+        created_by_session: 'sess-1',
+        created_at: NOW_MS - 2000,
+      },
+    ]
+    renderDesk()
+    const first = await screen.findByTestId('first-first-memory')
+    expect(first).toHaveTextContent("This is the project's first memory.")
+    // No checklist, no count.
+    expect(screen.queryByText(/\d\s*of\s*7/i)).toBeNull()
+  })
+
+  it('never narrates a kind twice per project: a seen-set from a previous visit silences it', async () => {
+    writeFirstsSeen('acme', ['first-rewrite', 'first-ask'])
+    renderDesk()
+    await screen.findByText('email-reviewer rewrote email-answerer')
+    expect(screen.queryByTestId('first-first-rewrite')).toBeNull()
+    expect(screen.queryByTestId('first-first-ask')).toBeNull()
+  })
+
+  it('does not reset the seen-set when the worker that earned it is gone', async () => {
+    // First visit: the fixture's rewrite narrates, and the effect persists
+    // "first-rewrite" as seen.
+    const first = renderDesk()
+    await screen.findByTestId('first-first-rewrite')
+    await waitFor(() => expect(readWatermarkOf('agentkit.firsts.acme')).toContain('first-rewrite'))
+    first.unmount()
+
+    // A second, later visit (a genuinely fresh mount — the worker and its
+    // whole history are gone, as if deleted): an empty changelog. The
+    // sentence must not return just because there is nothing left to
+    // contradict it.
+    configEvents = []
+    renderDesk()
+    await screen.findByRole('region', { name: 'Changes' })
+    expect(screen.queryByTestId('first-first-rewrite')).toBeNull()
+  })
+})
+
+function readWatermarkOf(key: string): string[] {
+  const raw = window.localStorage.getItem(key)
+  return raw ? (JSON.parse(raw) as string[]) : []
+}

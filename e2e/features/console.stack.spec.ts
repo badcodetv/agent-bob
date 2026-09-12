@@ -517,4 +517,45 @@ test.describe('operator console', () => {
     await page.getByTestId('about-restore-desk').click()
     await expect(page.getByTestId('about-toggle-desk')).toBeVisible()
   })
+
+  // ── C5: the Desk narrates firsts (design §3 G4) ────────────────────────────
+  test('the Desk narrates the project\'s first worker once, and not again after a reload', async ({
+    page,
+    request,
+  }) => {
+    const project = await openFreshProject(page, 'e2e-cx-firsts')
+    const api = await projectClient(request, project)
+
+    await gotoView(page, 'desk')
+    await expect(page.getByText('This project has no workers yet')).toBeVisible({ timeout: 30_000 })
+
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
+    await page.reload()
+    await gotoView(page, 'desk')
+
+    // The row's own sentence (firsts.ts), plus a real link into the guide —
+    // not a checklist, not a count.
+    const first = page.getByTestId('first-first-worker')
+    await expect(first).toBeVisible({ timeout: 30_000 })
+    await expect(first).toContainText("This is the project's first worker.")
+    await expect(page.getByText(/\d\s*of\s*7/i)).toHaveCount(0)
+    const guideLink = first.getByRole('link', { name: /Read more in the guide/ })
+    await expect(guideLink).toHaveAttribute('href', '#/guide/a-workers-instructions')
+
+    // Reload: the same kind must not narrate a second time, even though the
+    // worker (and its `worker_create` changelog row) is still right there.
+    await page.reload()
+    await gotoView(page, 'desk')
+    await expect(page.getByTestId('nav-workers')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('you hired cx-scribe', { exact: false })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('first-first-worker')).toHaveCount(0)
+
+    // Deleting the worker does not bring "first worker" back either — the
+    // milestone is the project's, not the worker's.
+    await api.deleteWorker(WRITER)
+    await page.reload()
+    await gotoView(page, 'desk')
+    await expect(page.getByTestId('nav-desk')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('first-first-worker')).toHaveCount(0)
+  })
 })
