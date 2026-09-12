@@ -721,17 +721,25 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 
 ### Stream D — integration
 
-### D1: merge and the full gates   [Status: todo | Model: orchestrator]
+### D1: merge and the full gates   [Status: done | Model: orchestrator]
 - **Scope:** Merge each `fleet/*` branch into `main` in dependency order (A3 and A4 before A5;
   C1 before C2 and C5), resolving conflicts in `main.go`, `App.tsx`, `DeskPage.tsx`,
   `ProjectSettingsPage.tsx` by hand. Run the three gates from §0 plus `bash web/scripts/verify-package.sh`
   and `docker build -f deploy/web.Dockerfile .`. Commit `docs/guide/` once B8 has passed.
 - **Validation:** all gates green on `main`.
 - **Depends on:** the stream's tickets
-- [ ] done
-- Notes:
+- [x] done
+- Notes: (2026-09-12) Done incrementally rather than as one batch at the end: every ticket merged in
+  dependency order with the gates re-run on the merged tree immediately after, so a failure could
+  only ever belong to the merge just made. Final state of `main`: `go build`/`go vet` clean;
+  `go test ./...` 34 packages ok **and separately green with a live Postgres attached** (throwaway
+  `pgvector:pg16` on :55432 — never the stack's shared database); `web` typecheck clean,
+  `vitest --testTimeout=20000` **1711/1711 in 93 files**; `web/scripts/verify-package.sh` PASS;
+  `examples/web` build and typecheck clean at 18 guide pages; `docker build -f
+  deploy/web.Dockerfile` EXIT=0. Conflicts resolved by hand in `App.tsx` (twice), `DeskPage.tsx`,
+  `ProjectSettingsPage.tsx` and `components/index.ts` — DI13 is the one that mattered.
 
-### D2: the stack e2e for everything new   [Status: todo | Model: sonnet]
+### D2: the stack e2e for everything new   [Status: DONE — 5 defects found and fixed | Model: orchestrator]
 - **Scope:** `./e2e/run-stack-e2e.sh up` (mock), then `./e2e/run-stack-e2e.sh test` for:
   `revert`, `onboarding`, `budget`, `memory-write`, `console` (the appended assertions), and the
   whole existing suite once. Fix what fails **inside the ticket that owns it** (append to its
@@ -740,8 +748,29 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
   a whole host").
 - **Validation:** the run's summary line, pasted into Notes; `e2e/stack-e2e-logs-mock.txt` captured.
 - **Depends on:** D1
-- [ ] done
-- Notes: (2026-09-12, orchestrator, pre-flight only — the stack has NOT been run) Two things done
+- [x] done
+- Notes: **(2026-09-12) RUN, and it earned its place: five real defects every offline gate missed —
+  DI29 the worst, DI27/DI28/DI30/DI31 the rest, fixed in `1a60902` and `3649e3e`.** Mock mode was
+  proved from the boot log before anything ran (`[agentd] ANTHROPIC_API_KEY unset → MOCK model
+  proxy`) and the two lines that would mean billing — `real model proxy →`, `subscription mode →` —
+  were absent. That mattered: this checkout has a REAL `.env` (108-char `ANTHROPIC_API_KEY` **and**
+  a real `CLAUDE_CODE_OAUTH_TOKEN`), and the only reason a stack run did not bill is that
+  `e2e/run-stack-e2e.sh:44-45` blanks both and `docker-compose.stack-e2e.yml:36-43` forces the local
+  backends with no `override.yml` — README-stack's traps (a) and (b) are closed on that path by
+  construction, not by anyone's discipline.
+  **Targeted specs, all green:** `revert` 1/1, `budget` 2/2, `memory-write` 2/2, `console` 8/8, and
+  `onboarding` 1/1 — the last needs its own invocation, `--mock-script
+  e2e/mock-scripts/onboarding.json`, or it SKIPS, and A2's entire scenario lives inside it, so A2
+  was unproven until that run.
+  **Whole suite:** `78 passed, 1 failed, 39 skipped (8.9m)`. The 39 skip by design (each wants a
+  particular mock script). The 1 is DI32, load flake, proven by a 9.8s isolated pass.
+  `--trace on` is what made three of the five diagnosable: the trace's `resources/` holds request
+  and response bodies by sha, which is how the budget defect was pinned on the spec rather than the
+  server — the PUT carried `daily_tokens_hard: 5000` and the 200 echoed it back, so the product was
+  right and the poll was reading a different project.
+  Earlier pre-flight, still true: `e2e/` has no typecheck, so `playwright --list` is how the specs
+  get compiled — 115 tests in 21 files parsed, every selector in A2's new scenario verified.
+  **Superseded pre-flight note:** Two things done
   ahead of D2 so it does not burn a whole stack cycle on them. **(1) Every spec parses.** `e2e/` has
   no `typecheck` script and no `tsconfig.json`, so nothing had ever compiled the specs A2 and C4
   wrote; `npx playwright test --config playwright.stack.config.ts --list` does it without a stack
@@ -828,3 +857,17 @@ tense. No em-dashes in prose. Write only your own files; do not touch another ti
 **24. `first-memory` needed a second fetch, and its timestamp is the newest memory, not the earliest.** (C5, 2026-09-12) Memory writes are not config events — confirmed in `go/agentdb/memories.go` and `go/cmd/agentd/mcpserver.go`, neither emits one — so the fold has no route to them and `useDesk` was not in the ticket's file list. C5 merged a synthetic record client-side from `useMemories({limit:1})` in `DeskPage.tsx`. The read route returns newest-first, so on a project that already has memory history the synthetic record carries the *newest* row's timestamp, not the first. Harmless where it matters (a brand-new project has one row, which is both) and self-limiting (once the kind fires it is locked forever, so the cost is firing on the wrong visit, never twice). The clean fix is a route into the fold, which means touching `useDesk`.
 
 **25. `first-ask` narrates the earliest still-OPEN ask, not the earliest ask ever.** (C5, 2026-09-12) Deliberate and documented at `web/src/desk.ts:484-498`: an answered ask has no row left on the Desk to carry the sentence, so the record it narrates on must still be open. The residue is retrofit-only — switch this on for a project whose true first ask was already answered and whatever is oldest-and-still-open gets labelled "the first ask". Nothing to do for a new project, which is what this wave is for.
+
+**26. Two client helpers, one word apart in meaning, and the wrong one fails silently.** (D2, 2026-09-12) `projectClient(request, project)` binds to the project you name; `newProjectClient(request, prefix)` takes a **prefix** and mints a brand-new project of its own (`e2e/helpers/api.ts:803-813` vs `:821-829`). A5's `budget.stack.spec.ts` passed the page's project into `newProjectClient`, so it polled a different, empty project — where `GET /agent/project-settings` answers with `DefaultProjectSettings`, i.e. `0/0`, forever. Nothing errors, because the wrong project is a *valid* project and its settings read back as plausible zeros. What settled it was the Playwright trace's stored bodies: the PUT sent `daily_tokens_hard: 5000` and the 200 echoed it back for `e2e-budget-mtycxcve-sn0wz`, proving the product right and the spec wrong. Worth renaming one of the two, or giving `newProjectClient` an options object; a helper whose argument means something different from its neighbour's is a trap that will be re-sprung.
+
+**27. An assertion that can pass without the thing under test happening.** (D2, 2026-09-12) `memory-write.stack.spec.ts` proved "the new registry version landed" with `expect(page.getByText(NEW_RULES)).toBeVisible()` — but `NEW_RULES` is also the text sitting in the form's own textarea, so it matches whether or not the POST completed. The test then read `/agent/memories/current` once and got the seed. It failed in a serial run and passed in isolation, the signature of a race rather than a broken route: `NewestMemory` orders `created_at DESC, id DESC` (`go/agentdb/memories.go:646`) and is correct. Fixed by polling the route for the expected content. Second defect in the same spec: it asserted `content` on the LIST route, which returns `MemorySearchResult` carrying **`snippet`** (`memories.go:180-197`), so it compared `undefined` to the note. Full content has its own route and the spec now reads it.
+
+**28. `getByLabel` matches a substring, and the budget bar's label contains the input's.** (D2, 2026-09-12) `page.getByLabel('Hard limit')` resolved to two elements: the `<input aria-label="Hard limit">` and the progress bar labelled *"Today's tokens against the hard limit"*. A locator artefact, not an accessibility defect — a screen reader hears two clear, distinct names — so the spec changed, to `getByRole('spinbutton', { name: 'Hard limit' })`. Worth distinguishing from DI20/DI29, where the ambiguity was real.
+
+**29. A2 shipped unable to do the one thing it existed for, and no offline gate could have known.** (D2, 2026-09-12) The worst finding of the wave. `useInterviewState` (`examples/web/src/onboarding.ts`) stopped polling the instant `inInterview` was false — and the FIRST check runs at mount, before the `onboard` session exists, which is exactly that state, for the ordinary reason that the interview has not begun. `settled.current` latched there, the interval never fired again, the Desk could never learn an interview had started, and **"Finish setting up this project" never appeared** — the precise defect A2 was written to prevent. Its comment said the flag meant "the interview is confirmedly over"; the code could not tell "over" from "not started" — the same conflation as DI21 and DI23. Now only `hasArchitect` ends the watch, at the cost of a project that never onboards polling two cheap GETs every 4s while its tab is open: the same order as the Desk's own live refresh, and the right side to err on. **Why nothing caught it:** `examples/web` has no test runner at all — no `test` script, no test files — so the app shell's logic is only ever covered by stack e2e, and A2's 59 unit tests all fed `inInterview` in as a prop rather than computing it. A2's own e2e scenario would have caught it, and it was written; it never ran, because `onboarding.stack.spec.ts` SKIPS without `--mock-script`. Three gaps had to line up, and they did.
+
+**30. A2's e2e insertion broke the assertion that followed it.** (D2, 2026-09-12) A2 spliced its navigation checks into the middle of the existing onboarding test and ended on the Workers view; the pre-existing assertion two lines later expects `run-architect`, mounted only on the onboarding view (`OnboardingPage.tsx:166`). The old assertion failed because of where the new one had walked the browser, not because anything was broken. Reordered so view-dependent assertions run last, each on the view that owns it. General rule for appending to a long browser test: **the browser has one position, and it is shared state.**
+
+**31. A UI reorganisation must grep the specs that select the fields it moves.** (D2, 2026-09-12) A5's G5 split moved `base_image` into the collapsed "Advanced" tier. `product-ui.stack.spec.ts:42` has filled that field since long before, and spent **four minutes** timing out on a field that is now one click away. Neither A5's Files list nor the orchestrator's review checked which existing specs select the moved fields. Fixed by opening Advanced first; a grep of `e2e/features` for the other moved fields found no further UI locators, the remaining hits being API-level.
+
+**32. The full stack suite has its own load flake, distinct from the web unit suite's.** (D2, 2026-09-12) `product-ui.stack.spec.ts:114` ("a session permalink opens that session directly") waited out its 120s for an assistant turn during the full run and **passes in isolation in 9.8s**. No `port pool is exhausted` line appears anywhere in the run, so this is not the documented port ceiling; it is a full suite standing up many session containers in DinD on a machine also running several other threads' work. Same shape as DI8 (the web suite's `user-event` timeouts) and the same remedy: judge a stack failure by an isolated re-run before believing it.
