@@ -3,7 +3,7 @@ title: When a worker asks you
 slug: when-a-worker-asks-you
 part: 1
 order: 7
-surfaces: [desk]
+surfaces: []   # Desk ROW link (G4/C5), not the Desk's About line — design §4.4
 ---
 
 Sometimes a worker reaches a point where it should not guess. It stops, mid-job, and asks you

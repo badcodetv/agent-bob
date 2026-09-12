@@ -88,8 +88,40 @@ async function main() {
   }
 
   pages.sort((a, b) => a.part - b.part || a.order - b.order || a.slug.localeCompare(b.slug))
+  reportSurfaceCollisions(pages)
   writeOutputs(pages)
   console.log(`[build-guide] wrote ${pages.length} page(s).`)
+}
+
+/**
+ * Say out loud when two pages claim the same console surface.
+ *
+ * `surfaces:` means "console surfaces whose About line uses this page" (work
+ * plan §1.5), so a surface wants ONE owner. The consumer resolves a collision
+ * by taking the first page in part/order (`buildGuideParagraphs` in
+ * examples/web/src/App.tsx) — deterministic, and silent, which is the problem:
+ * it once handed the Desk's About line to `when-a-worker-asks-you` because
+ * that page sorts earlier, and nothing failed. Design §4.4 is the authority on
+ * who owns what, and it does list two pages for Memory on purpose, so this
+ * REPORTS rather than throws: a hard failure would break a build the design
+ * sanctions. Read the winner it names and check §4.4 agrees.
+ */
+function reportSurfaceCollisions(pages) {
+  const claims = new Map()
+  for (const page of pages) {
+    for (const surface of page.surfaces) {
+      if (!claims.has(surface)) claims.set(surface, [])
+      claims.get(surface).push(page.slug)
+    }
+  }
+  for (const [surface, slugs] of claims) {
+    if (slugs.length > 1) {
+      console.log(
+        `[build-guide] NOTE: surface "${surface}" is claimed by ${slugs.length} pages ` +
+          `(${slugs.join(', ')}); its About line will use "${slugs[0]}" — check design §4.4.`,
+      )
+    }
+  }
 }
 
 /** Recursively collect every `.md` file under `dir` (the guide nests `for-operators/`). */
