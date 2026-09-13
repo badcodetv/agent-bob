@@ -164,3 +164,18 @@ was started with `WOLF_TEST_LOGIN='walker@example.com:walker-pass'`; the flag's 
   - `ee4aeb8`: Approve scrolls the team-forming panel into view.
   - `ff0564d`: `./stack wolf up --test-login` uses dev@example.com, which Wolf accepts.
   The coordinator re-ran the gates afterwards: all green.
+
+## Kai's feedback after using production (2026-09-13, 14:50)
+
+Both apps work but are **too busy to read at a glance**. The first-run fixes made them function; the
+next round is about comprehension ("come here and get a quick sense of what's going on").
+
+- **Wolf hypothesis page:** the report's chart and prose dominate; the verdict is buried (`0 tripped
+  · 0 holding · 2 indeterminate` in small mono text); raw numbers like `4408.89990234375`; the
+  conversation rail replays the whole interview at equal weight. Wanted: one clear answer first —
+  how is this thesis doing, what changed since last time, does it need me — then detail on demand.
+- **Bob Desk:** "Written down" shows raw JSON specs and HTML templates (`hypothesis-spec`,
+  `report-template`), memory labels and hashes; 68 "changes" below. Wanted: what the team is doing
+  and concluding, in sentences, not the storage.
+- **Bob bug:** creating a new project redirected to a *different* project.
+- Kai is next trying a real project: goal "Marketing for BadCode" on production.
