@@ -236,7 +236,7 @@ describe('the three stacks', () => {
       await within(asks).findByText('email-answerer · awaiting_human · 2h 40m'),
     ).toBeInTheDocument()
     expect(within(asks).getByText(/Ridley invoice query/)).toBeInTheDocument()
-    expect(within(asks).getByText(/stays parked at awaiting_human/)).toBeInTheDocument()
+    expect(within(asks).getByText(/reply in its thread, dismiss it here/)).toBeInTheDocument()
   })
 
   it('reads the changes as a changelog: who, what, and why', async () => {
@@ -292,8 +292,94 @@ describe('the three stacks', () => {
     const onOpenSession = vi.fn()
     renderDesk({ onOpenSession })
     const asks = await screen.findByRole('region', { name: 'Asks' })
-    await userEvent.click(await within(asks).findByRole('button', { name: 'open thread' }))
+    await userEvent.click(await within(asks).findByRole('button', { name: 'open thread to answer' }))
     expect(onOpenSession).toHaveBeenCalledWith('sess-1')
+  })
+})
+
+describe('notices and dismissing', () => {
+  const notice = {
+    id: 'n1',
+    project: 'acme',
+    session_id: 'sess-arch',
+    worker: 'architect',
+    kind: 'notice',
+    message: 'I created four workers. Everything can be reverted from the changelog.',
+    session_url: '/p/acme/s/sess-arch',
+    channel: 'none',
+    delivered: false,
+    expires_at: 0,
+    created_at: NOW - 400,
+    answered_at: 0,
+    timed_out_at: 0,
+  }
+
+  it('shows a notice as a note from the team with Got it, not as an unanswered ask', async () => {
+    attentionRequests = [...attentionRequests, notice]
+    renderDesk()
+    const team = await screen.findByRole('region', { name: 'From the team' })
+    expect(await within(team).findByText('note from architect')).toBeInTheDocument()
+    expect(within(team).getByText(/created four workers/)).toBeInTheDocument()
+    expect(within(team).getByRole('button', { name: 'Got it' })).toBeInTheDocument()
+    const asks = screen.getByRole('region', { name: 'Asks' })
+    expect(within(asks).queryByText(/created four workers/)).toBeNull()
+  })
+
+  it('has no From the team section when nobody has sent a notice', async () => {
+    renderDesk()
+    await screen.findByText(/Ridley invoice query/)
+    expect(screen.queryByRole('region', { name: 'From the team' })).toBeNull()
+  })
+
+  it('Got it posts the resolve route and the note leaves once the list reloads', async () => {
+    attentionRequests = [notice]
+    const inner = globalThis.fetch
+    const posted: string[] = []
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posted.push(String(url))
+        attentionRequests = []
+        return new Response(JSON.stringify({ ...notice, answered_at: NOW }), { status: 200 })
+      }
+      return inner(url, init)
+    }) as typeof globalThis.fetch
+    renderDesk()
+    const team = await screen.findByRole('region', { name: 'From the team' })
+    await userEvent.click(await within(team).findByRole('button', { name: 'Got it' }))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'From the team' })).toBeNull())
+    expect(posted).toEqual(['/agent/attention-requests/n1/resolve'])
+  })
+
+  it('an ask can be dismissed without replying', async () => {
+    const inner = globalThis.fetch
+    const posted: string[] = []
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posted.push(String(url))
+        attentionRequests = []
+        return new Response('{}', { status: 200 })
+      }
+      return inner(url, init)
+    }) as typeof globalThis.fetch
+    renderDesk()
+    const asks = await screen.findByRole('region', { name: 'Asks' })
+    await userEvent.click(await within(asks).findByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(within(asks).queryByText(/Ridley invoice query/)).toBeNull())
+    expect(posted).toEqual(['/agent/attention-requests/a1/resolve'])
+  })
+
+  it('says why when acknowledging fails, and keeps the note', async () => {
+    attentionRequests = [notice]
+    const inner = globalThis.fetch
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response('not found', { status: 404 })
+      return inner(url, init)
+    }) as typeof globalThis.fetch
+    renderDesk()
+    const team = await screen.findByRole('region', { name: 'From the team' })
+    await userEvent.click(await within(team).findByRole('button', { name: 'Got it' }))
+    expect(await within(team).findByRole('alert')).toHaveTextContent('not found')
+    expect(within(team).getByText(/created four workers/)).toBeInTheDocument()
   })
 })
 

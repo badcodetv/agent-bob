@@ -157,6 +157,7 @@ describe('the wire shapes', () => {
       session_id: '',
       worker: '',
       message: '',
+      kind: 'ask',
       session_url: '',
       channel: '',
       delivered: false,
@@ -196,6 +197,38 @@ describe('countAsks — the badge\u2019s number (doc 21, X7)', () => {
 
   it('drops a parked delivery whose request has been answered', () => {
     expect(countAsks([delivery()], [request({ answered_at: NOW })])).toBe(0)
+  })
+})
+
+describe('notices — reports, not questions', () => {
+  it('a notice is never an ask, even on a session with a parked delivery', () => {
+    const notice = request({ id: 'n1', kind: 'notice', worker: 'architect', created_at: NOW - 300 })
+    expect(countAsks([delivery()], [notice])).toBe(0)
+    const desk = buildDesk(input({ deliveries: [delivery()], subscriptions: [subscription()], attentionRequests: [notice] }))
+    expect(desk.asks).toHaveLength(0)
+    expect(desk.notices).toEqual([
+      expect.objectContaining({ id: 'n1', requestId: 'n1', headline: 'note from architect', ageSeconds: 300 }),
+    ])
+  })
+
+  it('lists open notices newest first and drops acknowledged ones', () => {
+    const desk = buildDesk(
+      input({
+        attentionRequests: [
+          request({ id: 'old', kind: 'notice', created_at: NOW - 900 }),
+          request({ id: 'new', kind: 'notice', created_at: NOW - 60 }),
+          request({ id: 'done', kind: 'notice', created_at: NOW - 30, answered_at: NOW }),
+          request({ id: 'q', created_at: NOW - 10 }),
+        ],
+      }),
+    )
+    expect(desk.notices.map((n) => n.id)).toEqual(['new', 'old'])
+  })
+
+  it('reads a missing or unknown kind as an ask', () => {
+    expect(coerceAttentionRequest({ id: 'x' }).kind).toBe('ask')
+    expect(coerceAttentionRequest({ id: 'x', kind: 'fyi' }).kind).toBe('ask')
+    expect(coerceAttentionRequest({ id: 'x', kind: 'notice' }).kind).toBe('notice')
   })
 })
 
@@ -351,8 +384,8 @@ describe('asks', () => {
     expect(desk.asks.map((a) => a.id)).toEqual(['d1', 'd3', 'd2'])
   })
 
-  it('states the parked-row caveat once, for the page to render', () => {
-    expect(DESK_ASKS_CAVEAT).toMatch(/stays parked at awaiting_human/)
+  it('states how an ask leaves the stack once, for the page to render', () => {
+    expect(DESK_ASKS_CAVEAT).toMatch(/reply in its thread/)
   })
 })
 
@@ -755,6 +788,7 @@ describe('the whole fold', () => {
     // rather than only a filter.
     expect(Object.keys(buildDesk(input({})))).toEqual([
       'asks',
+      'notices',
       'changes',
       'earlierChanges',
       'trouble',
@@ -765,6 +799,7 @@ describe('the whole fold', () => {
   it('is empty on an empty project — the first-run state is the page\'s job, not the fold\'s', () => {
     expect(buildDesk(input({}))).toEqual({
       asks: [],
+      notices: [],
       changes: [],
       earlierChanges: [],
       trouble: [],

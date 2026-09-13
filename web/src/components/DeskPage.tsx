@@ -21,6 +21,7 @@ import useDesk, { type UseDeskOptions } from '../useDesk.js'
 import {
   DESK_ASKS_CAVEAT,
   type DeskAsk,
+  type DeskNotice,
   deskNotes,
   type DeskChange,
   type DeskFirstRecord,
@@ -145,6 +146,7 @@ export default function DeskPage({
     lastSeenMs,
     markSeen,
     nowMs,
+    resolveAttention,
   } = useDesk({
       ...deskOptions,
       projectId,
@@ -225,6 +227,7 @@ export default function DeskPage({
     !loading &&
     error === null &&
     desk.asks.length === 0 &&
+    desk.notices.length === 0 &&
     desk.changes.length === 0 &&
     desk.trouble.length === 0
 
@@ -278,6 +281,24 @@ export default function DeskPage({
         />
       ) : (
         <Stack spacing={4}>
+          {desk.notices.length > 0 && (
+            <Section
+              label="From the team"
+              count={desk.notices.length}
+              caption="what they did — nothing to answer"
+              empty=""
+            >
+              {desk.notices.map((notice) => (
+                <NoticeRow
+                  key={notice.id}
+                  notice={notice}
+                  onOpenSession={onOpenSession}
+                  onAcknowledge={() => resolveAttention(notice.requestId)}
+                />
+              ))}
+            </Section>
+          )}
+
           <Section
             label="Asks"
             count={desk.asks.length}
@@ -315,6 +336,9 @@ export default function DeskPage({
                 reduced={reduced}
                 firstNarration={narrationByRecordId.get(ask.id)}
                 guideAvailable={guideAvailable}
+                // A stand-in ask rebuilt from a parked delivery has no request
+                // to resolve, so it offers no Dismiss.
+                onDismiss={asksHaveMessages ? () => resolveAttention(ask.requestId) : undefined}
               />
             ))}
             {desk.asks.length > 0 && (
@@ -472,6 +496,7 @@ function AskRow({
   reduced = false,
   firstNarration,
   guideAvailable = false,
+  onDismiss,
 }: {
   ask: DeskAsk
   onOpenSession?: (id: string) => void
@@ -480,6 +505,8 @@ function AskRow({
   /** design §3 G4: set only on the project's first ask, once, ever. */
   firstNarration?: FirstToNarrate
   guideAvailable?: boolean
+  /** Close the ask without replying — for one dealt with some other way. */
+  onDismiss?: () => Promise<void>
 }) {
   // §4.2: an ask's age ticks, and escalates — the number is an SLA on the
   // operator, not a progress bar. The escalation is a word AND a colour on top
@@ -519,11 +546,89 @@ function AskRow({
         )}
       </Stack>
       {ask.message !== '' && <ClampedText text={ask.message} sx={{ mt: 0.5 }} />}
-      <Box sx={{ mt: 0.5 }}>
-        <ThreadLink sessionId={ask.sessionId} url={ask.sessionUrl} onOpenSession={onOpenSession} />
-      </Box>
+      <Stack direction="row" spacing={2} alignItems="baseline" sx={{ mt: 0.5 }}>
+        <ThreadLink
+          sessionId={ask.sessionId}
+          url={ask.sessionUrl}
+          onOpenSession={onOpenSession}
+          label="open thread to answer"
+        />
+        {onDismiss && <ResolveControl label="Dismiss" variant="link" onResolve={onDismiss} />}
+      </Stack>
       {firstNarration && <FirstNarrationLine first={firstNarration} guideAvailable={guideAvailable} />}
     </SpineRow>
+  )
+}
+
+/**
+ * A worker telling a person what it did (a `notice`). Not a question, so it
+ * says who it is from, shows the words, and offers "Got it" — which is the
+ * whole of acknowledging it.
+ */
+function NoticeRow({
+  notice,
+  onOpenSession,
+  onAcknowledge,
+}: {
+  notice: DeskNotice
+  onOpenSession?: (id: string) => void
+  onAcknowledge: () => Promise<void>
+}) {
+  return (
+    <SpineRow glyph="agent" component="li" glyphLabel="a note from the team" data-testid="desk-notice">
+      <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
+        <Typography variant="body2" sx={MONO}>
+          {notice.headline}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {coarseAgeLabel(notice.ageSeconds)} ago
+        </Typography>
+      </Stack>
+      {notice.message !== '' && <ClampedText text={notice.message} sx={{ mt: 0.5 }} />}
+      <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.75 }}>
+        <ResolveControl label="Got it" variant="button" onResolve={onAcknowledge} />
+        <ThreadLink sessionId={notice.sessionId} url={notice.sessionUrl} onOpenSession={onOpenSession} />
+      </Stack>
+    </SpineRow>
+  )
+}
+
+/** One acknowledge action: disabled while it posts, and says so if it fails. */
+function ResolveControl({
+  label,
+  variant,
+  onResolve,
+}: {
+  label: string
+  variant: 'button' | 'link'
+  onResolve: () => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const run = () => {
+    setBusy(true)
+    setFailure(null)
+    onResolve()
+      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : 'could not save that'))
+      .finally(() => setBusy(false))
+  }
+  return (
+    <>
+      {variant === 'button' ? (
+        <Button size="small" variant="outlined" onClick={run} disabled={busy}>
+          {label}
+        </Button>
+      ) : (
+        <Link component="button" type="button" variant="caption" onClick={run} disabled={busy}>
+          {label}
+        </Link>
+      )}
+      {failure !== null && (
+        <Typography variant="caption" color="error.main" role="alert">
+          {failure}
+        </Typography>
+      )}
+    </>
   )
 }
 

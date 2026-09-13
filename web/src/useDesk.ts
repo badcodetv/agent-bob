@@ -30,8 +30,8 @@
 // so the page can say so rather than implying the workers said nothing.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ConfigApiOptions } from './configApi.js'
-import { buildDesk, type AttentionRequest, type Desk } from './desk.js'
+import { useConfigApi, type ConfigApiOptions } from './configApi.js'
+import { ATTENTION_ENDPOINTS, buildDesk, type AttentionRequest, type Desk } from './desk.js'
 import useAttentionRequests from './useAttentionRequests.js'
 import useConfigLog from './useConfigLog.js'
 import useEventsOverview from './useEvents.js'
@@ -78,6 +78,7 @@ export function deliveriesAsRequests(deliveries: EventDelivery[]): AttentionRequ
       session_id: d.session_id,
       worker: '',
       message: '',
+      kind: 'ask' as const,
       session_url: '',
       channel: '',
       delivered: false,
@@ -142,6 +143,11 @@ export interface DeskApi {
   /** Reload every underlying list. */
   reload: () => Promise<void>
   /**
+   * Acknowledge one attention request — "Got it" on a notice, "Dismiss" on an
+   * ask — then reload. Rejects with the server's sentence on failure.
+   */
+  resolveAttention: (requestId: string) => Promise<void>
+  /**
    * The shared clock, in unix MILLISECONDS — re-rendered on the cadence the
    * rows ask for (per second while something runs, per minute once nothing is
    * young, not at all when everything has finished).
@@ -165,6 +171,7 @@ export default function useDesk(options: UseDeskOptions = {}): DeskApi {
   const log = useConfigLog({ ...options, projectId })
   const schedules = useSchedules(options)
   const workers = useWorkers(options)
+  const { request } = useConfigApi(options)
 
   // Frozen for the visit, per project: a mark that re-read on every render
   // would clear the Changes stack the moment anything else re-rendered, and a
@@ -213,6 +220,14 @@ export default function useDesk(options: UseDeskOptions = {}): DeskApi {
   // torn down and rebuilt every render (`reload`'s identity changes with its
   // five hooks) — a poll that restarted its own timer would never fire.
   reloadRef.current = reload
+
+  const resolveAttention = useCallback(
+    async (requestId: string) => {
+      await request(ATTENTION_ENDPOINTS.resolve(requestId), { method: 'POST' })
+      await Promise.all([attention.reload(), overview.reload()])
+    },
+    [attention, overview, request],
+  )
 
   useEffect(() => {
     if (refreshMs <= 0 || paused) return
@@ -272,6 +287,7 @@ export default function useDesk(options: UseDeskOptions = {}): DeskApi {
     lastSeenMs,
     markSeen,
     reload,
+    resolveAttention,
     nowMs: tickNowSeconds * 1000,
   }
 }

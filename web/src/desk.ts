@@ -37,11 +37,21 @@ import {
 import { describeCron, type Schedule } from './schedules.js'
 import type { MemoryRow } from './memories.js'
 
-/** The read route the Asks stack needs (design B1; go/httpapi/attention.go). */
+/** The routes the Asks and From-the-team stacks need (design B1; go/httpapi/attention.go). */
 export const ATTENTION_ENDPOINTS = {
   /** GET — `?state=open|all`, `?limit=`; `{"attention_requests": [...]}`. */
   list: '/agent/attention-requests',
+  /** POST — a person acknowledges one request ("Got it" / "Dismiss"). */
+  resolve: (id: string) => `/agent/attention-requests/${encodeURIComponent(id)}/resolve`,
 }
+
+/**
+ * `ask` — a question a person owes an answer to; its job parks at
+ * `awaiting_human`. `notice` — act-then-notify: the worker already did the
+ * thing and is saying so, nothing parks, and a person acknowledges it
+ * (engine migration 051).
+ */
+export type AttentionKind = 'ask' | 'notice'
 
 // ---------------------------------------------------------------------------
 // The attention request (go/agentdb.AttentionRequest's JSON, verbatim)
@@ -60,6 +70,9 @@ export interface AttentionRequest {
   session_id: string
   worker: string
   message: string
+  /** Optional because rows from an engine older than migration 051, and
+   *  fixtures, carry none — absent means `ask`, which is what those were. */
+  kind?: AttentionKind
   /** Permalink minted at request time, so a later base-URL change cannot
    *  rewrite history. */
   session_url: string
@@ -87,6 +100,7 @@ export function coerceAttentionRequest(raw: unknown): AttentionRequest {
     session_id: str(r.session_id),
     worker: str(r.worker),
     message: str(r.message),
+    kind: r.kind === 'notice' ? 'notice' : 'ask',
     session_url: str(r.session_url),
     channel: str(r.channel),
     delivered: bool(r.delivered),
@@ -95,6 +109,11 @@ export function coerceAttentionRequest(raw: unknown): AttentionRequest {
     answered_at: num(r.answered_at),
     timed_out_at: num(r.timed_out_at),
   }
+}
+
+/** A notice tells; an ask asks. Anything unmarked is an ask. */
+export function isAttentionNotice(r: Pick<AttentionRequest, 'kind'>): boolean {
+  return r.kind === 'notice'
 }
 
 /** Open = nobody has answered it and the sweep has not timed it out. */
@@ -117,13 +136,13 @@ export type DeskGlyph = (typeof DESK_GLYPHS)[number]
 // ---------------------------------------------------------------------------
 
 /**
- * The honest handling of the parked-row wart, stated once and rendered by the
- * page: a delivery parked at `awaiting_human` never leaves that status, so the
- * stack is computed from the *request*, not from the row.
+ * How an ask leaves the stack, stated once and rendered by the page. A reply in
+ * the thread closes the request and settles the parked job (engine
+ * 2026-09-13); the stack is still computed from the *request*, so an older
+ * engine that leaves the row parked shows the same thing.
  */
 export const DESK_ASKS_CAVEAT =
-  'An ask leaves this stack when its request is answered or times out. The delivery row itself ' +
-  'stays parked at awaiting_human — nothing rewrites it.'
+  'An ask leaves this stack when you reply in its thread, dismiss it here, or it times out.'
 
 /** One thing waiting for a person. */
 export interface DeskAsk {
@@ -157,6 +176,31 @@ export interface DeskAsk {
   /** Always `'first-ask'`: every ask is a candidate, and `firsts.ts` picks
    *  whichever is chronologically earliest. See `DeskFirstRecord`. */
   firstKind: DeskFirstKind
+}
+
+// ---------------------------------------------------------------------------
+// Stack 1b — notices ("from the team")
+// ---------------------------------------------------------------------------
+
+/**
+ * One open notice: a worker telling a person what it did. There is no question
+ * in it, so it is never shown as "nobody has answered these" — it is shown as a
+ * note, and a person acknowledges it.
+ */
+export interface DeskNotice {
+  /** The request id — also what "Got it" resolves. */
+  id: string
+  requestId: string
+  worker: string
+  sessionId: string
+  sessionUrl: string
+  message: string
+  /** `note from architect`. */
+  headline: string
+  /** Unix SECONDS. */
+  createdAt: number
+  /** How long ago it was written, in seconds. */
+  ageSeconds: number
 }
 
 // ---------------------------------------------------------------------------
@@ -447,6 +491,8 @@ export interface BuildDeskInput {
 
 export interface Desk {
   asks: DeskAsk[]
+  /** Open notices, newest first — reports that want reading, not answering. */
+  notices: DeskNotice[]
   changes: DeskChange[]
   /**
    * Changes at or before the mark, newest first, capped. Empty when the
@@ -489,6 +535,7 @@ export function buildDesk(input: BuildDeskInput): Desk {
   const asks = buildDeskAsks(input)
   return {
     asks,
+    notices: buildDeskNotices(input),
     changes: fresh,
     earlierChanges: earlier,
     trouble: buildDeskTrouble(input),
@@ -543,7 +590,8 @@ export function openRequestsBySession(
 ): Map<string, AttentionRequest> {
   const openBySession = new Map<string, AttentionRequest>()
   for (const request of attentionRequests) {
-    if (!isAttentionRequestOpen(request) || request.session_id === '') continue
+    // A notice is not an ask: it parks no job and nobody owes it an answer.
+    if (!isAttentionRequestOpen(request) || isAttentionNotice(request) || request.session_id === '') continue
     const held = openBySession.get(request.session_id)
     if (
       !held ||
@@ -622,6 +670,25 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
   // Newest first, like every other list in this UI; ties by id so the order is
   // deterministic under a second-resolution clock.
   return asks.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+}
+
+/** Open notices, newest first. Not joined to deliveries: a notice parks none. */
+function buildDeskNotices(input: BuildDeskInput): DeskNotice[] {
+  const { attentionRequests, nowSeconds } = input
+  return attentionRequests
+    .filter((r) => isAttentionNotice(r) && isAttentionRequestOpen(r))
+    .map((r) => ({
+      id: r.id,
+      requestId: r.id,
+      worker: r.worker,
+      sessionId: r.session_id,
+      sessionUrl: r.session_url,
+      message: r.message,
+      headline: `note from ${r.worker === '' ? 'a worker' : r.worker}`,
+      createdAt: r.created_at,
+      ageSeconds: Math.max(0, nowSeconds - (r.created_at || nowSeconds)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
 }
 
 /** The default depth of the "earlier" tail under the waterline. */
