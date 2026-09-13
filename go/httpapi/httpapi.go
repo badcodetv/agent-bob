@@ -94,7 +94,9 @@ type Config struct {
 
 	// Attention backs GET /agent/attention-requests, the Desk's Asks stack
 	// (design B1). Same defaulting rule as Workers: auto-filled from AgentDB,
-	// 501 without one. Read-only by design — see attention.go.
+	// 501 without one. Its one write (resolve) and the reply hook on
+	// SendMessage need the store to implement AttentionAnswerer too — see
+	// attention.go.
 	Attention AttentionStore
 
 	// Memories backs the §7.6 memory paths — the snippet search at
@@ -424,6 +426,8 @@ type Endpoints struct {
 	RevertConfigEvent string // "POST /agent/config-events/{id}/revert"
 	// Attention requests (design B1) — read-only; the project comes from the JWT.
 	AttentionRequests string // "GET /agent/attention-requests"
+	// The one write beside it: a person acknowledging a request on the Desk.
+	ResolveAttentionRequest string // "POST /agent/attention-requests/{id}/resolve"
 	// Usage (ticket A4) — read-only; the project comes from the JWT. Reports
 	// the same token ledger the router's budget gate reads, plus a truthful
 	// cost, a query count, the project's budget, and the boot credential mode.
@@ -542,23 +546,24 @@ var DefaultEndpoints = Endpoints{
 	PutWorker:        "PUT /agent/workers/{name}",
 	DeleteWorker:     "DELETE /agent/workers/{name}",
 
-	GetProjectSettings: "GET /agent/project-settings",
-	PutProjectSettings: "PUT /agent/project-settings",
-	IngestEvent:        "POST /agent/events",
-	ListEvents:         "GET /agent/events",
-	Subscriptions:      "/agent/subscriptions",
-	Subscription:       "/agent/subscriptions/{id}",
-	Deliveries:         "GET /agent/deliveries",
-	ProjectToken:       "POST /agent/project-token",
-	Schedules:          "/agent/schedules",
-	Schedule:           "/agent/schedules/{id}",
-	ConfigEvents:       "GET /agent/config-events",
-	ConfigEvent:        "GET /agent/config-events/{id}",
-	RevertConfigEvent:  "POST /agent/config-events/{id}/revert",
-	AttentionRequests:  "GET /agent/attention-requests",
-	Usage:              "GET /agent/usage",
-	ListMemories:       "GET /agent/memories",
-	CreateMemory:       "POST /agent/memories",
+	GetProjectSettings:      "GET /agent/project-settings",
+	PutProjectSettings:      "PUT /agent/project-settings",
+	IngestEvent:             "POST /agent/events",
+	ListEvents:              "GET /agent/events",
+	Subscriptions:           "/agent/subscriptions",
+	Subscription:            "/agent/subscriptions/{id}",
+	Deliveries:              "GET /agent/deliveries",
+	ProjectToken:            "POST /agent/project-token",
+	Schedules:               "/agent/schedules",
+	Schedule:                "/agent/schedules/{id}",
+	ConfigEvents:            "GET /agent/config-events",
+	ConfigEvent:             "GET /agent/config-events/{id}",
+	RevertConfigEvent:       "POST /agent/config-events/{id}/revert",
+	AttentionRequests:       "GET /agent/attention-requests",
+	ResolveAttentionRequest: "POST /agent/attention-requests/{id}/resolve",
+	Usage:                   "GET /agent/usage",
+	ListMemories:            "GET /agent/memories",
+	CreateMemory:            "POST /agent/memories",
 	// The literal segment beats the {id} wildcard in ServeMux precedence, so
 	// these two coexist without an ordering rule to remember.
 	GetMemory:     "GET /agent/memories/{id}",
@@ -641,34 +646,35 @@ func (h *Handlers) Mux() *http.ServeMux {
 	}
 	// Events & routing — each guarded so a host can unmount one by blanking it.
 	for pattern, handler := range map[string]http.HandlerFunc{
-		e.IngestEvent:       h.IngestEvent,
-		e.ListEvents:        h.ListEvents,
-		e.Subscriptions:     h.Subscriptions,
-		e.Subscription:      h.Subscription,
-		e.Deliveries:        h.ListDeliveries,
-		e.ProjectToken:      h.ProjectToken,
-		e.Schedules:         h.Schedules,
-		e.Schedule:          h.Schedule,
-		e.ConfigEvents:      h.ListConfigEvents,
-		e.ConfigEvent:       h.GetConfigEvent,
-		e.RevertConfigEvent: h.RevertConfigEvent,
-		e.AttentionRequests: h.ListAttentionRequests,
-		e.Usage:             h.GetUsage,
-		e.ListMemories:      h.ListMemories,
-		e.ListDatasets:      h.ListDatasets,
-		e.GetDataset:        h.GetDataset,
-		e.DatasetVersions:   h.ListDatasetVersions,
-		e.DownloadDataset:   h.DownloadDataset,
-		e.CreateMemory:      h.CreateMemory,
-		e.GetMemory:         h.GetMemory,
-		e.CurrentMemory:     h.CurrentMemory,
-		e.ListTopologies:    h.ListTopologies,
-		e.PreviewTopology:   h.PreviewTopology,
-		e.ApplyTopology:     h.ApplyTopologyHandler,
-		e.CurrentCharter:    h.GetCurrentCharter,
-		e.ApplyCharter:      h.ApplyCharter,
-		e.ListImages:        h.ListImages,
-		e.ListSkills:        h.ListSkills,
+		e.IngestEvent:             h.IngestEvent,
+		e.ListEvents:              h.ListEvents,
+		e.Subscriptions:           h.Subscriptions,
+		e.Subscription:            h.Subscription,
+		e.Deliveries:              h.ListDeliveries,
+		e.ProjectToken:            h.ProjectToken,
+		e.Schedules:               h.Schedules,
+		e.Schedule:                h.Schedule,
+		e.ConfigEvents:            h.ListConfigEvents,
+		e.ConfigEvent:             h.GetConfigEvent,
+		e.RevertConfigEvent:       h.RevertConfigEvent,
+		e.AttentionRequests:       h.ListAttentionRequests,
+		e.ResolveAttentionRequest: h.ResolveAttentionRequest,
+		e.Usage:                   h.GetUsage,
+		e.ListMemories:            h.ListMemories,
+		e.ListDatasets:            h.ListDatasets,
+		e.GetDataset:              h.GetDataset,
+		e.DatasetVersions:         h.ListDatasetVersions,
+		e.DownloadDataset:         h.DownloadDataset,
+		e.CreateMemory:            h.CreateMemory,
+		e.GetMemory:               h.GetMemory,
+		e.CurrentMemory:           h.CurrentMemory,
+		e.ListTopologies:          h.ListTopologies,
+		e.PreviewTopology:         h.PreviewTopology,
+		e.ApplyTopology:           h.ApplyTopologyHandler,
+		e.CurrentCharter:          h.GetCurrentCharter,
+		e.ApplyCharter:            h.ApplyCharter,
+		e.ListImages:              h.ListImages,
+		e.ListSkills:              h.ListSkills,
 
 		e.GitProjectionStatus: h.GetGitProjectionStatus,
 		e.GitBootstrap:        h.GitBootstrap,

@@ -481,6 +481,11 @@ expires_in (seconds, optional) sets a fallback: if nobody has replied by then, `
 	`you are woken with a human.attention.timeout event and YOUR PROMPT decides ` +
 	`what to do — proceed, escalate or abandon. Without it the request simply waits.
 
+notice (boolean, optional) says this is NOT a question: you have already done ` +
+	`the thing and are telling a human what you did. A notice does not pause your ` +
+	`job waiting for a reply and never expires; the human acknowledges it. Use it ` +
+	`for act-then-notify reports, and leave it off whenever you actually need an answer.
+
 If the project has no attention channel configured, the request is logged and ` +
 	`the permalink still comes back; the thread is the review surface either way.`
 
@@ -727,6 +732,10 @@ func (m *managementTools) tools() []*mcpTool {
 				"expires_in": map[string]any{
 					"type":        "integer",
 					"description": "Optional seconds until the request lapses; on lapsing you are woken with a human.attention.timeout event.",
+				},
+				"notice": map[string]any{
+					"type":        "boolean",
+					"description": "True when this reports something you have already done and needs no reply. Leave it off to ask a question.",
 				},
 			}, []string{"message"}),
 			Handler: m.requestHumanAttention,
@@ -1678,6 +1687,7 @@ func (m *managementTools) scheduleDelete(ctx context.Context, caller mcpCaller, 
 type attentionArgs struct {
 	Message   string `json:"message"`
 	ExpiresIn int64  `json:"expires_in"`
+	Notice    bool   `json:"notice"`
 }
 
 func (m *managementTools) requestHumanAttention(ctx context.Context, caller mcpCaller, raw json.RawMessage) (any, error) {
@@ -1703,5 +1713,6 @@ func (m *managementTools) requestHumanAttention(ctx context.Context, caller mcpC
 		SessionID: caller.SessionID,
 		Message:   args.Message,
 		ExpiresIn: args.ExpiresIn,
+		Notice:    args.Notice,
 	})
 }

@@ -42,6 +42,20 @@ import (
 // {source: "core", depth: 0} plus the worker and session of the paused job.
 const EventTypeHumanAttentionTimeout = "human.attention.timeout"
 
+// The two kinds of request (migration 051).
+//
+// An ASK is a question: a person owes the worker an answer, the job parks at
+// `awaiting_human` until one arrives, and the Desk lists it under Asks.
+//
+// A NOTICE is act-then-notify: the worker has already done the thing and is
+// telling a person so. Nobody owes it an answer, so it never parks a job, it
+// never times out into a `human.attention.timeout` wake-up, and the Desk shows
+// it as a note a person acknowledges rather than a question left unanswered.
+const (
+	AttentionKindAsk    = "ask"
+	AttentionKindNotice = "notice"
+)
+
 // ErrAttentionRequestNotFound is returned when no request matches.
 var ErrAttentionRequestNotFound = errors.New("attention request not found")
 
@@ -57,6 +71,9 @@ type AttentionRequest struct {
 	Worker    string `json:"worker" gorm:"type:varchar(255)"`
 	// Message is what the worker asked the human for, verbatim.
 	Message string `json:"message" gorm:"type:text"`
+	// Kind is AttentionKindAsk or AttentionKindNotice. Rows written before
+	// migration 051 read as asks, which is what they were treated as.
+	Kind string `json:"kind" gorm:"type:varchar(16);not null;default:ask"`
 	// SessionURL is the permalink minted at request time (§9, F3). Stored rather
 	// than recomputed so a later change of AGENTKIT_PUBLIC_BASE_URL cannot
 	// rewrite history.
@@ -93,6 +110,16 @@ func (s *Store) CreateAttentionRequest(ctx context.Context, req *AttentionReques
 	}
 	if req.ExpiresAt < 0 {
 		return nil, fmt.Errorf("expires_at must not be negative")
+	}
+	switch req.Kind {
+	case "":
+		req.Kind = AttentionKindAsk
+	case AttentionKindAsk:
+	case AttentionKindNotice:
+		// A notice waits on nobody, so there is nothing for a deadline to lapse.
+		req.ExpiresAt = 0
+	default:
+		return nil, fmt.Errorf("kind must be %q or %q, not %q", AttentionKindAsk, AttentionKindNotice, req.Kind)
 	}
 	if req.ID == "" {
 		req.ID = uuid.New().String()
@@ -176,7 +203,7 @@ func (s *Store) ListOpenAttentionRequests(ctx context.Context, project string) (
 func (s *Store) ListExpiredAttentionRequests(ctx context.Context, now int64, limit int) ([]*AttentionRequest, error) {
 	out := []*AttentionRequest{}
 	if err := s.gdb.WithContext(ctx).Model(&AttentionRequest{}).
-		Where("expires_at > 0 AND expires_at <= ? AND answered_at = 0 AND timed_out_at = 0", now).
+		Where("expires_at > 0 AND expires_at <= ? AND kind <> ? AND answered_at = 0 AND timed_out_at = 0", now, AttentionKindNotice).
 		Order("expires_at ASC, id ASC").Limit(clampLimit(limit)).Find(&out).Error; err != nil {
 		return nil, fmt.Errorf("failed to list expired attention requests: %w", err)
 	}
@@ -197,28 +224,126 @@ func (s *Store) resolveAttention(ctx context.Context, id, column string, at int6
 			}
 			return err
 		}
-		if req.AnsweredAt != 0 || req.TimedOutAt != 0 {
-			// Already resolved: the sweep is at-least-once, so a second pass over
-			// the same row must be a no-op rather than a second timeout event.
-			return nil
-		}
-		if err := tx.Model(&AttentionRequest{}).Where("id = ?", id).Update(column, at).Error; err != nil {
-			return err
-		}
-		// The stamp is per-request: with this one closed the session is no longer
-		// waiting on a human, unless another open request says otherwise.
-		var open int64
-		if err := tx.Model(&AttentionRequest{}).
-			Where("session_id = ? AND id <> ? AND answered_at = 0 AND timed_out_at = 0", req.SessionID, id).
-			Count(&open).Error; err != nil {
-			return err
-		}
-		if open > 0 {
-			return nil
-		}
-		return tx.Model(&Session{}).Where("id = ?", req.SessionID).
-			Update("attention_requested", false).Error
+		return resolveAttentionTx(tx, &req, column, at)
 	})
+}
+
+// resolveAttentionTx is resolveAttention's body, for callers that already hold
+// the row and a transaction.
+//
+// When an ANSWER closes the last open ask on a session, the deliveries parked
+// on that session leave `awaiting_human` for `ok`. That is the close the
+// parked-row wart was missing (docs/18 §9): the human's reply resumed the
+// session, but nothing told the job-history row, so it stayed parked with no
+// `ended_at` forever. A timeout does not settle the row — the timeout event
+// wakes the worker, and whatever it does next is its own job.
+func resolveAttentionTx(tx *gorm.DB, req *AttentionRequest, column string, at int64) error {
+	if req.AnsweredAt != 0 || req.TimedOutAt != 0 {
+		// Already resolved: the sweep is at-least-once, so a second pass over
+		// the same row must be a no-op rather than a second timeout event.
+		return nil
+	}
+	if err := tx.Model(&AttentionRequest{}).Where("id = ?", req.ID).Update(column, at).Error; err != nil {
+		return err
+	}
+	if column == "answered_at" {
+		req.AnsweredAt = at
+	} else {
+		req.TimedOutAt = at
+	}
+	// The stamp is per-request: with this one closed the session is no longer
+	// waiting on a human, unless another open request says otherwise.
+	var open int64
+	if err := tx.Model(&AttentionRequest{}).
+		Where("session_id = ? AND id <> ? AND answered_at = 0 AND timed_out_at = 0", req.SessionID, req.ID).
+		Count(&open).Error; err != nil {
+		return err
+	}
+	if open > 0 {
+		return nil
+	}
+	if err := tx.Model(&Session{}).Where("id = ?", req.SessionID).
+		Update("attention_requested", false).Error; err != nil {
+		return err
+	}
+	if column != "answered_at" {
+		return nil
+	}
+	return settleParkedDeliveriesTx(tx, req.Project, req.SessionID, at)
+}
+
+// settleParkedDeliveriesTx moves a session's `awaiting_human` deliveries to
+// `ok`, stamping `ended_at`. Runtime state, like every delivery write — no
+// config event (§15.3 rule 3).
+func settleParkedDeliveriesTx(tx *gorm.DB, project, sessionID string, at int64) error {
+	if project == "" || sessionID == "" {
+		return nil
+	}
+	return tx.Model(&EventDelivery{}).
+		Where("project = ? AND session_id = ? AND status = ?", project, sessionID, DeliveryAwaitingHuman).
+		Updates(map[string]any{"status": DeliveryOK, "ended_at": at, "failure_reason": ""}).Error
+}
+
+// AnswerSessionAttention closes every open request on a session because a
+// person has just replied in it — §9's "a reply IS the answer", applied at the
+// moment the reply arrives rather than only when a deadline makes the sweep
+// look. Without it a request made with no `expires_in` (the common case) was
+// never closed by anything, and its job sat parked forever.
+//
+// Notices on the session close too: someone reading and replying to the thread
+// has read what it said. Returns how many requests it closed. Idempotent.
+func (s *Store) AnswerSessionAttention(ctx context.Context, project, sessionID string, at int64) (int, error) {
+	if project == "" || sessionID == "" {
+		return 0, fmt.Errorf("project and session id are required")
+	}
+	closed := 0
+	err := s.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var open []*AttentionRequest
+		if err := tx.Where("project = ? AND session_id = ? AND answered_at = 0 AND timed_out_at = 0", project, sessionID).
+			Order("created_at ASC, id ASC").Find(&open).Error; err != nil {
+			return err
+		}
+		for _, req := range open {
+			if err := resolveAttentionTx(tx, req, "answered_at", at); err != nil {
+				return err
+			}
+			closed++
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to answer session attention: %w", err)
+	}
+	return closed, nil
+}
+
+// AcknowledgeAttentionRequest closes one request because a person said so on
+// the Desk: "Got it" on a notice, or "Dismiss" on an ask they have dealt with
+// some other way. It is recorded as answered — the same terminal state a reply
+// produces — and settles the session's parked deliveries when it was the last
+// open request there. Tenancy-scoped: another project's row is not found.
+// Returns the row as it now stands; acknowledging a resolved row is a no-op.
+func (s *Store) AcknowledgeAttentionRequest(ctx context.Context, project, id string, at int64) (*AttentionRequest, error) {
+	if project == "" || id == "" {
+		return nil, fmt.Errorf("project and id are required")
+	}
+	var req AttentionRequest
+	err := s.gdb.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("project = ? AND id = ?", project, id).First(&req).Error; err != nil {
+			if isNotFound(err) {
+				return fmt.Errorf("%w: %s/%s", ErrAttentionRequestNotFound, project, id)
+			}
+			return err
+		}
+		return resolveAttentionTx(tx, &req, "answered_at", at)
+	})
+	if err != nil {
+		if errors.Is(err, ErrAttentionRequestNotFound) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to acknowledge attention request: %w", err)
+	}
+	return &req, nil
 }
 
 // MarkAttentionAnswered closes a request because a human replied. Idempotent:
@@ -269,13 +394,17 @@ func (s *Store) CountUserMessagesSince(ctx context.Context, sessionID string, si
 //
 // No approval state: "open" means created and neither answered nor timed out,
 // and a human simply typing the next message is what closes it (§9).
+//
+// Notices do not count: a worker that has told a person what it did is not
+// waiting on them, so its job ends `ok` rather than parking.
 func (s *Store) SessionAwaitsHuman(ctx context.Context, project, sessionID string) (bool, error) {
 	if project == "" || sessionID == "" {
 		return false, fmt.Errorf("project and session id are required")
 	}
 	var n int64
 	if err := s.gdb.WithContext(ctx).Model(&AttentionRequest{}).
-		Where("project = ? AND session_id = ? AND answered_at = 0 AND timed_out_at = 0", project, sessionID).
+		Where("project = ? AND session_id = ? AND kind <> ? AND answered_at = 0 AND timed_out_at = 0",
+			project, sessionID, AttentionKindNotice).
 		Count(&n).Error; err != nil {
 		return false, fmt.Errorf("failed to count open attention requests: %w", err)
 	}

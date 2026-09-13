@@ -716,14 +716,15 @@ Stated plainly because each one will otherwise be discovered the hard way.
 - **A briefing that cannot load is only logged.** `BuildBriefingSections` returns no error by
   design, so a misconfigured `briefing` selector yields a worker running with a missing section
   and nothing in the job's output says so — look in agentd's log.
-- **A delivery parked at `awaiting_human` never leaves that status.** The human clicks the
-  permalink and replies, and the *session* resumes exactly as §9 intends — but the reply arrives
-  through the ordinary chat path, which knows nothing about deliveries, so the job-history row
-  stays parked with no `ended_at`. It is a display wart, not a stall: the parked row holds no
-  capacity slot, the lease reaper only touches `running` rows, and the worker keeps running new
-  jobs. Closing it would mean either a resume hook on the message path or extending the attention
-  sweep — and `expires_in`-less requests, which are the common case, are invisible to that sweep.
-  Deliberately not fixed by growing an approval state machine, which §9 explicitly deletes.
+- ~~A delivery parked at `awaiting_human` never left that status.~~ **Fixed 2026-09-13.** A
+  person's message to a session (`POST /agent/session/{id}/message`) now closes that session's
+  open attention requests *before* the turn it starts, and closing the last one settles the
+  session's parked deliveries to `ok` with an `ended_at`. The Desk's "Got it" / "Dismiss" is
+  `POST /agent/attention-requests/{id}/resolve`, which records the same answered state. A
+  timeout still does not settle the row — the timeout event wakes the worker instead.
+  `request_human_attention` also takes `notice: true` (migration `051`) for act-then-notify
+  reports: a notice never parks the job and never lapses, and the Desk shows it as a note to
+  acknowledge rather than an ask. The architect's STEP 5 report is a notice.
 
 ---
 

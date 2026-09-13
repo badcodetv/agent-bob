@@ -1194,6 +1194,23 @@ var agentMigrations = []migration{
 				ON git_projection_notes (project, kind, noted_at DESC);
 		`,
 	},
+	{
+		// `attention_requests.kind` separates the two things
+		// request_human_attention was being used for: an ASK (a question a
+		// person owes an answer to — the job parks at awaiting_human) and a
+		// NOTICE (act-then-notify: "here is what I changed", which the
+		// architect's prompt sends at the end of every run that changed
+		// anything). Before this column both parked the job, so every
+		// architect run sat at awaiting_human forever and the Desk listed a
+		// report as though it were an unanswered question.
+		//
+		// Numbered 051, not 050: feat/project-connections already carries a
+		// "050_worker_connections", and migrations are tracked by name.
+		Name: "051_attention_request_kind",
+		SQL: `
+			ALTER TABLE attention_requests ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'ask';
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

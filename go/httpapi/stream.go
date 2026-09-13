@@ -116,6 +116,9 @@ func (h *Handlers) SendMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
+	// A reply IS the answer (§9): whatever the person typed closes what the
+	// session asked them, before the turn it starts can ask again.
+	h.answerAttentionOnReply(r.Context(), id.Customer, sid)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
