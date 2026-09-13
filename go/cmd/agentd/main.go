@@ -559,6 +559,11 @@ func main() {
 			Store: agentDB, Dispatcher: gate, Sessions: runner, MaxProvisionFailures: maxFail,
 		})
 		go sched.Run(ctx)
+		// "Run a cycle now" (schedulerun.go): the scheduler's own firing, at the
+		// current minute, for a human hurrying the clock. Mounted here rather
+		// than in httpapi because it needs the scheduler, which httpapi cannot
+		// reach — the same reason POST /agent/attention lives here.
+		apiMux.HandleFunc("POST /agent/schedules/{id}/run", scheduleRunNowHandler(agentDB, sched))
 
 		attention = newAttentionService(agentDB, permalinks)
 		apiMux.HandleFunc("POST /agent/attention", attentionHandler(attention))

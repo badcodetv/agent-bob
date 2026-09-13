@@ -186,7 +186,11 @@ rewiring is delete + create.
 | `enabled` | |
 
 **Schedules** — `/agent/schedules` CRUD, the UI editor, or `schedule_create` / `schedule_update` /
-`schedule_delete`. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
+`schedule_delete`. `POST /agent/schedules/{id}/run` fires one **enabled** schedule now — the
+scheduler's own firing at the current minute (same claim, event, delivery and dispatch gate), so
+two presses in one minute fire once; a disabled schedule answers 409, and running is not a config
+event (`go/cmd/agentd/schedulerun.go`). The console's "Run a cycle now" calls it for every enabled
+schedule. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
 nicknames like `@daily` are **refused**, not expanded. A row carries **either** `worker` **or**
 `target_session` (the NAME of an existing session), never both and never neither — the store
 enforces the XOR (`go/agentdb/schedules.go:207-220`). A session-mode firing restores the session if
