@@ -13,14 +13,15 @@ walked three times each with screenshots. Nothing is pushed or merged: it all si
 connected to its session. The goal was also forgotten a second after creating the project, and
 after Approve nothing happened until 09:00 the next day.
 **Bob, now:**
-- Type a goal, then answer a short interview (3 short questions) that ends in a charter (the
-  one-page plan you approve).
+- Type a goal, then answer a short interview (3 short questions in the second walk, 5 in the final
+  walk) that ends in a charter (the one-page plan you approve).
 - Approve, and the architect (the worker that designs the team) starts at once. The screen shows
   its steps ("Creating numbers-clerk…") and each worker as it lands.
 - "Go to the Desk". The Desk shows what the team wrote down, notes from the team with a Got it
   button, and questions you can answer in a thread, which then clear.
 - "Run a cycle now" hurries the clock, skipping workers that just ran.
-- On the real model, a team of four was ready about 5½ minutes after Approve.
+- On the real model, a team of four was ready 4½–5½ minutes after Approve. In the final walk the
+  first architect step showed at 28s and the first worker at 89s.
 
 **Wolf, before:** the interview looped on tool calls, never ended, and the page never noticed when
 it was done.
@@ -39,18 +40,35 @@ it was done.
   or a notice). It applies on boot and must go out with the deploy.
 
 **Not verified / left for Kai:**
-- The final walk's own written report never reached the coordinator. The walk finished around
-  11:55 and committed its screenshots and 5 fixes.
-- Screenshots of Approve and the team forming exist only from the second walk (`bob-02-06`…`-08`),
-  not from the final walk.
-- Two mock-mode sessions and the test projects and hypotheses are left on the local stack on purpose.
-- Real-model sessions used: 15 before the final walk, and at most 9 in it.
+- Final walk result (its report arrived late): **both paths PASS**, gates green before and after its
+  fixes.
+- Screenshots of Approve and the team forming exist only from the second walk (`bob-02-06`…`-08`).
+  The final walk deleted its own shots because they showed only the charter, then fixed that
+  (`ee4aeb8`, unit-tested only).
+- "Run a cycle now" was not pressed in the final walk: it would have started about 6 more real
+  sessions. One worker's schedule was fired on its own instead, and its question cleared once
+  answered.
+- Real-model sessions used: 23 of 25 (Wolf 4 + Bob 11 earlier, then Bob 5 + Wolf 3 in the final walk).
+
+**Still not satisfying, worst first (not fixed):**
+1. A worker's chat thread opens with a big "Event: schedule.fired…" instruction bubble. The
+   `<agent-context>` collapse does not cover job seeds.
+2. Bob's interview asked 5 questions in the final walk, against a target of 3 or fewer.
+3. Wolf: proposal and timeline snippets show raw markdown; the report prints 4408.89990234375
+   unrounded; an ask card shows \"escaped\" quotes.
+4. Bob's Desk shows the raw status `awaiting_human` twice, and the first-memory hint still shows
+   when 5 memories already exist.
+5. The architect added a second schedule for itself instead of changing the first. One local ask
+   links to a deleted session, so its thread link is dead; Dismiss clears it.
+6. `./stack sessions` prints 1970 dates, and `./stack clean` fails when login is on.
 
 ## RESUME HERE
 
 Finished. Next steps are Kai's: review both branches, merge, and deploy (Bob needs migration 051).
 The local stack is in mock mode with test logins: `test@example.com` / `bob-e2e` for Bob, and
-Wolf's dev login `dev@example.com` (see `ff0564d`).
+Wolf's dev login `walker@example.com` / `walker-pass` via `POST /api/auth/dev-login` (the stack
+was started with `WOLF_TEST_LOGIN='walker@example.com:walker-pass'`; the flag's default is now
+`dev@example.com`, see `ff0564d`).
 
 ## Checklist
 
