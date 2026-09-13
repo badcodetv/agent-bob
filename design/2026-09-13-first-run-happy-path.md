@@ -40,7 +40,7 @@ Kai tried both apps as a new user and neither felt finished.
 ### Wolf: sign in → locked hypothesis → research
 - ✅ **Bounded interview with a clear closing message** (real model: 1 question, 7 tool calls, closing message names the button; built: ≤3 questions, defaults stated for vague ideas, tool-call caps, template skeleton, new `report_validate` tool; not yet seen on the real model)
 - ✅ **The page notices when the interview is done** (real model: button appeared ≤6s after the closing message, no reload; built: polls every 5s while draft, progress line, primary "Review and go live" button; not yet seen live)
-- 🟡 **Go live → scoreboard + visible research progress** (go-live feedback fixed; report + scoreboard land without reload ~3.5/6.5 min after a run; still NO signal while research runs)
+- 🟡 **Go live → scoreboard + visible research progress** (built `d7b619d` `eebb79b`: "Research is running — started 2 minutes ago…" / "Last research run finished … · next run …", polls 10s while running; review screen now shows the spec being locked `8f83511`; report stamp names the researcher `c212f9e`; chart years `f0c0c00`; draft says a template is ready `825ea04`; day one says "Waiting for the first observation" `3521e1c`; seed bubble is one short line `d641d94`. NOT yet seen live. Earlier: go-live feedback fixed; report + scoreboard land without reload ~3.5/6.5 min after a run; still NO signal while research runs)
 - ⬜ **Walked end to end on the real model, with screenshots**
 
 ## Decisions taken (and why)
@@ -94,3 +94,6 @@ Kai tried both apps as a new user and neither felt finished.
   and go live at the top of the hypothesis page…". Fixed: accept/go-live gave no feedback, live
   hypothesis still offered Go live, day-one scoreboard said "no observations" above a price chart.
   wolf gates 2505 tests green. Two test hypotheses left live for walker@example.com (local only).
+- 2026-09-13 — Wolf after-interview pass (code only, api 2002 / web 534 green): research state in the
+  detail payload from Bob deliveries for the researcher schedule; review screen shows the spec;
+  report writer, chart years, draft copy, day-one wording, shorter seed. Needs one live re-walk.
