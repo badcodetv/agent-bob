@@ -17,8 +17,10 @@ Kai tried both apps as a new user and neither felt finished.
 
 ## RESUME HERE
 
-1. Wolf finish-line fixes are BUILT (agent-wolf `5c9291f`..`42601a2`, gates green). Needs a live
-   real-model walk once the stack is free.
+1. Wolf WALKED on the real model twice (screens `wolf-01-*`): interview finishes cleanly; three
+   post-interview bugs fixed (`ed18f44` `ee13263` `96bab08`). Remaining: no "research running"
+   signal, review screen hides the spec, seed shown as user bubble, "unknown writer", draft page
+   says "No report template yet" after the interview, scoreboard 0.00 on day one.
 2. Bob chat-wiring fix is DONE and proven in a browser (mock model). Screens: `design/2026-09-13-first-run-screens/bob-01-*`.
 3. Bob team forming + "Run a cycle now" BUILT and MERGED (branch `feat/first-run-team-forming`),
    polish fixes merged. Gates re-running on the merge. NEXT: a real-model Bob walk (interview →
@@ -36,9 +38,9 @@ Kai tried both apps as a new user and neither felt finished.
 - ⬜ **Walked end to end on the real model, with screenshots**
 
 ### Wolf: sign in → locked hypothesis → research
-- 🟡 **Bounded interview with a clear closing message** (built: ≤3 questions, defaults stated for vague ideas, tool-call caps, template skeleton, new `report_validate` tool; not yet seen on the real model)
-- 🟡 **The page notices when the interview is done** (built: polls every 5s while draft, progress line, primary "Review and go live" button; not yet seen live)
-- ⬜ **Go live → scoreboard + visible research progress**
+- ✅ **Bounded interview with a clear closing message** (real model: 1 question, 7 tool calls, closing message names the button; built: ≤3 questions, defaults stated for vague ideas, tool-call caps, template skeleton, new `report_validate` tool; not yet seen on the real model)
+- ✅ **The page notices when the interview is done** (real model: button appeared ≤6s after the closing message, no reload; built: polls every 5s while draft, progress line, primary "Review and go live" button; not yet seen live)
+- 🟡 **Go live → scoreboard + visible research progress** (go-live feedback fixed; report + scoreboard land without reload ~3.5/6.5 min after a run; still NO signal while research runs)
 - ⬜ **Walked end to end on the real model, with screenshots**
 
 ## Decisions taken (and why)
@@ -47,7 +49,7 @@ Kai tried both apps as a new user and neither felt finished.
   Kai's wish ("the architect says: here's the team I'd deploy") is met by running the architect
   the moment the charter is approved and showing its roster land, rather than making the
   interviewer design workers (the prompt forbids that on purpose — doc 18 §9a).
-- **Mock model for wiring, real model only to judge quality.** Real-session budget: 25; used: 0.
+- **Mock model for wiring, real model only to judge quality.** Real-session budget: 25; used: 4 (Wolf walks).
 - **Test logins turned on locally** (`AGENTKIT_TEST_LOGIN`, `--test-login`) so agents can drive the
   browser; Google sign-in still works alongside.
 
@@ -87,3 +89,8 @@ Kai tried both apps as a new user and neither felt finished.
   "overlapping labels" were a screenshot taken mid-animation, not a bug. `8fc85ce`..`a65deaa`.
 - 2026-09-13 — Bob team forming merged: approve starts the architect (`c22c790`), schedule run-now
   route (`e6d7508`), team-forming panel + Run a cycle now (`ad010b0`), shell link + specs (`a56f444`).
+- 2026-09-13 — Wolf real-model walks ×2 (4 sessions). Interview: create→first question 23s,
+  answer→closing message ~40s, button ≤6s later. Closing message: "It's ready for you: press Review
+  and go live at the top of the hypothesis page…". Fixed: accept/go-live gave no feedback, live
+  hypothesis still offered Go live, day-one scoreboard said "no observations" above a price chart.
+  wolf gates 2505 tests green. Two test hypotheses left live for walker@example.com (local only).
