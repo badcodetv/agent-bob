@@ -529,3 +529,46 @@ func TestWorkersLivePG_SchemaDefaults(t *testing.T) {
 		t.Fatalf("frozen: false did not persist on live Postgres — the gorm-default trap")
 	}
 }
+
+func TestListWorkerProjectNames(t *testing.T) {
+	s := newWorkerTestStore(t)
+	ctx := context.Background()
+	seed := []struct {
+		project, name string
+		updated       int64
+	}{
+		{"bakery", "interviewer", 100},
+		{"bakery", "architect", 300},
+		{"bookshop", "interviewer", 200},
+		{"florist", "interviewer", 50},
+	}
+	for _, w := range seed {
+		row := &Worker{Project: w.project, Name: w.name, Enabled: true, MaxInstances: 1, CreatedAt: w.updated, UpdatedAt: w.updated}
+		if err := s.gdb.Create(row).Error; err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		// autoUpdateTime stamps now on create; pin the value the test orders by.
+		if err := s.gdb.Model(&Worker{}).Where("project = ? AND name = ?", w.project, w.name).UpdateColumn("updated_at", w.updated).Error; err != nil {
+			t.Fatalf("pin updated_at: %v", err)
+		}
+	}
+	cases := []struct {
+		name  string
+		limit int
+		want  []string
+	}{
+		{"distinct, most recently active first", 0, []string{"bakery", "bookshop", "florist"}},
+		{"capped", 2, []string{"bakery", "bookshop"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := s.ListWorkerProjectNames(ctx, tc.limit)
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

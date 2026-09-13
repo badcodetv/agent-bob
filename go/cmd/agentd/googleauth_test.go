@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -965,5 +967,66 @@ func TestParseTestLogin(t *testing.T) {
 		if _, _, err := parseTestLogin(bad); err == nil {
 			t.Fatalf("parseTestLogin(%q) should fail", bad)
 		}
+	}
+}
+
+func TestStoredProjectsDirectory(t *testing.T) {
+	pm := projectMap{
+		"kai@example.com":  {"*"},
+		"jack@example.com": {"apples-oranges"},
+		"ops@example.com":  {"pears-plums"},
+	}
+	cases := []struct {
+		name    string
+		list    func(context.Context, int) ([]string, error)
+		email   string
+		want    []string
+		wantAll []string
+	}{
+		{
+			name: "a wildcard grant also lists stored projects, deduplicated, invalid ids dropped",
+			list: func(context.Context, int) ([]string, error) {
+				return []string{"bakery-newsletter", "pears-plums", "Not Valid"}, nil
+			},
+			email:   "kai@example.com",
+			want:    []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+			wantAll: []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+		},
+		{
+			name:    "a plain account is untouched",
+			list:    func(context.Context, int) ([]string, error) { return []string{"bakery-newsletter"}, nil },
+			email:   "jack@example.com",
+			want:    []string{"apples-oranges"},
+			wantAll: []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+		},
+		{
+			name:    "a failed read falls back to the map",
+			list:    func(context.Context, int) ([]string, error) { return nil, fmt.Errorf("database is down") },
+			email:   "kai@example.com",
+			want:    []string{"apples-oranges", "pears-plums"},
+			wantAll: []string{"apples-oranges", "pears-plums"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := storedProjectsDirectory{userDirectory: pm, list: tc.list}
+			got, _, ok := d.resolve(tc.email)
+			if !ok {
+				t.Fatalf("resolve(%s) not ok", tc.email)
+			}
+			sort.Strings(got)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("resolve = %v, want %v", got, want)
+			}
+			all := d.allProjects()
+			sort.Strings(all)
+			wantAll := append([]string(nil), tc.wantAll...)
+			sort.Strings(wantAll)
+			if !reflect.DeepEqual(all, wantAll) {
+				t.Fatalf("allProjects = %v, want %v", all, wantAll)
+			}
+		})
 	}
 }

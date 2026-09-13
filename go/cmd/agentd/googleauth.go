@@ -11,6 +11,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -319,6 +320,67 @@ func (pm projectMap) resolve(email string) (projects []string, wildcard, ok bool
 type userDirectory interface {
 	resolve(email string) (projects []string, wildcard, ok bool)
 	allProjects() []string
+}
+
+// storedProjectsDirectory widens a WILDCARD grant with the projects that exist
+// in the database. The project map only names projects someone wrote into it;
+// a wildcard login creates projects by minting a token for a new id, and those
+// never reach the map — so after signing in again, the picker listed none of
+// them. A wildcard holder can already mint a token for any project id, so
+// listing the names grants nothing new. A non-wildcard account is untouched.
+//
+// Best-effort: a failed or slow read returns the map's projects alone, because
+// a login that fails over a convenience list is worse than a shorter list.
+type storedProjectsDirectory struct {
+	userDirectory
+	list func(ctx context.Context, limit int) ([]string, error)
+}
+
+// storedProjectsLimit caps how many database projects a login lists (and so
+// mints tokens for). Most recently active first.
+const storedProjectsLimit = 50
+
+func (d storedProjectsDirectory) stored() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	names, err := d.list(ctx, storedProjectsLimit)
+	if err != nil {
+		log.Printf("[agentd] login: could not list stored projects, using the project map alone: %v", err)
+		return nil
+	}
+	out := names[:0:0]
+	for _, n := range names {
+		if validProjectID.MatchString(n) && len(n) <= 64 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func mergeProjectNames(first, second []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{first, second} {
+		for _, p := range list {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func (d storedProjectsDirectory) resolve(email string) ([]string, bool, bool) {
+	projects, wildcard, ok := d.userDirectory.resolve(email)
+	if ok && wildcard {
+		projects = mergeProjectNames(projects, d.stored())
+	}
+	return projects, wildcard, ok
+}
+
+func (d storedProjectsDirectory) allProjects() []string {
+	return mergeProjectNames(d.userDirectory.allProjects(), d.stored())
 }
 
 // projectSettingsHolder is the live, reloadable project map. Every reader that

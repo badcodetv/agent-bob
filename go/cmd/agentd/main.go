@@ -673,15 +673,21 @@ func main() {
 		// snapshot of its users half, so a reload reaches these handlers
 		// without re-registering them (A6).
 		loginIssuer := devclaims.NewWithTTL(jwtSecret, 12*time.Hour)
+		var logins userDirectory = projectMapHolder
+		if agentDB != nil {
+			// A wildcard login also lists the projects that exist but that the
+			// map never named — the ones it created itself.
+			logins = storedProjectsDirectory{userDirectory: projectMapHolder, list: agentDB.ListWorkerProjectNames}
+		}
 		if googleClientID != "" {
 			root.HandleFunc("POST /auth/google", authGoogleHandler(
-				&googleVerifier{clientID: googleClientID}, projectMapHolder, loginIssuer))
+				&googleVerifier{clientID: googleClientID}, logins, loginIssuer))
 			log.Printf("[agentd] google login enabled (%d mapped account(s))", len(projectMapHolder.users()))
 		}
 		if testLogin != "" {
 			email, password, err := parseTestLogin(testLogin)
 			must(err)
-			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, projectMapHolder, loginIssuer))
+			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, loginIssuer))
 			log.Printf("[agentd] WARNING: password test login enabled for %s — all projects granted; test/dev only", email)
 		}
 		// Wildcard-login exchange: mints tokens for new project IDs.

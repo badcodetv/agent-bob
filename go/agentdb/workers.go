@@ -447,3 +447,34 @@ func (s *Store) DeleteWorker(ctx context.Context, project, name string, cw Confi
 	}
 	return nil
 }
+
+// ListWorkerProjectNames returns the distinct projects that have at least one
+// worker, most recently active first, capped at limit (0 = 50). Every project
+// created through onboarding has one — the interviewer is written when the
+// project is — so this is the cheap answer to "which projects exist", which
+// the project map cannot give: a wildcard login creates projects the map never
+// names. Read-only, unscoped by design: its one caller is the wildcard login,
+// which may already mint a token for any project id.
+func (s *Store) ListWorkerProjectNames(ctx context.Context, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	type row struct {
+		Project string
+		Latest  int64
+	}
+	var rows []row
+	if err := s.gdb.WithContext(ctx).Model(&Worker{}).
+		Select("project, MAX(updated_at) AS latest").
+		Group("project").
+		Order("latest DESC, project ASC").
+		Limit(limit).
+		Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("failed to list worker projects: %w", err)
+	}
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.Project)
+	}
+	return out, nil
+}
