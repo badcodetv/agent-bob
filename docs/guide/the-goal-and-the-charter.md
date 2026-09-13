@@ -6,10 +6,10 @@ order: 2
 surfaces: [project-create, onboarding]
 ---
 
-The charter is the one document every project starts from: what it is for, how you would know it
-is working, and what gets written down. You write the goal; an interview turns it into the rest;
-you approve the whole thing once. "The gate is for comprehension, not correctness: nobody is being
-asked to audit a schema, only whether this is what their project is for."
+The charter is the short document every project starts from: what it is for, how you would know
+it is working, and what gets written down. You write the goal; an interview asks a few questions
+and drafts the rest; you read it and approve it once. Approving asks whether this is what your
+project is for, not whether every detail is perfect.
 
 ## In the console
 

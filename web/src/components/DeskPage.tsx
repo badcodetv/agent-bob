@@ -665,8 +665,9 @@ function FirstRun({
       {inInterview ? (
         <>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            An interview is setting this project up. Answer its questions and approve the charter
-            it writes, and the architect it creates will build the roster.
+            An interview is setting this project up. Answer its questions, then approve the
+            charter it writes: a short statement of what the project is for. Approving creates the
+            architect, a worker that designs the rest of the team.
           </Typography>
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
             <Button

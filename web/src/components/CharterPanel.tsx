@@ -103,7 +103,7 @@ export default function CharterPanel({
           <Stack spacing={2}>
             <Part label="What this project is for" value={c.goal} />
             <Part label="How we would know it is working" value={c.measure} />
-            <Part label="What gets written down, and under which label" value={c.label_rules} />
+            <Part label="What gets written down, and how it is filed" value={c.label_rules} />
             <Part label="Background every worker carries" value={c.project_background} />
           </Stack>
         )}
@@ -134,8 +134,9 @@ export default function CharterPanel({
               )}
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              Approving this creates the architect and nothing else — it decides what workers this
-              project needs, and creates them itself.
+              Approving this creates one worker, the architect, and nothing else. The architect is
+              an AI worker whose job is to decide what other workers this project needs, and to
+              create them itself.
               {effects?.schedule_enabled === true
                 ? ' From then on it reviews the project on the schedule above and makes changes without asking. Every change it makes can be reverted from the changelog, and the schedule itself can be switched off on the architect\u2019s Triggers tab.'
                 : ' You can run it whenever you like.'}
@@ -182,7 +183,7 @@ export default function CharterPanel({
 
         {applied ? (
           <Alert severity="success" data-testid="charter-applied">
-            Approved. The architect exists.
+            Approved. The architect has been created.
           </Alert>
         ) : (
           charter.valid && (

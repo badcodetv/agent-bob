@@ -175,8 +175,8 @@ export default function OnboardingPage({
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Answer the questions on the left. When there is enough to go on, a charter appears
-              here — what this project is for, how you would know it is working, and what gets
-              written down. Nothing exists until you approve it.
+              here: a short statement of what this project is for, how you would know it is
+              working, and what gets written down. Nothing is created until you approve it.
             </Typography>
           </Box>
 

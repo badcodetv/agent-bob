@@ -69,8 +69,8 @@ export default function CreateProjectForm({ onCreate, onCreated, onCancel, autoF
         autoFocus={autoFocus}
         required
         label="Project id"
-        placeholder="apples-oranges"
-        helperText="Kebab-case. This is the namespace everything in the project lives under."
+        placeholder="bookshop-newsletter"
+        helperText="Lowercase letters, numbers and hyphens, like bookshop-newsletter. Everything in the project is filed under it."
         value={projectId}
         onChange={(e) => setProjectId(e.target.value)}
         slotProps={{ htmlInput: { 'data-testid': 'new-project-input' } }}
@@ -82,7 +82,7 @@ export default function CreateProjectForm({ onCreate, onCreated, onCancel, autoF
         minRows={2}
         required
         label="What is this project for?"
-        helperText="Your goal — the interview starts from this."
+        helperText="One sentence about the outcome you want. The interview starts from this, so a rough answer is fine."
         placeholder="e.g. send a weekly newsletter that brings people back into the shop"
         value={goal}
         onChange={(e) => setGoal(e.target.value)}
