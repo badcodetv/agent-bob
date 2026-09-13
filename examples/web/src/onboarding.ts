@@ -38,6 +38,9 @@
 import { useEffect, useRef, useState } from "react";
 
 export const ONBOARD_SESSION_NAME = "onboard";
+/** What the session list calls the interview. Without it the list read
+ *  "Untitled" — the first message is instructions, not something to title. */
+export const ONBOARD_SESSION_TITLE = "Onboarding interview";
 const INTERVIEWER = "interviewer";
 
 /** How long to wait for a container before giving up and saying so. */
@@ -113,7 +116,7 @@ export async function startOnboarding(opts: StartOnboardingOptions): Promise<str
   // 4. The session. persona, never worker — see the note at the top.
   const created = await call("/agent/session", {
     method: "POST",
-    body: JSON.stringify({ persona: INTERVIEWER, name: ONBOARD_SESSION_NAME }),
+    body: JSON.stringify({ persona: INTERVIEWER, name: ONBOARD_SESSION_NAME, title: ONBOARD_SESSION_TITLE }),
   });
   if (!created.ok) await failWith(created, "could not start the interview");
   const createdRow = (await created.json()) as { id?: string; sessionId?: string };

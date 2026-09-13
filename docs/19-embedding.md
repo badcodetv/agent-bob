@@ -155,6 +155,10 @@ else about the route is unchanged.
 
 Response is the usual `{id, status, workflowId}`.
 
+An optional `title` sets what the session list shows (trimmed, cut to 255 bytes). Leave it out and
+the first message is summarised into one when a title model is configured; set it when the first
+message is instructions rather than conversation, as the onboarding interview does.
+
 **Look it up again by the name you chose:**
 
 ```http
@@ -656,7 +660,7 @@ Everything an embedding backend touches, in one table.
 
 | Method + path | Auth | Notes |
 | --- | --- | --- |
-| `POST /agent/session` | key or JWT | optional `name`; 409/400/403/501 |
+| `POST /agent/session` | key or JWT | optional `name` and `title`; 409/400/403/501 |
 | `GET /agent/sessions/by-name/{name}` | key, JWT, **or a matching embed token** | omits `composed_prompt` |
 | `GET /agent/sessions/by-name/{name}/artifacts` | key, JWT, **or a matching embed token** | metadata list |
 | `GET /agent/sessions/by-name/{name}/artifacts/file?path=…` | key, JWT, **or a matching embed token** | raw bytes |

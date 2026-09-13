@@ -24,7 +24,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useInterviewState, startOnboarding, ONBOARD_SESSION_NAME } from './onboarding.js'
+import { useInterviewState, startOnboarding, ONBOARD_SESSION_NAME, ONBOARD_SESSION_TITLE } from './onboarding.js'
 
 const API = 'http://api.test'
 const TOKEN = 'test-token'
@@ -229,10 +229,14 @@ describe('startOnboarding', () => {
   /** A scripted by-name status sequence; the last entry repeats. */
   function fakeServer(opts: { exists: boolean; statuses: { status: string; create_error?: string }[] }) {
     const posts: string[] = []
+    const bodies: Record<string, unknown> = {}
     let polls = 0
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const path = new URL(String(input)).pathname
-      if (init?.method === 'POST' || init?.method === 'PUT') posts.push(path)
+      if (init?.method === 'POST' || init?.method === 'PUT') {
+        posts.push(path)
+        if (typeof init.body === 'string') bodies[path] = JSON.parse(init.body)
+      }
       if (path === SESSION_PATH) {
         if (!opts.exists && posts.every((p) => p !== '/agent/session')) {
           return new Response('no such session', { status: 404 })
@@ -249,17 +253,23 @@ describe('startOnboarding', () => {
       }
       return new Response('unexpected path ' + path, { status: 500 })
     })
-    return { fetchImpl: fetchImpl as unknown as typeof fetch, posts }
+    return { fetchImpl: fetchImpl as unknown as typeof fetch, posts, bodies }
   }
 
   it('creates the session, waits out `creating`, and sends no message itself', async () => {
-    const { fetchImpl, posts } = fakeServer({
+    const { fetchImpl, posts, bodies } = fakeServer({
       exists: false,
       statuses: [{ status: 'creating' }, { status: 'creating' }, { status: 'running' }],
     })
     const id = await startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })
     expect(id).toBe('sess-onboard-9')
     expect(posts).toContain('/agent/session')
+    // Named for the session list: its first message is not something to title.
+    expect(bodies['/agent/session']).toEqual({
+      persona: 'interviewer',
+      name: ONBOARD_SESSION_NAME,
+      title: ONBOARD_SESSION_TITLE,
+    })
     expect(posts.some((p) => p.endsWith('/message'))).toBe(false)
   })
 

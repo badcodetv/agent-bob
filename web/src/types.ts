@@ -165,6 +165,9 @@ export interface AgentSessionListItem {
    * `persona`, which is the older prompt-preset concept.
    */
   worker?: string
+  /** The session's project-unique name, when it has one (`onboard` for a
+   *  project's interview). Absent for ordinary chats. */
+  name?: string
   container_state?: string
   snapshot_state?: '' | 'pending' | 'archived' | 'failed' | 'persistence_failed' | 'extraction_failed'
   snapshot_progress?: OpProgress
