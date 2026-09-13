@@ -133,15 +133,19 @@ the workers are its actual shape. Bring the second towards the first.
   {kind: "project-goal", name: "project-goal"} so it is readable as a note.
 
 STEP 5 — IF YOU CHANGED ANYTHING, SAY SO.
-Call request_human_attention with a message naming what you changed, why, and
-that it can be reverted from the changelog. This is not permission-seeking —
-it has already happened. It is you telling a human what you did.
+Call request_human_attention (message, notice) with notice set to true and a
+message naming what you changed, why, and that it can be reverted from the
+changelog. This is not permission-seeking — it has already happened. It is you
+telling a human what you did, so it is a notice: nobody owes you a reply, and
+leaving notice off would park your run as though you were waiting for one.
+Lead with one short line a person can read at a glance, then the detail.
 
 STEP 6 — IF YOU ARE BLIND, SAY THAT TOO.
 If this is the third run in a row where you found no new evidence, call
 request_human_attention and say plainly: nothing in this project is writing
 memory, so you cannot tell whether anything is working, and somebody should
-either give a worker that job or turn you off.
+either give a worker that job or turn you off. Leave notice off here: this one
+needs a person to decide something.
 
 ═══════════════════════════════════════════════════════════════════════
 RULES THAT DO NOT BEND

@@ -121,3 +121,43 @@ func TestLabelRegistryExplainsTheThreeMechanics(t *testing.T) {
 		}
 	}
 }
+
+// TestArchitectReportsAsANotice pins the first-run fix for parked architect
+// runs: STEP 5 is act-then-notify, so it must say notice — without it every
+// run that changed anything parked at awaiting_human forever and sat on the
+// Desk as an unanswered question. STEP 6 needs a decision, so it must not.
+func TestArchitectReportsAsANotice(t *testing.T) {
+	p := Architect()
+	step5 := strings.Index(p, "STEP 5 — IF YOU CHANGED ANYTHING, SAY SO.")
+	step6 := strings.Index(p, "STEP 6 — IF YOU ARE BLIND, SAY THAT TOO.")
+	rules := strings.Index(p, "RULES THAT DO NOT BEND")
+	if step5 < 0 || step6 < step5 || rules < step6 {
+		t.Fatal("architect.md has lost STEP 5, STEP 6 or the rules that follow them")
+	}
+	if !strings.Contains(p[step5:step6], "notice set to true") {
+		t.Error("STEP 5 must send its report as a notice")
+	}
+	if !strings.Contains(p[step6:rules], "Leave notice off") {
+		t.Error("STEP 6 must ask, not notify")
+	}
+}
+
+// TestInterviewerKeepsQuestionsShort pins the round-2 first-use fix: the
+// labelling question used to arrive as a twenty-line paragraph. The
+// interviewer proposes labels rather than asking a person to invent them.
+func TestInterviewerKeepsQuestionsShort(t *testing.T) {
+	p := Interviewer()
+	for name, want := range map[string]string{
+		"the length rule":       "at most two short sentences",
+		"options when a choice": "Offer options whenever the answer can",
+		"labels are proposed":   "PROPOSE them",
+		"no follow-up on a yes": "do not ask a follow-up",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("interviewer.md is missing %s: no %q", name, want)
+		}
+	}
+	if strings.Contains(p, "explain it before you ask") {
+		t.Error("interviewer.md still tells the interviewer to lecture before the labelling question")
+	}
+}
