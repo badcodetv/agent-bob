@@ -22,11 +22,13 @@ Kai tried both apps as a new user and neither felt finished.
    signal, review screen hides the spec, seed shown as user bubble, "unknown writer", draft page
    says "No report template yet" after the interview, scoreboard 0.00 on day one.
 2. Bob chat-wiring fix is DONE and proven in a browser (mock model). Screens: `design/2026-09-13-first-run-screens/bob-01-*`.
-3. Bob WALKED on the real model (screens `bob-02-*`, 11 sessions): goal → 3 questions → charter →
-   4 workers → one cycle. Fixed on the way: Activity/Desk showed nothing readable. Remaining: parked
-   jobs never clear, ~2 min silent start in the team panel, Q3 + label rules are walls of text,
-   stacked "now in the menu above" notices. NEXT: fix those + Wolf adopts `<agent-context>`, then
-   a last short live check.
+3. Bob WALKED on the real model (screens `bob-02-*`, 11 sessions). Round 2 BUILT (12 commits,
+   gates green): parked asks clear on reply, architect notices dismissable (migration 051), live
+   architect steps while the team forms, shorter interview questions, label rules as a list, merged
+   menu notice, sidebar lists the interview, picker lists projects, markdown-free previews, Desk link
+   fixed, cycle skips recently-run workers, no $ in subscription mode. Wolf adopted the
+   `<agent-context>` seed + interview session title.
+4. NOW: one final real-model walk of both apps (≤9 sessions), screens `bob-03-*` / `wolf-02-*`.
 
 ## Checklist
 
@@ -110,3 +112,8 @@ Kai tried both apps as a new user and neither felt finished.
   weekly-review, scribe. A cycle settled in 4 min. Fixed: Activity shows closing words with Show all
   (`f03d814`); Desk "Written down" + human schedule names (`0c16728`); cycle confirm names schedule
   times (`701c091`); generic agent-context block (`ad3fc3c`). web 1781 / examples-web 11 green.
+- 2026-09-13 — Bob round 2 (code, web 1828 green): `ef3fad0` reply settles parked job + notice flag;
+  `d385c35` architect sends a notice, interviewer proposes labels; `da32193` Desk "From the team" with
+  Got it; `cb26171` live architect steps; `4318341` label rules list; `40174d3` one menu notice;
+  `289d6d4` sidebar; `2bd1d3d` picker; `6a11626` previews; `f3edb56` Desk link; `4f3b9aa` cycle skips
+  recent; `4f0dd77` subscription budget line. Wolf `65737f5` `cdd5b8e` `dcb6d4b` (api 2007 green).
