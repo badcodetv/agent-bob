@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  splitLabelRules,
   buildOnboardingSeed,
   parseOnboardingSeed,
   coerceCharter,
@@ -161,6 +162,25 @@ describe('coerceCharterIssues', () => {
     expect(coerceCharterIssues(null)).toEqual([])
     expect(coerceCharterIssues('nope')).toEqual([])
     expect(coerceCharterIssues({ errors: 'nope' })).toEqual([])
+  })
+})
+
+describe('splitLabelRules', () => {
+  it.each([
+    ['one rule per line, bullets stripped', '- kind=decision — why\n- kind=lesson: next time', [
+      { label: 'kind=decision', meaning: 'why' },
+      { label: 'kind=lesson', meaning: 'next time' },
+    ]],
+    ['one paragraph, split only where a sentence ends before kind=', 'kind=summary - what happened; name=<slug> too. kind=draft - not sent yet, e.g. kind=draft notes.', [
+      { label: 'kind=summary', meaning: 'what happened; name=<slug> too.' },
+      { label: 'kind=draft', meaning: 'not sent yet, e.g. kind=draft notes.' },
+    ]],
+    ['prose with no rule shape stays whole', 'Keep decisions and lessons.', [
+      { label: '', meaning: 'Keep decisions and lessons.' },
+    ]],
+    ['blank is nothing', '   ', []],
+  ])('%s', (_name, text, want) => {
+    expect(splitLabelRules(text)).toEqual(want)
   })
 })
 

@@ -185,6 +185,46 @@ export function describeCharterCadence(cron: string): string {
   return cron.trim()
 }
 
+/** One labelling rule, split out of the charter's prose for a list. */
+export interface LabelRule {
+  /** `kind=decision`, or '' when the rule does not lead with one. */
+  label: string
+  /** What it is for and when it is written, in the interview's words. */
+  meaning: string
+}
+
+/**
+ * Split `label_rules` into one rule per label, for a bulleted list.
+ *
+ * Interviews write the rules two ways: one rule per line, or one paragraph
+ * where each rule starts `kind=<name> - …` straight after the previous
+ * sentence ends. Both split here, and nothing is dropped — every character of
+ * the prose lands in exactly one rule, because these rules are the thing a
+ * person is approving. `name=<slug>` inside a rule's meaning is NOT a split
+ * point: it is how that rule's notes are named. Returns one rule holding the
+ * whole text when it has no recognisable shape, and the panel then shows it as
+ * prose.
+ */
+export function splitLabelRules(text: string): LabelRule[] {
+  const trimmed = text.trim()
+  if (trimmed === '') return []
+  const lines = trimmed
+    .split(/\n+/)
+    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim())
+    .filter((l) => l !== '')
+  const chunks =
+    lines.length > 1
+      ? lines
+      : trimmed
+          .split(/(?<=[.;!?])\s+(?=kind=[\w.-]+\s*[-–—:]\s)/)
+          .map((c) => c.trim())
+          .filter((c) => c !== '')
+  return chunks.map((chunk) => {
+    const m = /^(kind=[\w.-]+)\s*(?:[-–—:]\s*)?([\s\S]*)$/.exec(chunk)
+    return m ? { label: m[1]!, meaning: m[2]!.trim() } : { label: '', meaning: chunk }
+  })
+}
+
 /**
  * The first message an onboarding interview is handed.
  *

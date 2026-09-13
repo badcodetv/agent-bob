@@ -6,7 +6,8 @@
 // this is what their project is for. So the panel renders the four
 // substantive parts in the words the interview agreed, and the labelling
 // rules IN FULL rather than truncated, because those are the thing actually
-// being agreed and a "…" over them would defeat the point of asking.
+// being agreed and a "…" over them would defeat the point of asking. In full
+// is not the same as in one paragraph: they render as a list, one per label.
 //
 // Router-free and store-free: it takes a charter and an apply function.
 
@@ -26,6 +27,7 @@ import {
 } from '@mui/material'
 import {
   describeCharterCadence,
+  splitLabelRules,
   type CharterCurrent,
   type CharterIssue,
 } from '../charter.js'
@@ -59,6 +61,44 @@ function Part({ label, value }: { label: string; value: string }) {
       <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
         {value}
       </Typography>
+    </Box>
+  )
+}
+
+/**
+ * The labelling rules as a list: one rule per label, the label in mono and
+ * what it is for beside it, under one plain sentence saying why rules exist.
+ * Text with no recognisable rule shape falls back to prose — never truncated.
+ */
+function LabelRules({ value }: { value: string }) {
+  const rules = splitLabelRules(value)
+  if (rules.length === 0) return null
+  if (rules.length === 1 && rules[0]!.label === '') {
+    return <Part label="What gets written down, and how it is filed" value={value} />
+  }
+  return (
+    <Box data-testid="charter-label-rules">
+      <Typography variant="overline" color="text.secondary" component="div">
+        What gets written down, and how it is filed
+      </Typography>
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>
+        Workers remember nothing between runs, so these labels are how anything they learn is kept
+        and found again.
+      </Typography>
+      <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+        {rules.map((rule, i) => (
+          <Box component="li" key={`${rule.label}-${i}`} sx={{ py: 0.25 }}>
+            <Typography variant="body2" component="span">
+              {rule.label !== '' && (
+                <Box component="code" sx={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', mr: 0.75 }}>
+                  {rule.label}
+                </Box>
+              )}
+              {rule.meaning}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
     </Box>
   )
 }
@@ -103,7 +143,7 @@ export default function CharterPanel({
           <Stack spacing={2}>
             <Part label="What this project is for" value={c.goal} />
             <Part label="How we would know it is working" value={c.measure} />
-            <Part label="What gets written down, and how it is filed" value={c.label_rules} />
+            <LabelRules value={c.label_rules} />
             <Part label="Background every worker carries" value={c.project_background} />
           </Stack>
         )}

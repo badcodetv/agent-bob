@@ -54,11 +54,28 @@ describe('CharterPanel', () => {
 
     // Every rule, not a truncation: these are the thing being agreed, and a
     // human who cannot read the last one has not agreed to it.
-    const rules = screen.getByText(/kind=decision/)
-    for (const line of LABEL_RULES.split('\n')) {
-      expect(rules.textContent).toContain(line)
+    const rules = screen.getByTestId('charter-label-rules')
+    const items = rules.querySelectorAll('li')
+    expect(items).toHaveLength(LABEL_RULES.trim().split('\n').length)
+    for (const line of LABEL_RULES.trim().split('\n')) {
+      const [label, meaning] = line.split(' — ')
+      expect(rules.textContent).toContain(label)
+      expect(rules.textContent).toContain(meaning)
     }
     expect(rules.textContent).not.toContain('…')
+  })
+
+  it('lists a one-paragraph set of rules one per label, without splitting on name=', () => {
+    const charter = validCharter()
+    charter.charter!.label_rules =
+      'kind=decision - a choice and why. kind=summary - what happened; name=<slug> so it can be found again. kind=fact - a durable fact.'
+    render(<CharterPanel charter={charter} onApprove={vi.fn()} />)
+    const items = screen.getByTestId('charter-label-rules').querySelectorAll('li')
+    expect(Array.from(items).map((li) => li.textContent)).toEqual([
+      'kind=decisiona choice and why.',
+      'kind=summarywhat happened; name=<slug> so it can be found again.',
+      'kind=facta durable fact.',
+    ])
   })
 
   // The one line that says a loop will change the project on a clock, by
