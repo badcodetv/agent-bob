@@ -407,9 +407,17 @@ function ProjectWorkspace({
   // says the interview is over, forget it, or a later reload of this project
   // would read the stale goal and jump straight back into the onboarding view
   // (the exact "state of the browser, not the project" bug G1 fixes).
+  //
+  // "Over" needs an interview session to exist. `inInterview` is also false
+  // before the interview has STARTED — the first check runs at mount, before
+  // the `onboard` session is created — and clearing the goal then (as this
+  // did) handed the onboarding screen a null goal, so the seed told the
+  // interviewer nobody had written one. Invisible while the seed was sent from
+  // startOnboarding, which captured the goal before the check came back; the
+  // same confusion DI29 was, one hook further out.
   useEffect(() => {
-    if (interviewResolved && !inInterview) onOnboardingDone();
-  }, [interviewResolved, inInterview, onOnboardingDone]);
+    if (interviewResolved && !inInterview && interviewSessionId !== null) onOnboardingDone();
+  }, [interviewResolved, inInterview, interviewSessionId, onOnboardingDone]);
   const [deskAsks, setDeskAsks] = useState(0);
   const { count: fetchedAsks } = useAsksCount({ enabled: !onDesk });
   const openAsks = onDesk ? deskAsks : fetchedAsks;
