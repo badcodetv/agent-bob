@@ -182,8 +182,9 @@ export {
   coerceCharterCurrent,
   describeCharterCadence,
   buildOnboardingSeed,
+  parseOnboardingSeed,
 } from './charter.js'
-export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './charter.js'
+export type { Charter, CharterIssue, CharterEffects, CharterCurrent, OnboardingSeed } from './charter.js'
 export { default as useCharter } from './useCharter.js'
 export type { UseCharterOptions, CharterApi } from './useCharter.js'
 

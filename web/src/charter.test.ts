@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildOnboardingSeed,
+  parseOnboardingSeed,
   coerceCharter,
   coerceCharterCurrent,
   coerceCharterEffects,
@@ -200,5 +201,33 @@ describe('buildOnboardingSeed', () => {
   it('says so when there is no goal, rather than shipping a blank line', () => {
     const seed = buildOnboardingSeed('s1', '   ')
     expect(seed).toMatch(/did not write a goal/i)
+  })
+})
+
+describe('parseOnboardingSeed', () => {
+  it('round-trips what buildOnboardingSeed wrote', () => {
+    const goal = 'Send one email a week.\n\nTo the bookshop list.'
+    expect(parseOnboardingSeed(buildOnboardingSeed('7974ef7b49bb', goal))).toEqual({
+      sessionId: '7974ef7b49bb',
+      goal,
+    })
+  })
+
+  it('reads a seed with no goal as an empty goal, not as the placeholder text', () => {
+    expect(parseOnboardingSeed(buildOnboardingSeed('s1', ''))).toEqual({ sessionId: 's1', goal: '' })
+  })
+
+  it('tolerates CRLF line endings from a replayed transcript', () => {
+    const seed = buildOnboardingSeed('s1', 'a goal').replace(/\n/g, '\r\n')
+    expect(parseOnboardingSeed(seed)?.goal).toBe('a goal')
+  })
+
+  it.each([
+    ['an ordinary message', 'hello there'],
+    ['only the first line', "This interview's session id is s1."],
+    ['a preamble with one line changed', buildOnboardingSeed('s1', 'goal').replace('exactly that id', 'that id')],
+    ['text before the preamble', 'Note:\n' + buildOnboardingSeed('s1', 'goal')],
+  ])('leaves %s alone', (_, content) => {
+    expect(parseOnboardingSeed(content)).toBeNull()
   })
 })

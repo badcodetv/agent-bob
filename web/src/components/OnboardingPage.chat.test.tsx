@@ -16,6 +16,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import OnboardingPage from './OnboardingPage.js'
 import { AgentChatProvider } from '../AgentChatProvider.js'
+import { buildOnboardingSeed } from '../charter.js'
 
 const SESSION = 'onboard-1'
 
@@ -97,6 +98,10 @@ describe('OnboardingPage inside a real chat provider', () => {
     expect(sent[0].content).toContain('Send one newsletter a week.')
     expect(sent[0].content).toContain(SESSION)
 
+    // ...but the person sees their goal, not the interviewer's instructions.
+    expect(screen.getByTestId('onboarding-seed').textContent).toBe('You set the goal: Send one newsletter a week.')
+    expect(screen.queryByText(/Deposit the charter/)).toBeNull()
+
     const input = screen.getByTestId('chat-input') as HTMLTextAreaElement
     await waitFor(() => expect(input.disabled).toBe(false))
     await userEvent.type(input, 'For our readers.')
@@ -121,6 +126,20 @@ describe('OnboardingPage inside a real chat provider', () => {
     // Give a wrongly-firing seed effect every chance to run.
     await new Promise((r) => setTimeout(r, 50))
     expect(sent).toHaveLength(0)
+  })
+
+  it('shows a replayed seed as the goal line too', async () => {
+    history = [
+      { type: 'user_message', data: { id: 'u-1', content: buildOnboardingSeed(SESSION, 'Sell more books.') }, timestamp: '2026-09-13T10:00:00Z' },
+      { type: 'message_start', data: { role: 'assistant', messageId: 'a-0' }, timestamp: '2026-09-13T10:00:01Z' },
+      { type: 'content_delta', data: { delta: 'Earlier question.' }, timestamp: '2026-09-13T10:00:01Z' },
+      { type: 'message_end', data: {}, timestamp: '2026-09-13T10:00:02Z' },
+      { type: 'query_complete', data: {}, timestamp: '2026-09-13T10:00:02Z' },
+    ]
+    mount('Sell more books.')
+    await screen.findByText('Earlier question.')
+    expect(screen.getByTestId('onboarding-seed').textContent).toBe('You set the goal: Sell more books.')
+    expect(screen.queryByText(new RegExp(SESSION + '\\.'))).toBeNull()
   })
 
   it('sends nothing on its own when no goal prop is given', async () => {

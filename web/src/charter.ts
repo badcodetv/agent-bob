@@ -204,6 +204,14 @@ export function describeCharterCadence(cron: string): string {
  */
 export function buildOnboardingSeed(sessionId: string, goal: string): string {
   const trimmed = goal.trim()
+  return [...seedPreamble(sessionId), trimmed === '' ? SEED_NO_GOAL : trimmed].join('\n')
+}
+
+const SEED_NO_GOAL = '(they did not write a goal — start by asking what this project is for)'
+
+/** Every line of the seed above the goal. Shared by the builder and the parser,
+ *  so the one cannot drift from the other. */
+function seedPreamble(sessionId: string): string[] {
   return [
     `This interview's session id is ${sessionId}.`,
     'Deposit the charter with the label name set to exactly that id.',
@@ -213,6 +221,32 @@ export function buildOnboardingSeed(sessionId: string, goal: string): string {
     '',
     '---',
     '',
-    trimmed === '' ? '(they did not write a goal — start by asking what this project is for)' : trimmed,
-  ].join('\n')
+  ]
+}
+
+/** What the transcript shows in place of the seed. `goal` is '' when the
+ *  person created the project without one. */
+export interface OnboardingSeed {
+  sessionId: string
+  goal: string
+}
+
+/**
+ * Recognises a message built by buildOnboardingSeed, so the chat can show the
+ * person "you set the goal: …" instead of the interviewer's instructions and a
+ * session id they never need to see.
+ *
+ * Display only: the stored message is untouched, so the interviewer's view of
+ * it — and a replay of that view — is exactly what it always was. The match is
+ * the WHOLE preamble, line for line, rather than a loose prefix: a human who
+ * pastes something resembling it into a chat still sees their own words.
+ */
+export function parseOnboardingSeed(content: string): OnboardingSeed | null {
+  const text = content.replace(/\r\n/g, '\n')
+  const id = /^This interview's session id is (\S+)\.\n/.exec(text)?.[1]
+  if (id === undefined) return null
+  const preamble = seedPreamble(id).join('\n')
+  if (!text.startsWith(preamble)) return null
+  const goal = text.slice(preamble.length).trim()
+  return { sessionId: id, goal: goal === SEED_NO_GOAL ? '' : goal }
 }

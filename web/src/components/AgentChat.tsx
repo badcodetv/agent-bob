@@ -28,6 +28,7 @@ import useVoiceDictation from '../hooks/useVoiceDictation.js'
 import type { RenderPlugin, AgentSSEEvent } from '../plugins.js'
 import type { AgentSSEEvent as CoreSSEEvent } from '../types.js'
 import { useAgentChatContextOptional } from '../AgentChatProvider.js'
+import { parseOnboardingSeed } from '../charter.js'
 
 /**
  * Fold plugin events into per-plugin, per-toolCallId state maps.
@@ -480,6 +481,46 @@ export default function AgentChat(props: AgentChatProps) {
             const hasArtifacts = autoArtifacts.has(message.id) || toolArtifacts.has(message.id)
             if (!hasContent && !hasThinking && !hasTools && !hasArtifacts) return null
             const showForkDivider = forkedMessageCount != null && forkedMessageCount > 0 && index === forkedMessageCount - 1
+            // An onboarding interview's first message is instructions for the
+            // interviewer plus the goal the person typed. Show them their goal,
+            // not the instructions (charter.ts, parseOnboardingSeed).
+            const seed = message.role === 'user' ? parseOnboardingSeed(message.content) : null
+            if (seed !== null) {
+              return (
+                <Box
+                  key={message.id}
+                  data-role="user"
+                  data-testid="onboarding-seed"
+                  sx={{
+                    mb: 2,
+                    alignSelf: 'center',
+                    mx: 'auto',
+                    maxWidth: '90%',
+                    px: 1.5,
+                    py: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    backgroundColor: 'action.hover',
+                    fontSize: '0.8125rem',
+                    lineHeight: 1.6,
+                    color: 'text.secondary',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {seed.goal === '' ? (
+                    'You started this project without a goal, so the interview begins by asking what it is for.'
+                  ) : (
+                    <>
+                      <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                        You set the goal:
+                      </Box>{' '}
+                      {seed.goal}
+                    </>
+                  )}
+                </Box>
+              )
+            }
             return (
               <React.Fragment key={message.id}>
                 <Box
