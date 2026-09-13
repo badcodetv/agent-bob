@@ -104,21 +104,29 @@ func (h *Handlers) IngestEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "type is required", http.StatusBadRequest)
 		return
 	}
-	ev, err := store.CreateProjectEvent(r.Context(), &agentdb.ProjectEvent{
-		Project: id.Customer,
-		Type:    body.Type,
-		Text:    body.Text,
-		Envelope: agentdb.EventEnvelope{
-			Source: agentdb.EventSourceExternal,
-			Depth:  0,
-		},
-	})
+	ev, err := store.CreateProjectEvent(r.Context(), externalEvent(id.Customer, body.Type, body.Text))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, ev)
+}
+
+// externalEvent is the one shape of an event a human or an outside sender
+// causes: core's envelope {source: "external", depth: 0}. Shared by ingestion
+// and by the charter approval's architect run (charter.go), so the two cannot
+// drift apart.
+func externalEvent(project, typ, text string) *agentdb.ProjectEvent {
+	return &agentdb.ProjectEvent{
+		Project: project,
+		Type:    typ,
+		Text:    text,
+		Envelope: agentdb.EventEnvelope{
+			Source: agentdb.EventSourceExternal,
+			Depth:  0,
+		},
+	}
 }
 
 // ListEvents serves GET /agent/events — the project's event log, newest-first,

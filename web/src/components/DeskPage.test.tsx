@@ -275,6 +275,19 @@ describe('the three stacks', () => {
     }
   })
 
+  // Hurry the clock. The one control on the Desk that writes — and only when
+  // pressed and confirmed, which "never writes" above proves by not pressing it.
+  it('offers "Run a cycle now" once the project has workers, and not on a first run', async () => {
+    const { unmount } = renderDesk()
+    expect(await screen.findByTestId('desk-run-cycle')).toBeInTheDocument()
+    unmount()
+
+    workers = []
+    renderDesk()
+    expect(await screen.findByText('This project has no workers yet')).toBeInTheDocument()
+    expect(screen.queryByTestId('desk-run-cycle')).toBeNull()
+  })
+
   it('opens the thread through the host, rather than navigating itself', async () => {
     const onOpenSession = vi.fn()
     renderDesk({ onOpenSession })

@@ -577,6 +577,7 @@ function ProjectWorkspace({
             goal={onboardingGoal}
             refreshMs={4000}
             projectId={project}
+            onOpenDesk={() => setView("desk")}
           />
         )}
         {shownView === "guide" && <GuidePage slug={guideSlug} />}

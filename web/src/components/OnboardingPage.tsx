@@ -38,7 +38,7 @@ import {
 } from '@mui/material'
 import AgentChat from './AgentChat.js'
 import CharterPanel from './CharterPanel.js'
-import RunArchitectControl from './RunArchitectControl.js'
+import TeamFormingPanel from './TeamFormingPanel.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import useCharter from '../useCharter.js'
 import { useAgentChatContextOptional } from '../AgentChatProvider.js'
@@ -71,6 +71,9 @@ export interface OnboardingPageProps extends ConfigApiOptions {
    *  being onboarded — not yet in `apiOptions`, since this screen predates a
    *  usable project token for most of its life. */
   projectId?: string
+  /** Take the human to the Desk once the team has formed. The "Your team is
+   *  ready" button renders only when this is given. */
+  onOpenDesk?: () => void
 }
 
 /** The waiting rail: a spinner and, more importantly, a reason. */
@@ -92,6 +95,7 @@ export default function OnboardingPage({
   goal,
   refreshMs,
   projectId = '',
+  onOpenDesk,
   ...apiOptions
 }: OnboardingPageProps) {
   const charter = useCharter({ ...apiOptions, session: sessionId, refreshMs })
@@ -204,22 +208,19 @@ export default function OnboardingPage({
             />
           )}
 
+          {/* ── After Approve: the team forming (feat/first-run-team-forming) ──
+              Approval starts the architect's first run server-side; this panel
+              watches it hire the team. Kept as one self-contained block. */}
           {charter.applied && (
-            <Paper variant="outlined" sx={{ p: 2 }} data-testid="onboarding-next">
-              <Typography variant="subtitle2" gutterBottom>
-                What happens next
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                The architect exists but has not run yet. It will run on its own schedule from now
-                on — run it once now and watch what it does, so the first time it changes something
-                is not while you are looking the other way.
-              </Typography>
-              <RunArchitectControl
+            <Box data-testid="onboarding-next">
+              <TeamFormingPanel
                 {...apiOptions}
-                primary
                 architectName={current?.charter?.architect_name ?? ''}
+                approvedAtMs={current?.applied_at ?? 0}
+                architectRunError={charter.architectRun?.error || null}
+                onOpenDesk={onOpenDesk}
               />
-            </Paper>
+            </Box>
           )}
         </Stack>
       </Box>

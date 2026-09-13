@@ -64,6 +64,12 @@ export interface CharterApi {
    *  again on an already-approved charter. It is what the "Run the architect
    *  now" control keys off, and what stops the poll. */
   applied: boolean
+  /** What THIS screen's apply said about the architect's first run, which the
+   *  server now starts on approval: the `architect.run` event id, or the
+   *  sentence explaining why it was not started. Null until this screen
+   *  applies (a reload knows only `applied`, and the team view reads the jobs
+   *  themselves). */
+  architectRun: { eventId: string; error: string } | null
 }
 
 export default function useCharter(options: UseCharterOptions = {}): CharterApi {
@@ -84,6 +90,7 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
   // What THIS screen has seen. The exported `applied` below is this OR the
   // server's own answer, so a reload no longer forgets an approval.
   const [sawApply, setSawApply] = useState(false)
+  const [architectRun, setArchitectRun] = useState<CharterApi['architectRun']>(null)
 
   // The exported answer: this screen's own apply, or the server's record of
   // one. `charter.applied` is the field DI10 added to GET /agent/charter/current
@@ -159,6 +166,11 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
           }),
         })
         setSawApply(true)
+        const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+        setArchitectRun({
+          eventId: typeof r.architect_run_event_id === 'string' ? r.architect_run_event_id : '',
+          error: typeof r.architect_run_error === 'string' ? r.architect_run_error : '',
+        })
         return coerceTopologyApplyResult(raw)
       } catch (err) {
         if (configApiStatus(err) === 422 && err instanceof Error) {
@@ -187,6 +199,7 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     applyError,
     applyIssues,
     applied,
+    architectRun,
   }
 }
 

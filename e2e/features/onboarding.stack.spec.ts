@@ -203,7 +203,15 @@ test.describe('onboarding', () => {
     // of where the new one had walked the browser to, not because anything was
     // broken. Hence the order here: view-dependent assertions last, each one
     // on the view that owns it. See DI30.
-    await expect(page.getByTestId('run-architect')).toBeVisible()
+    //
+    // Since feat/first-run-team-forming, approval starts the architect itself
+    // (one `architect.run` event, written by POST /agent/charter/apply) and the
+    // view shows the team forming instead of offering the button.
+    await expect(page.getByTestId('team-forming')).toBeVisible({ timeout: 30_000 })
+    const runs = await client.raw('GET', '/agent/events?type=architect.run')
+    expect(runs.ok()).toBe(true)
+    const runEvents = ((await runs.json()) as { events?: unknown[] }).events ?? []
+    expect(runEvents, 'approving starts exactly one architect run').toHaveLength(1)
 
     // A2, post-approval: the topology seed is offered again once the interview
     // is over (the architect worker now exists — see `useInterviewState`'s

@@ -186,7 +186,11 @@ rewiring is delete + create.
 | `enabled` | |
 
 **Schedules** — `/agent/schedules` CRUD, the UI editor, or `schedule_create` / `schedule_update` /
-`schedule_delete`. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
+`schedule_delete`. `POST /agent/schedules/{id}/run` fires one **enabled** schedule now — the
+scheduler's own firing at the current minute (same claim, event, delivery and dispatch gate), so
+two presses in one minute fire once; a disabled schedule answers 409, and running is not a config
+event (`go/cmd/agentd/schedulerun.go`). The console's "Run a cycle now" calls it for every enabled
+schedule. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
 nicknames like `@daily` are **refused**, not expanded. A row carries **either** `worker` **or**
 `target_session` (the NAME of an existing session), never both and never neither — the store
 enforces the XOR (`go/agentdb/schedules.go:207-220`). A session-mode firing restores the session if
@@ -792,6 +796,14 @@ untrusted party. In one transaction it writes:
 Then, outside the transaction, it disables the `interviewer` — otherwise it
 would persist enabled and unwired, and the architect's first reconciliation
 pass would find an orphan worker it is free to rewrite or delete.
+
+And then it **starts the architect's first run**: it writes one `architect.run`
+event (external envelope — the same write `POST /agent/events` performs), so the
+router wakes the architect through the subscription it just created, with its
+briefing. The response names it as `architect_run_event_id`; if the event could
+not be written the charter still stands and `architect_run_error` says why. A
+re-apply is refused by the store (409) before this point, so it never
+double-fires. The console follows it with a "Your team is forming" view.
 
 ### The architect's standing loop
 

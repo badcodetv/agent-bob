@@ -314,7 +314,7 @@ func (s *scheduler) Tick(ctx context.Context) error {
 		// has to report the ones it missed while nobody was looking.
 		s.catchUp(ctx, sch, expr, minute)
 		if expr.Matches(minute) {
-			if err := s.fire(ctx, sch, minute); err != nil {
+			if _, err := s.fire(ctx, sch, minute); err != nil {
 				s.logf("[scheduler] schedule %s/%s: %v", sch.Project, sch.ID, err)
 			}
 		}
@@ -342,7 +342,17 @@ func (s *scheduler) Tick(ctx context.Context) error {
 
 // fire turns one due schedule into one job, idempotently — or, in session mode,
 // into one message to an existing session.
-func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time.Time) error {
+//
+// The result says what came of it, for the one caller that tells a human
+// (POST /agent/schedules/{id}/run, schedulerun.go); the tick ignores it.
+func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time.Time) (firingResult, error) {
+	return s.fireOccurrence(ctx, sch, minute, false)
+}
+
+// fireOccurrence is fire with one extra choice: detach runs the worker-mode
+// gate off the calling goroutine once the firing's rows are written. The tick
+// passes false (it is already off any request); run-now passes true.
+func (s *scheduler) fireOccurrence(ctx context.Context, sch *agentdb.Schedule, minute time.Time, detach bool) (firingResult, error) {
 	// The two modes are mutually exclusive by store validation
 	// (agentdb.validateSchedule), so this is a total branch and not a
 	// precedence rule.
@@ -366,9 +376,9 @@ func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time
 		s.logf("[scheduler] schedule %s/%s targets worker %q which no longer exists: disabling",
 			sch.Project, sch.ID, sch.Worker)
 		s.disable(ctx, sch, "worker "+sch.Worker+" no longer exists")
-		return nil
+		return firingResult{Outcome: firingTargetMissing, Reason: "worker " + sch.Worker + " no longer exists; the schedule was disabled"}, nil
 	case err != nil:
-		return fmt.Errorf("read worker %q: %w", sch.Worker, err)
+		return firingResult{}, fmt.Errorf("read worker %q: %w", sch.Worker, err)
 	}
 
 	firing, claimed, err := s.store.ClaimFiring(ctx, &agentdb.ScheduleFiring{
@@ -377,12 +387,12 @@ func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time
 		ScheduledFor: agentdb.OccurrenceKey(minute),
 	})
 	if err != nil {
-		return err
+		return firingResult{}, err
 	}
 	if !claimed {
 		// Someone already fired this occurrence. Nothing to do — that is the
 		// whole guarantee (§8.6).
-		return nil
+		return firingResult{Outcome: firingAlreadyFired, Reason: "this schedule already fired this minute"}, nil
 	}
 
 	// The instruction the trigger delivers becomes the event text (§8.6). The
@@ -424,10 +434,29 @@ func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time
 		// process is alive to say it — the catch-up sweep would only find this
 		// row if a later gap happened to span it.
 		s.noteFiringProducedNothing(ctx, sch, firing, minute, err)
-		return err
+		return firingResult{}, err
 	}
+	res := firingResult{Outcome: firingRequested, EventID: delivery.EventID, DeliveryID: delivery.ID}
 
-	// …and it goes through the SAME gate as an event-matched delivery, so a
+	if detach {
+		// A human is waiting on an HTTP response, and the gate may provision a
+		// container. The rows already exist, so the job is durable from here:
+		// the dispatch runs off the request, exactly as it would inline.
+		dctx := context.WithoutCancel(ctx)
+		s.spawn(func() {
+			if err := s.dispatchFiring(dctx, sch, minute, delivery); err != nil {
+				s.logf("[scheduler] schedule %s/%s (run now): %v", sch.Project, sch.ID, err)
+			}
+		})
+		return res, nil
+	}
+	return res, s.dispatchFiring(ctx, sch, minute, delivery)
+}
+
+// dispatchFiring hands a recorded firing's delivery to the gate and keeps the
+// provision-failure streak honest.
+func (s *scheduler) dispatchFiring(ctx context.Context, sch *agentdb.Schedule, minute time.Time, delivery *agentdb.EventDelivery) error {
+	// …it goes through the SAME gate as an event-matched delivery, so a
 	// worker already at max_instances queues rather than doubling up.
 	outcome, reason, err := s.dispatcher.DispatchWithReason(ctx, delivery)
 	if err != nil {
@@ -483,12 +512,12 @@ func (s *scheduler) fire(ctx context.Context, sch *agentdb.Schedule, minute time
 //
 // That last pair is why current state reaches a long-lived session through the
 // memory tools at message time rather than through its prompt.
-func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minute time.Time) error {
+func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minute time.Time) (firingResult, error) {
 	if s.sessions == nil {
 		// No Runner wired (nothing in the shipped agentd, but the seam is
 		// optional). Loud and per-tick rather than a silent no-op: a schedule
 		// that looks enabled and never fires is the worst of both.
-		return fmt.Errorf("schedule targets session %q but this deployment has no session runner wired",
+		return firingResult{}, fmt.Errorf("schedule targets session %q but this deployment has no session runner wired",
 			sch.TargetSession)
 	}
 
@@ -506,9 +535,9 @@ func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minu
 		s.logf("[scheduler] schedule %s/%s targets session %q which no longer exists: disabling",
 			sch.Project, sch.ID, sch.TargetSession)
 		s.disable(ctx, sch, "session "+sch.TargetSession+" no longer exists")
-		return nil
+		return firingResult{Outcome: firingTargetMissing, Reason: "session " + sch.TargetSession + " no longer exists; the schedule was disabled"}, nil
 	case err != nil:
-		return fmt.Errorf("read session %q: %w", sch.TargetSession, err)
+		return firingResult{}, fmt.Errorf("read session %q: %w", sch.TargetSession, err)
 	}
 
 	firing, claimed, err := s.store.ClaimFiring(ctx, &agentdb.ScheduleFiring{
@@ -517,10 +546,10 @@ func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minu
 		ScheduledFor: agentdb.OccurrenceKey(minute),
 	})
 	if err != nil {
-		return err
+		return firingResult{}, err
 	}
 	if !claimed {
-		return nil
+		return firingResult{Outcome: firingAlreadyFired, Reason: "this schedule already fired this minute"}, nil
 	}
 	// No StampFiringEvent: session mode produces no event, so the firing row's
 	// event_id stays empty. It is still the idempotency record — the claim is
@@ -539,14 +568,14 @@ func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minu
 		// inspected retires the schedule rather than skipping forever in silence.
 		s.noteProvisionFailure(ctx, sch, fmt.Sprintf("could not read the status of session %q: %v",
 			sch.TargetSession, err))
-		return nil
+		return firingResult{Outcome: firingBusy, Reason: fmt.Sprintf("could not read the status of session %q", sch.TargetSession)}, nil
 	}
 	if st.ActiveQueryID != "" {
 		s.logf("[scheduler] %s/%s fired %s → skipped: session %q is already running query %s "+
 			"(firing %s recorded; nothing is queued)",
 			sch.Project, sch.ID, agentdb.OccurrenceKey(minute), sch.TargetSession, st.ActiveQueryID, firing.ID)
 		// Not a provision failure: a busy session is one that is working.
-		return nil
+		return firingResult{Outcome: firingBusy, Reason: "session " + sch.TargetSession + " is already working; nothing was sent"}, nil
 	}
 
 	s.logf("[scheduler] %s/%s fired %s → sending to session %q (%s)",
@@ -579,7 +608,7 @@ func (s *scheduler) fireSession(ctx context.Context, sch *agentdb.Schedule, minu
 		}
 		s.clearProvisionFailures(turnCtx, sch)
 	})
-	return nil
+	return firingResult{Outcome: firingRequested}, nil
 }
 
 // ── The catch-up (RD11) ─────────────────────────────────────────────────────

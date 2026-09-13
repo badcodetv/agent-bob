@@ -187,6 +187,30 @@ export {
 export type { Charter, CharterIssue, CharterEffects, CharterCurrent, OnboardingSeed } from './charter.js'
 export { default as useCharter } from './useCharter.js'
 export type { UseCharterOptions, CharterApi } from './useCharter.js'
+export {
+  INTERVIEWER_WORKER_NAME,
+  firstLine,
+  memberStatusOf,
+  describeMemberStatus,
+  newestDeliveryByWorker,
+  summariseTeamForming,
+  recentActivity,
+  scheduleRunEndpoint,
+  coerceScheduleRunResult,
+  scheduleTarget,
+  planCycle,
+  describeRunOutcome,
+} from './teamForming.js'
+export type {
+  TeamFormingPhase,
+  MemberStatus,
+  TeamMember,
+  TeamFormingState,
+  ScheduleRunResult,
+  CycleLine,
+} from './teamForming.js'
+export { default as useTeamForming } from './useTeamForming.js'
+export type { UseTeamFormingOptions, TeamFormingApi } from './useTeamForming.js'
 
 // The git projection (G16) — the pure client for GET /agent/git-projection,
 // and the prose that turns one health word into a sentence an operator can act
@@ -934,6 +958,11 @@ export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './component
 export type { RunArchitectControlProps } from './components/RunArchitectControl.js'
 export { default as OnboardingPage } from './components/OnboardingPage.js'
 export type { OnboardingPageProps } from './components/OnboardingPage.js'
+// After Approve: the team forming, and "Run a cycle now" (hurry the clock).
+export { default as TeamFormingPanel } from './components/TeamFormingPanel.js'
+export type { TeamFormingPanelProps } from './components/TeamFormingPanel.js'
+export { default as RunCycleControl } from './components/RunCycleControl.js'
+export type { RunCycleControlProps } from './components/RunCycleControl.js'
 
 // The budget panel (A5) — today's spend against the operator's budget, and
 // the operator-gated form that changes it.

@@ -260,7 +260,57 @@ func (h *Handlers) ApplyCharter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.disableInterviewer(r, id.Customer, session)
-	writeJSON(w, result)
+	resp := charterApplyResp{TopologyApplyResult: result}
+	resp.ArchitectRunEventID, resp.ArchitectRunError = h.startArchitect(r, id.Customer, session)
+	writeJSON(w, resp)
+}
+
+// charterApplyResp is the apply's read-back plus one fact about what happened
+// next: whether the architect's first run was started.
+//
+// The result is embedded, so every field the console already reads stays at
+// the top level and the change is additive on the wire.
+type charterApplyResp struct {
+	*agentdb.TopologyApplyResult
+	// ArchitectRunEventID is the `architect.run` event this approval emitted.
+	// Empty when none was — ArchitectRunError then says why.
+	ArchitectRunEventID string `json:"architect_run_event_id,omitempty"`
+	// ArchitectRunError is the server's own sentence for why the first run was
+	// not started although the charter applied. The approval itself succeeded;
+	// the console falls back to offering "Run the architect now".
+	ArchitectRunError string `json:"architect_run_error,omitempty"`
+}
+
+// architectFirstRunText is the event text of the run an approval starts. It
+// reaches the architect fenced as data, never as an instruction (§6.2.4); its
+// prompt's step 0 already knows what a first run is for.
+const architectFirstRunText = "The onboarding charter was just approved in the console. This first run was started automatically by that approval."
+
+// startArchitect emits `architect.run` the moment a charter is approved, so the
+// human who pressed Approve watches the team form instead of waiting for the
+// daily schedule or hunting for a button.
+//
+// It is the SAME write POST /agent/events performs — a project event with the
+// external envelope, picked up by the router through the subscription the
+// charter just created — so the run is logged, routed, capacity-gated and
+// budgeted exactly like the button's. There is no second dispatch path.
+//
+// It cannot double-fire: it runs only after ApplyTopology committed, and a
+// second apply of the same charter is refused by the store before reaching
+// here (the architect's name is taken — 409, TestApplyCharter_SecondApplyIs409).
+//
+// Failure is reported, not raised. The charter has committed; a 500 would tell
+// the human the approval failed when it did not.
+func (h *Handlers) startArchitect(r *http.Request, project, session string) (eventID, problem string) {
+	if h.cfg.Events == nil {
+		return "", "events are not configured on this host, so the architect was not started"
+	}
+	ev, err := h.cfg.Events.CreateProjectEvent(r.Context(), externalEvent(project, charter.EventArchitectRun,
+		architectFirstRunText+" Interview session: "+session+"."))
+	if err != nil {
+		return "", "the charter was approved, but the architect could not be started: " + err.Error()
+	}
+	return ev.ID, ""
 }
 
 // charterAppliedScanCap bounds how far back the apply search reads. A project
