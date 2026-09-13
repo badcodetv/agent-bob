@@ -615,9 +615,47 @@ export function countAsks(
   deliveries: EventDelivery[],
   attentionRequests: AttentionRequest[],
 ): number {
-  const openBySession = openRequestsBySession(attentionRequests)
-  return deliveries.filter((d) => d.status === 'awaiting_human' && openBySession.has(d.session_id))
-    .length
+  return askPairs(deliveries, openRequestsBySession(attentionRequests)).length
+}
+
+/**
+ * Which deliveries carry a live question, each with the request it waits on.
+ *
+ * A parked (`awaiting_human`) delivery with an open request, as always. And one
+ * more shape the first real-model walk found (2026-09-13): a person replies in a
+ * worker's thread, the reply settles the job to `ok`, the worker carries on in
+ * the same session and asks again — handing over the draft it was asked for.
+ * That second request is open and newer than the job's end, so it is a live
+ * question; without this it showed on Activity and nowhere on the Desk.
+ *
+ * Still not on the Desk: a request older than the job's end (a job that failed
+ * or moved on after asking — the stale row X7 is about). One delivery per
+ * session, the newest, so a session is never listed twice.
+ */
+function askPairs(
+  deliveries: EventDelivery[],
+  openBySession: Map<string, AttentionRequest>,
+): { delivery: EventDelivery; request: AttentionRequest; askedAgain: boolean }[] {
+  const out: { delivery: EventDelivery; request: AttentionRequest; askedAgain: boolean }[] = []
+  const settledBySession = new Map<string, EventDelivery>()
+  const parkedSessions = new Set<string>()
+  for (const delivery of deliveries) {
+    const request = openBySession.get(delivery.session_id)
+    if (!request) continue
+    if (delivery.status === 'awaiting_human') {
+      parkedSessions.add(delivery.session_id)
+      out.push({ delivery, request, askedAgain: false })
+      continue
+    }
+    if (delivery.status !== 'ok' || delivery.ended_at <= 0 || request.created_at < delivery.ended_at) continue
+    const held = settledBySession.get(delivery.session_id)
+    if (!held || delivery.ended_at > held.ended_at) settledBySession.set(delivery.session_id, delivery)
+  }
+  for (const [sessionId, delivery] of settledBySession) {
+    if (parkedSessions.has(sessionId)) continue
+    out.push({ delivery, request: openBySession.get(sessionId)!, askedAgain: true })
+  }
+  return out
 }
 
 function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
@@ -628,16 +666,13 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
   const workerBySubscription = new Map(subscriptions.map((s) => [s.id, s.worker]))
 
   const asks: DeskAsk[] = []
-  for (const delivery of deliveries) {
-    if (delivery.status !== 'awaiting_human') continue
-    const request = openBySession.get(delivery.session_id)
-    // No open request ⇒ answered, timed out, or never asked. Either way this
-    // row is not a live question, so it is not on the Desk.
-    if (!request) continue
-
-    const waitingSeconds =
-      deliveryDurationSeconds(delivery, nowSeconds) ??
-      Math.max(0, nowSeconds - (request.created_at || nowSeconds))
+  // No open request ⇒ answered, timed out, or never asked. Either way that row
+  // is not a live question, so it is not on the Desk.
+  for (const { delivery, request, askedAgain } of askPairs(deliveries, openBySession)) {
+    const askedFor = Math.max(0, nowSeconds - (request.created_at || nowSeconds))
+    const waitingSeconds = askedAgain ? askedFor : (deliveryDurationSeconds(delivery, nowSeconds) ?? askedFor)
+    // The job row says `ok` once a reply settled it; the question is still waiting.
+    const status = askedAgain ? 'awaiting_human' : delivery.status
     const worker =
       request.worker || delivery.worker || workerBySubscription.get(delivery.subscription_id) || ''
     const expiresInSeconds = request.expires_at > 0 ? request.expires_at - nowSeconds : null
@@ -650,7 +685,7 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
       sessionId: delivery.session_id,
       sessionUrl: request.session_url,
       message: request.message,
-      status: delivery.status,
+      status,
       waitingSeconds,
       waitingLabel: formatDuration(waitingSeconds),
       expiresInSeconds,
@@ -660,7 +695,7 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
           : expiresInSeconds <= 0
             ? 'expired'
             : `expires in ${formatDuration(expiresInSeconds)}`,
-      headline: `${worker === '' ? 'a worker' : worker} · ${delivery.status} · ${formatDuration(waitingSeconds)}`,
+      headline: `${worker === '' ? 'a worker' : worker} · ${status} · ${formatDuration(waitingSeconds)}`,
       glyph: 'attention',
       createdAt: request.created_at,
       firstKind: 'first-ask',

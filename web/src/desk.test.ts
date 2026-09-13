@@ -198,6 +198,35 @@ describe('countAsks — the badge\u2019s number (doc 21, X7)', () => {
   it('drops a parked delivery whose request has been answered', () => {
     expect(countAsks([delivery()], [request({ answered_at: NOW })])).toBe(0)
   })
+
+  // The 2026-09-13 real-model walk: a reply settled referral-campaign's job to
+  // ok, the worker carried on in the thread and asked again with the draft.
+  it('lists a question asked again after a reply settled the job', () => {
+    const settled = delivery({ status: 'ok', ended_at: NOW - 120 })
+    const answered = request({ id: 'a1', created_at: NOW - 700, answered_at: NOW - 120 })
+    const again = request({ id: 'a2', created_at: NOW - 60, message: 'Draft for Mara is ready to send.' })
+    expect(countAsks([settled], [answered, again])).toBe(1)
+    const desk = buildDesk(input({ deliveries: [settled], subscriptions: [subscription()], attentionRequests: [answered, again] }))
+    expect(desk.asks).toEqual([
+      expect.objectContaining({
+        requestId: 'a2',
+        status: 'awaiting_human',
+        waitingSeconds: 60,
+        message: 'Draft for Mara is ready to send.',
+      }),
+    ])
+  })
+
+  it('does not list an open request older than the job’s end, or on a failed job', () => {
+    const stale = request({ created_at: NOW - 700 })
+    expect(countAsks([delivery({ status: 'ok', ended_at: NOW - 120 })], [stale])).toBe(0)
+    expect(countAsks([delivery({ status: 'failed', ended_at: NOW - 120 })], [request({ created_at: NOW - 60 })])).toBe(0)
+  })
+
+  it('lists a session once when it has both a parked and a settled delivery', () => {
+    const deliveries = [delivery({ id: 'old', status: 'ok', ended_at: NOW - 900 }), delivery({ id: 'new' })]
+    expect(countAsks(deliveries, [request({ created_at: NOW - 60 })])).toBe(1)
+  })
 })
 
 describe('notices — reports, not questions', () => {
