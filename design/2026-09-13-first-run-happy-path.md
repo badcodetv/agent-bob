@@ -17,8 +17,8 @@ Kai tried both apps as a new user and neither felt finished.
 
 ## RESUME HERE
 
-1. Wolf finish-line fixes are being built by a subagent (prompt budget + closing step, page polls
-   itself, progress line). Live check afterwards.
+1. Wolf finish-line fixes are BUILT (agent-wolf `5c9291f`..`42601a2`, gates green). Needs a live
+   real-model walk once the stack is free.
 2. Bob chat-wiring fix is being built by a subagent that owns the local stack.
 3. Next for Bob: after Approve, run the architect **immediately** and show the team forming live;
    then a "speed up" control for the first hour.
@@ -35,8 +35,8 @@ Kai tried both apps as a new user and neither felt finished.
 - ⬜ **Walked end to end on the real model, with screenshots**
 
 ### Wolf: sign in → locked hypothesis → research
-- 🟡 **Bounded interview with a clear closing message**
-- 🟡 **The page notices when the interview is done** (polls while draft; "Review and go live" appears by itself)
+- 🟡 **Bounded interview with a clear closing message** (built: ≤3 questions, defaults stated for vague ideas, tool-call caps, template skeleton, new `report_validate` tool; not yet seen on the real model)
+- 🟡 **The page notices when the interview is done** (built: polls every 5s while draft, progress line, primary "Review and go live" button; not yet seen live)
 - ⬜ **Go live → scoreboard + visible research progress**
 - ⬜ **Walked end to end on the real model, with screenshots**
 
@@ -50,6 +50,10 @@ Kai tried both apps as a new user and neither felt finished.
 - **Test logins turned on locally** (`AGENTKIT_TEST_LOGIN`, `--test-login`) so agents can drive the
   browser; Google sign-in still works alongside.
 
+- **Wolf: a validator tool rather than a looser prompt.** The server already had the review screen's
+  template check; `report_validate` calls the same code (a test pins they agree), so the model can
+  stop redesigning once the template passes.
+
 ## Open questions for Kai
 
 (none yet)
@@ -60,3 +64,6 @@ Kai tried both apps as a new user and neither felt finished.
   session (`OnboardingPage.tsx:115` passes only an id; `useAgentSession.sendMessage` no-ops with no
   current session); seed reply stream discarded (`onboarding.ts:135`). Wolf: no end condition in
   `prompts/interviewer.md`; `HypothesisDetail.tsx` loads once and never polls.
+- 2026-09-13 — Wolf: interviewer rewritten (≤3 questions, hard tool caps, closing message naming the
+  "Review and go live" button), `report_validate` added, detail page polls while draft, NextStep
+  shows progress. api 1992 / web 506 tests green. Commits `5c9291f` `d2f59bf` `2a65124` `42601a2`.
