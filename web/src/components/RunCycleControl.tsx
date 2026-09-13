@@ -26,7 +26,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useConfigApi, type ConfigApiOptions } from '../configApi.js'
-import { coerceSchedule, SCHEDULE_ENDPOINTS, type Schedule } from '../schedules.js'
+import { coerceSchedule, describeCron, SCHEDULE_ENDPOINTS, type Schedule } from '../schedules.js'
 import {
   coerceScheduleRunResult,
   describeRunOutcome,
@@ -92,7 +92,13 @@ export default function RunCycleControl({
     onRan?.(out)
   }
 
-  const who = plan?.map(scheduleTarget) ?? []
+  // The same worker can be on several clocks (an end-of-week ask and a
+  // send-day ask, say); the confirmation names each by when it would have run,
+  // or it lists one worker twice and reads like a bug.
+  const who = plan?.map((s) => {
+    const when = describeCron(s.cron)
+    return when === null ? scheduleTarget(s) : `${scheduleTarget(s)} — ${when.charAt(0).toLowerCase()}${when.slice(1).replace(/\.$/, '')}`
+  }) ?? []
 
   return (
     <Box>

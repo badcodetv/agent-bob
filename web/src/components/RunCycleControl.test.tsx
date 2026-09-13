@@ -56,6 +56,8 @@ describe('RunCycleControl', () => {
     expect(plan.textContent).toMatch(/writer/)
     // A disabled schedule was switched off by someone; a cycle does not overrule that.
     expect(plan.textContent).not.toMatch(/retired/)
+    // Each clock is named by when it would have run, so a worker on two reads as two.
+    expect(plan.textContent).toMatch(/scout — at \d\d:\d\d/)
 
     await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(requests.filter((r) => r.method === 'POST')).toHaveLength(0)
