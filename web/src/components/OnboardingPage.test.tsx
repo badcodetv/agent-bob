@@ -122,23 +122,51 @@ describe('OnboardingPage', () => {
     expect(screen.getByText(/Send one newsletter a week/)).toBeTruthy()
   })
 
-  it('offers to run the architect only after approval, and does it with an event', async () => {
+  // Approval now starts the architect SERVER-side (go/httpapi/charter.go), so
+  // the screen's job after Approve is to watch the team form — and not to post
+  // a second architect.run of its own, which would queue a duplicate run.
+  it('shows the team forming after approval, and starts nothing itself', async () => {
     charterResponse = { status: 200, body: validCharterBody }
-    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} onOpenDesk={() => {}} />)
     await screen.findByTestId('charter-panel')
-
-    expect(screen.queryByTestId('run-architect')).toBeNull()
+    expect(screen.queryByTestId('team-forming')).toBeNull()
 
     await userEvent.click(screen.getByTestId('charter-approve'))
     await screen.findByTestId('onboarding-next')
+    await screen.findByTestId('team-forming')
+
+    expect(screen.queryByTestId('run-architect')).toBeNull()
+    expect(requests.some((r) => r.method === 'POST' && r.url.includes('/agent/events'))).toBe(false)
+    expect(requests.some((r) => r.url.includes('/agent/session'))).toBe(false)
+  })
+
+  // The fallback: the charter applied but the server could not write the
+  // event. Then — and only then — the manual control appears, and it still
+  // uses an EVENT, never a chat (a chat receives no briefing).
+  it('offers to run the architect when the apply says it was not started, and does it with an event', async () => {
+    charterResponse = { status: 200, body: validCharterBody }
+    const baseFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes('/agent/charter/apply')) {
+        requests.push({ url: String(url), method: 'POST', body: undefined })
+        return new Response(
+          JSON.stringify({ workers: [{ name: 'architect' }], architect_run_error: 'events are not configured on this host' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return baseFetch(url, init)
+    }) as typeof globalThis.fetch
+
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    await screen.findByTestId('charter-panel')
+    await userEvent.click(screen.getByTestId('charter-approve'))
+    await screen.findByTestId('team-forming-not-started')
+    expect(screen.getByText('events are not configured on this host')).toBeTruthy()
 
     await userEvent.click(screen.getByTestId('run-architect'))
     await userEvent.click(screen.getByRole('button', { name: /run it/i }))
     await screen.findByTestId('run-architect-emitted')
 
-    // An EVENT on /agent/events — not a message to a chat session. A chat
-    // receives no briefing, so an architect talked to has never seen the
-    // label registry.
     const posted = requests.filter((r) => r.method === 'POST' && r.url.includes('/agent/events'))
     expect(posted).toHaveLength(1)
     expect((posted[0].body as { type: string }).type).toBe('architect.run')
@@ -159,7 +187,7 @@ describe('OnboardingPage', () => {
     render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
 
     await screen.findByTestId('onboarding-next')
-    expect(screen.getByTestId('run-architect')).toBeTruthy()
+    expect(screen.getByTestId('team-forming')).toBeTruthy()
     // And it did not apply anything to learn that.
     expect(requests.some((r) => r.url.includes('/agent/charter/apply'))).toBe(false)
   })
@@ -175,12 +203,12 @@ describe('OnboardingPage', () => {
         })
       }
       if (u.includes('/agent/charter/apply')) {
-        return new Response(JSON.stringify({ workers: [], event: {} }), {
+        return new Response(JSON.stringify({ workers: [], event: {}, architect_run_error: 'not started' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (u.includes('/agent/events')) {
+      if (u.includes('/agent/events') && init?.method === 'POST') {
         return new Response('host port pool is exhausted', { status: 500 })
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })

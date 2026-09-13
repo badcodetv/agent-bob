@@ -9,6 +9,11 @@
 // The empty Desk is the FIRST-RUN state: a project with no workers is not shown
 // "nothing to show", it is shown the two ways in: the org chart the topology
 // flow builds, and chat.
+//
+// One exception to read-only: "Run a cycle now" (RunCycleControl), which fires
+// every enabled schedule once after a confirmation that names who will run.
+// It exists because a young project's clocks are daily and the Desk is where
+// a human watches what a cycle does.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Alert, Box, Button, Chip, Link, Paper, Stack, Typography } from '@mui/material'
@@ -41,6 +46,7 @@ import { useGuideParagraph } from '../guide/GuideProvider.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import BudgetPanel from './BudgetPanel.js'
+import RunCycleControl from './RunCycleControl.js'
 
 export interface DeskPageProps extends UseDeskOptions {
   /**
@@ -80,6 +86,12 @@ export interface DeskPageProps extends UseDeskOptions {
    * fetch, and — still the point of X7 — one definition of "an ask".
    */
   onAsksCount?: (count: number) => void
+  /**
+   * Offer "Run a cycle now" (hurry the clock) once the project has workers.
+   * Default true: a young project's schedules are daily, and the Desk is where
+   * a human watches what a cycle does.
+   */
+  showRunCycle?: boolean
 }
 
 /** Identifiers are mono, content is prose (§3.4). */
@@ -105,6 +117,7 @@ export default function DeskPage({
   title = 'Desk',
   showPauseToggle,
   onAsksCount,
+  showRunCycle = true,
   ...deskOptions
 }: DeskPageProps) {
   const reduced = usePrefersReducedMotion()
@@ -208,6 +221,12 @@ export default function DeskPage({
       </Stack>
 
       <AboutThisScreen surface="desk" projectId={projectId} />
+
+      {showRunCycle && !showFirstRunPanel && workerCount > 0 && (
+        <Box sx={{ mb: 2 }} data-testid="desk-run-cycle">
+          <RunCycleControl apiBaseUrl={deskOptions.apiBaseUrl} getAuthToken={deskOptions.getAuthToken} />
+        </Box>
+      )}
 
       {memoryNarration && (
         <FirstNarrationLine first={memoryNarration} guideAvailable={guideAvailable} sx={{ mb: 2 }} />
