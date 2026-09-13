@@ -140,9 +140,15 @@ describe('OnboardingPage', () => {
     await screen.findByTestId('charter-panel')
     expect(screen.queryByTestId('team-forming')).toBeNull()
 
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
     await userEvent.click(screen.getByTestId('charter-approve'))
     await screen.findByTestId('onboarding-next')
     await screen.findByTestId('team-forming')
+    // The panel mounts under a charter taller than the screen: it is brought
+    // into view, or the architect's live steps are off-screen for the wait.
+    expect(scrolled.mock.contexts).toContain(screen.getByTestId('onboarding-next'))
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
 
     expect(screen.queryByTestId('run-architect')).toBeNull()
     expect(requests.some((r) => r.method === 'POST' && r.url.includes('/agent/events'))).toBe(false)

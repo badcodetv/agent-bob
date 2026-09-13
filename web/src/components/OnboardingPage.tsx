@@ -132,6 +132,16 @@ export default function OnboardingPage({
     void chat.sendMessage(buildOnboardingSeed(sessionId, goal ?? ''))
   }, [ready, chat, sessionId, goal])
 
+  // The team panel mounts BELOW a charter that is taller than the screen, and
+  // the Approve button that mounts it is at the charter's foot. The real-model
+  // walk (2026-09-13) found the architect's live steps off-screen for the whole
+  // wait: bring them into view the moment they exist. Optional-called because
+  // jsdom has no scrollIntoView.
+  const nextRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (charter.applied) nextRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+  }, [charter.applied])
+
   return (
     <Box
       sx={{
@@ -212,7 +222,7 @@ export default function OnboardingPage({
               Approval starts the architect's first run server-side; this panel
               watches it hire the team. Kept as one self-contained block. */}
           {charter.applied && (
-            <Box data-testid="onboarding-next">
+            <Box data-testid="onboarding-next" ref={nextRef}>
               <TeamFormingPanel
                 {...apiOptions}
                 architectName={current?.charter?.architect_name ?? ''}
