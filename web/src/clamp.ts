@@ -43,10 +43,10 @@ export function firstLine(text: string, maxChars = 140): string {
 
 /**
  * Markdown's marks removed, for a one-glance preview: `**bold**`, `_em_`,
- * `` `code` ``, heading hashes, link syntax (the text is kept), and list
- * markers turned into bullets. Models write markdown, and a collapsed feed row
- * showing `**` and backticks reads as noise; the full text is still rendered
- * as markdown when the reader asks for it.
+ * `` `code` ``, heading hashes, link syntax (the text is kept), divider lines
+ * (`---`, `***`, `___`), and list markers turned into bullets. Models write
+ * markdown, and a collapsed feed row showing `**` and backticks reads as noise;
+ * the full text is still rendered as markdown when the reader asks for it.
  *
  * Deliberately conservative: a lone `*` or `_` inside a word (`snake_case`,
  * `2*3`) is left alone, because eating a character from a model's words is
@@ -55,6 +55,7 @@ export function firstLine(text: string, maxChars = 140): string {
 export function stripMarkdown(text: string): string {
   return text
     .replace(/\r\n/g, '\n')
+    .replace(/^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, '')
     .replace(/^```[^\n]*\n?/gm, '')
     .replace(/`([^`\n]*)`/g, '$1')
     .replace(/!?\[([^\]\n]*)\]\([^)\n]*\)/g, '$1')
@@ -63,4 +64,5 @@ export function stripMarkdown(text: string): string {
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/^(\s*)[-*+]\s+/gm, '$1• ')
     .replace(/^\s*>\s?/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
 }

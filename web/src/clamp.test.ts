@@ -40,6 +40,8 @@ describe('stripMarkdown', () => {
     ['underscores inside a word stay', 'a snake_case_name and 2*3*4', 'a snake_case_name and 2*3*4'],
     ['headings and links', '## Result\nsee [the thread](https://x/y)', 'Result\nsee the thread'],
     ['fences and quotes', '```json\n{"a":1}\n```\n> quoted', '{"a":1}\nquoted'],
+    ['divider lines go', 'Mara at Hollow Oak.\n\n---\n\nSubject: Quick question\n***\n_ _ _', 'Mara at Hollow Oak.\n\nSubject: Quick question\n\n'],
+    ['a dash inside a line stays', 'one -- two --- three', 'one -- two --- three'],
     ['plain text is untouched', 'Nothing to strip here.', 'Nothing to strip here.'],
   ])('%s', (_name, input, want) => {
     expect(stripMarkdown(input)).toBe(want)
