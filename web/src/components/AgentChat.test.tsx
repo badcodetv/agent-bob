@@ -9,11 +9,25 @@ import type { AgentMessage } from '../types.js'
 test('AgentChat renders from provider context', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat onSendMessage={() => {}} />
+    </AgentChatProvider>
+  )
+  expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
+})
+
+// The provider's sendMessage returns silently with no current session, so an
+// enabled composer there typed into nothing (2026-09-13: the Chat view opened
+// from the Desk, and the onboarding rail before it resumed its session).
+test('AgentChat disables the composer and says why when the provider has no session', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
       <AgentChat />
     </AgentChatProvider>
   )
-  // Matches the real placeholder text in AgentChat.tsx line ~679
-  expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
+  const input = screen.getByTestId('chat-input')
+  expect(input).toBeDisabled()
+  expect(input).toHaveAttribute('placeholder', expect.stringMatching(/no session is open/i))
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
 })
 
 // ---------------------------------------------------------------------------
@@ -107,7 +121,7 @@ test('AgentChat shows error alongside messages', () => {
 test('AgentChat shows input placeholder when no messages', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
-      <AgentChat messages={[]} />
+      <AgentChat messages={[]} onSendMessage={() => {}} />
     </AgentChatProvider>
   )
   expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
@@ -197,7 +211,7 @@ test('the empty state disappears once a message has been sent', () => {
 test('AgentChat warns when a turn ended unconfirmed (detector armed, not streaming)', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
-      <AgentChat isStreaming={false} stuckStatus="likely_stuck" />
+      <AgentChat isStreaming={false} stuckStatus="likely_stuck" onSendMessage={() => {}} />
     </AgentChatProvider>
   )
   expect(screen.getByTestId('unconfirmed-end-banner')).toBeInTheDocument()

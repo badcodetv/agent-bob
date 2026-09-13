@@ -166,6 +166,11 @@ export default function AgentChat(props: AgentChatProps) {
   const stuckStatus     = props.stuckStatus     ?? ctx?.stuckStatus
   const onNudge         = props.onNudge         ?? ctx?.nudgeAgent
   const readOnly        = props.readOnly
+  // Driven by the provider, and the provider has no session: there is nothing
+  // to send TO. `sendMessage` returns silently in that state, so an enabled
+  // composer here typed into a void — the Chat view opened from the Desk with
+  // no session selected did exactly that. Disabled, and it says why.
+  const noSession       = !props.onSendMessage && ctx !== null && !ctx.session
   const plugins         = props.plugins         ?? ctx?.config.plugins ?? []
   const pluginEvents    = props.pluginEvents    ?? ctx?.pluginEvents   ?? []
   const apiBaseUrl      = props.apiBaseUrl      ?? ctx?.config.apiBaseUrl ?? ''
@@ -243,7 +248,7 @@ export default function AgentChat(props: AgentChatProps) {
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isStreaming) return
+    if (!input.trim() || isStreaming || noSession) return
     let attachmentIds: string[] | undefined
     if (fileAttachments.attachments.length > 0) {
       attachmentIds = await fileAttachments.uploadAll(sessionId)
@@ -251,7 +256,7 @@ export default function AgentChat(props: AgentChatProps) {
     }
     onSendMessage(input.trim(), selectedModel, attachmentIds)
     setInput('')
-  }, [input, isStreaming, onSendMessage, selectedModel, fileAttachments.attachments.length, fileAttachments.uploadAll, fileAttachments.clear, sessionId])
+  }, [input, isStreaming, noSession, onSendMessage, selectedModel, fileAttachments.attachments.length, fileAttachments.uploadAll, fileAttachments.clear, sessionId])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -821,9 +826,10 @@ export default function AgentChat(props: AgentChatProps) {
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={(e: React.ClipboardEvent) => fileAttachments.handlePaste(e.nativeEvent)}
-                placeholder="Type a message..."
+                placeholder={noSession ? 'No session is open — start a new session or pick one to chat.' : 'Type a message...'}
                 rows={1}
-                disabled={isStreaming}
+                disabled={isStreaming || noSession}
+                data-testid="chat-input"
                 sx={{
                   flex: 1,
                   // 🔴 `minWidth: 0` OR THE COMPOSER CANNOT NARROW AT ALL.
@@ -856,7 +862,7 @@ export default function AgentChat(props: AgentChatProps) {
                   Stop
                 </Button>
               ) : (
-                <Button type="submit" aria-label="Send" disabled={!input.trim()} variant="contained" color="info" sx={{ borderRadius: '8px', textTransform: 'none' }}>
+                <Button type="submit" aria-label="Send" disabled={!input.trim() || noSession} variant="contained" color="info" sx={{ borderRadius: '8px', textTransform: 'none' }}>
                   Send
                 </Button>
               )}
