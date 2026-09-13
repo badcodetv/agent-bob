@@ -34,7 +34,8 @@ import {
   type ProjectEvent,
   type Subscription,
 } from './events.js'
-import type { Schedule } from './schedules.js'
+import { describeCron, type Schedule } from './schedules.js'
+import type { MemoryRow } from './memories.js'
 
 /** The read route the Asks stack needs (design B1; go/httpapi/attention.go). */
 export const ATTENTION_ENDPOINTS = {
@@ -324,10 +325,24 @@ export function deskChangeSubject(entry: ChangelogEntry): string {
       return 'the project prompt'
     case 'project-settings':
       return 'project settings'
-    case 'subscription':
+    // A subscription or schedule is keyed by a uuid, which says nothing to a
+    // person. The payload is the row's full state, so name what it wakes and
+    // when — "numbers-clerk's schedule (At 18:00, on Thursday.)" — and keep the
+    // id only when the payload has nothing better.
+    case 'subscription': {
+      const p = entry.event.payload ?? {}
+      const worker = typeof p.worker === 'string' ? p.worker : ''
+      const type = typeof p.event_type === 'string' ? p.event_type : ''
+      if (worker !== '') return type === '' ? `${worker}'s subscription` : `${worker}'s subscription to ${type}`
       return name === '' ? 'a subscription' : `subscription ${name}`
-    case 'schedule':
+    }
+    case 'schedule': {
+      const p = entry.event.payload ?? {}
+      const worker = typeof p.worker === 'string' ? p.worker : ''
+      const when = typeof p.cron === 'string' ? describeCron(p.cron) : null
+      if (worker !== '') return when === null ? `${worker}'s schedule` : `${worker}'s schedule (${when.replace(/\.$/, '')})`
       return name === '' ? 'a schedule' : `schedule ${name}`
+    }
     case 'image':
     case 'skill':
       return name
@@ -813,4 +828,51 @@ function buildDeskTrouble(input: BuildDeskInput): DeskTrouble[] {
 export function frozenTargetFromText(text: string): string {
   const m = /frozen worker "([^"]+)"/.exec(text) ?? /frozen worker “([^”]+)”/.exec(text)
   return m ? m[1]! : ''
+}
+
+// ---------------------------------------------------------------------------
+// Written down — what the team concluded
+// ---------------------------------------------------------------------------
+
+/** One memory as the Desk shows it: what it is, who wrote it, its opening. */
+export interface DeskNote {
+  id: string
+  /** `summary · review-2026-w37`, `rolling-summary · copywriter`. */
+  title: string
+  /** The worker that wrote it, or a plain phrase when no worker did. */
+  writer: string
+  /** Unix milliseconds (memories stamp ms). */
+  createdAtMs: number
+  /** The route's snippet — at most MEMORY_SNIPPET_CHARS; the Desk clamps it. */
+  excerpt: string
+  sessionId: string
+}
+
+/**
+ * The newest memories, as the Desk's "Written down" stack.
+ *
+ * Memory is where a worker's conclusions land, and it is not a configuration
+ * change, so before this the Desk — the page a first-time user is sent to
+ * after the team forms — showed the asks and the config log and not one thing
+ * the team had concluded (real-model walk, 2026-09-13).
+ */
+export function deskNotes(rows: MemoryRow[], limit = 5): DeskNote[] {
+  return rows.slice(0, Math.max(0, limit)).map((m) => {
+    const kind = m.labels.kind ?? ''
+    const which = m.labels.name ?? m.labels.worker ?? ''
+    const title = [kind, which].filter((part) => part !== '').join(' · ') || 'a note'
+    return {
+      id: m.id,
+      title,
+      writer:
+        m.created_by_worker !== ''
+          ? m.created_by_worker
+          : m.created_by_session !== ''
+            ? 'a chat session'
+            : 'you or the console',
+      createdAtMs: m.created_at,
+      excerpt: m.snippet,
+      sessionId: m.created_by_session,
+    }
+  })
 }

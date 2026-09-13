@@ -21,8 +21,10 @@ import useDesk, { type UseDeskOptions } from '../useDesk.js'
 import {
   DESK_ASKS_CAVEAT,
   type DeskAsk,
+  deskNotes,
   type DeskChange,
   type DeskFirstRecord,
+  type DeskNote,
   type DeskTrouble,
 } from '../desk.js'
 import { formatTimestamp } from '../events.js'
@@ -39,6 +41,7 @@ import { ageEscalation, coarseAgeLabel } from '../useElapsedTicker.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import useMemories from '../useMemories.js'
+import { formatMemoryTimestamp } from '../memories.js'
 import useFirsts from '../useFirsts.js'
 import type { FirstToNarrate } from '../firsts.js'
 import { buildGuideHash } from '../guide/guideRoute.js'
@@ -46,6 +49,7 @@ import { useGuideParagraph } from '../guide/GuideProvider.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import BudgetPanel from './BudgetPanel.js'
+import ClampedText from './ClampedText.js'
 import RunCycleControl from './RunCycleControl.js'
 
 export interface DeskPageProps extends UseDeskOptions {
@@ -92,9 +96,15 @@ export interface DeskPageProps extends UseDeskOptions {
    * a human watches what a cycle does.
    */
   showRunCycle?: boolean
+  /** Take the human to the memory browser. Renders "See everything written
+   *  down" under the Written down stack only when given. */
+  onOpenMemory?: () => void
 }
 
 /** Identifiers are mono, content is prose (§3.4). */
+/** How many of the newest memories the Written down stack shows. */
+const DESK_NOTES_LIMIT = 5
+
 const MONO = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }
 
 /** Off-screen but announced — the coarse label beside an `aria-hidden` age. */
@@ -118,6 +128,7 @@ export default function DeskPage({
   showPauseToggle,
   onAsksCount,
   showRunCycle = true,
+  onOpenMemory,
   ...deskOptions
 }: DeskPageProps) {
   const reduced = usePrefersReducedMotion()
@@ -153,7 +164,18 @@ export default function DeskPage({
   // "the project's first memory ever" rather than the true earliest one —
   // exactly right for a NEW project (there is only one row to be newest),
   // approximate for a project already old when this feature first ran on it.
-  const memories = useMemories({ ...deskOptions, limit: 1 })
+  // The same read feeds "Written down", so it asks for a few rows and follows
+  // the Desk's own poll: a conclusion landing should not need a reload.
+  const memories = useMemories({ ...deskOptions, limit: DESK_NOTES_LIMIT })
+  const reloadMemories = memories.reload
+  const memoryPollPaused = deskOptions.paused ?? paused
+  useEffect(() => {
+    const every = deskOptions.refreshMs ?? 0
+    if (every <= 0 || memoryPollPaused) return
+    const timer = setInterval(() => void reloadMemories(), every)
+    return () => clearInterval(timer)
+  }, [deskOptions.refreshMs, memoryPollPaused, reloadMemories])
+  const notes = useMemo(() => deskNotes(memories.memories, DESK_NOTES_LIMIT), [memories.memories])
   const memoryFirsts: DeskFirstRecord[] = useMemo(() => {
     const newest = memories.memories[0]
     return newest ? [{ kind: 'first-memory' as const, createdAtMs: newest.created_at, id: `memory:${newest.id}` }] : []
@@ -300,6 +322,24 @@ export default function DeskPage({
                 {DESK_ASKS_CAVEAT}
               </Typography>
             )}
+          </Section>
+
+          <Section
+            label="Written down"
+            count={notes.length}
+            caption="the newest things the team concluded"
+            empty="Nothing has been written down yet. Workers write what they find and decide here as they finish."
+            after={
+              onOpenMemory && notes.length > 0 ? (
+                <Link component="button" type="button" variant="caption" onClick={onOpenMemory} sx={{ mt: 1 }}>
+                  See everything written down
+                </Link>
+              ) : undefined
+            }
+          >
+            {notes.map((note) => (
+              <NoteRow key={note.id} note={note} onOpenSession={onOpenSession} />
+            ))}
           </Section>
 
           <Section
@@ -478,15 +518,43 @@ function AskRow({
           </Typography>
         )}
       </Stack>
-      {ask.message !== '' && (
-        <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-          {ask.message}
-        </Typography>
-      )}
+      {ask.message !== '' && <ClampedText text={ask.message} sx={{ mt: 0.5 }} />}
       <Box sx={{ mt: 0.5 }}>
         <ThreadLink sessionId={ask.sessionId} url={ask.sessionUrl} onOpenSession={onOpenSession} />
       </Box>
       {firstNarration && <FirstNarrationLine first={firstNarration} guideAvailable={guideAvailable} />}
+    </SpineRow>
+  )
+}
+
+function NoteRow({
+  note,
+  onOpenSession,
+}: {
+  note: DeskNote
+  onOpenSession?: (id: string) => void
+}) {
+  return (
+    <SpineRow glyph="agent" component="li" glyphLabel="written down" data-testid="desk-note">
+      <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
+        <Typography variant="body2" sx={MONO}>
+          {note.title}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {note.writer} · {formatMemoryTimestamp(note.createdAtMs)}
+        </Typography>
+      </Stack>
+      {note.excerpt !== '' && <ClampedText text={note.excerpt} maxLines={4} maxChars={320} sx={{ mt: 0.5 }} />}
+      {note.sessionId !== '' && (
+        <Box sx={{ mt: 0.5 }}>
+          <ThreadLink
+            sessionId={note.sessionId}
+            url=""
+            onOpenSession={onOpenSession}
+            label="open the session that wrote it"
+          />
+        </Box>
+      )}
     </SpineRow>
   )
 }
@@ -532,13 +600,13 @@ function ChangeRow({
           <Chip size="small" variant="outlined" label={NEW_MARKER_LABEL} />
         )}
       </Stack>
-      <Typography
-        variant="body2"
+      <ClampedText
+        text={change.reason}
+        maxLines={4}
+        maxChars={320}
         color={change.noReason ? 'text.disabled' : 'text.primary'}
-        sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}
-      >
-        {change.reason}
-      </Typography>
+        sx={{ mt: 0.5 }}
+      />
       {change.entry.actorSession !== '' && (
         <Box sx={{ mt: 0.5 }}>
           <ThreadLink

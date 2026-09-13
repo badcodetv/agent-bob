@@ -20,7 +20,9 @@ import {
   SCHEDULE_MAX_PROVISION_FAILURES,
   type AttentionRequest,
   type BuildDeskInput,
+  deskNotes,
 } from './desk.js'
+import type { MemoryRow } from './memories.js'
 import { coerceConfigEvent, type ConfigEvent } from './configLog.js'
 import {
   coerceDelivery,
@@ -474,6 +476,22 @@ describe('changes', () => {
     expect(subjectOf({ action: 'subscription_create', payload: { id: 'sub-3' } })).toBe(
       'subscription sub-3',
     )
+    // The uuid is the fallback; the row's own state names it for a person.
+    expect(
+      subjectOf({
+        action: 'subscription_create',
+        payload: { id: 'sub-3', worker: 'scribe', event_type: 'worker.finished' },
+      }),
+    ).toBe("scribe's subscription to worker.finished")
+    expect(
+      subjectOf({
+        action: 'schedule_update',
+        payload: { id: '9d33f7c6', worker: 'numbers-clerk', cron: '0 18 * * 4' },
+      }),
+    ).toBe("numbers-clerk's schedule (At 18:00, on Thursday)")
+    expect(subjectOf({ action: 'schedule_update', payload: { id: '9d33f7c6' } })).toBe(
+      'schedule 9d33f7c6',
+    )
     expect(subjectOf({ action: 'image_create', payload: { name: 'toolbox', version: 4 } })).toBe(
       'toolbox:4',
     )
@@ -919,5 +937,37 @@ describe('firsts — the fold tags one record of each kind (design §3 G4)', () 
     expect(desk.earlierChanges.length).toBeLessThanOrEqual(3)
     // …but the fold's own first-of-a-kind list still has the actual first.
     expect(desk.firsts.find((f) => f.kind === 'first-worker')?.id).toBe('first-worker-ever')
+  })
+})
+
+describe('deskNotes — what the team wrote down', () => {
+  const row = (over: Partial<MemoryRow> = {}): MemoryRow => ({
+    id: 'm1',
+    labels: { kind: 'summary', name: 'review-2026-w37' },
+    snippet: 'THE HONEST HEADLINE: nothing to review yet.',
+    score: 0,
+    created_by_worker: 'weekly-review',
+    created_by_session: 'sess-4',
+    created_at: NOW_MS,
+    ...over,
+  })
+
+  it('titles by kind and name or worker, and says who wrote it', () => {
+    const notes = deskNotes([
+      row(),
+      row({ id: 'm2', labels: { kind: 'rolling-summary', worker: 'copywriter' }, created_by_worker: 'scribe' }),
+      row({ id: 'm3', labels: { kind: 'org-charter', name: 'x' }, created_by_worker: '' }),
+      row({ id: 'm4', labels: {}, created_by_worker: '', created_by_session: '' }),
+    ])
+    expect(notes.map((n) => [n.title, n.writer])).toEqual([
+      ['summary · review-2026-w37', 'weekly-review'],
+      ['rolling-summary · copywriter', 'scribe'],
+      ['org-charter · x', 'a chat session'],
+      ['a note', 'you or the console'],
+    ])
+  })
+
+  it('keeps only the newest few', () => {
+    expect(deskNotes([row(), row({ id: 'm2' }), row({ id: 'm3' })], 2)).toHaveLength(2)
   })
 })

@@ -637,3 +637,41 @@ function readWatermarkOf(key: string): string[] {
   const raw = window.localStorage.getItem(key)
   return raw ? (JSON.parse(raw) as string[]) : []
 }
+
+describe('DeskPage — Written down', () => {
+  it("shows the team's newest memories with who wrote them, short, and a way to the rest", async () => {
+    memories = [
+      {
+        id: 'm2',
+        project: 'acme',
+        labels: { kind: 'summary', name: 'review-2026-w37' },
+        snippet: Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'),
+        score: 0,
+        created_by_worker: 'weekly-review',
+        created_by_session: 'sess-4',
+        created_at: NOW_MS - 1000,
+      },
+    ]
+    const onOpenMemory = vi.fn()
+    const onOpenSession = vi.fn()
+    renderDesk({ onOpenMemory, onOpenSession })
+    const region = await screen.findByRole('region', { name: 'Written down' })
+    const note = await within(region).findByTestId('desk-note')
+    expect(note).toHaveTextContent('summary · review-2026-w37')
+    expect(note).toHaveTextContent('weekly-review')
+    // Clamped: the fifth line is behind "Show all".
+    expect(note).not.toHaveTextContent('line 5')
+    await userEvent.click(within(note).getByRole('button', { name: 'Show all' }))
+    expect(note).toHaveTextContent('line 12')
+    await userEvent.click(within(note).getByRole('button', { name: 'open the session that wrote it' }))
+    expect(onOpenSession).toHaveBeenCalledWith('sess-4')
+    await userEvent.click(within(region).getByRole('button', { name: 'See everything written down' }))
+    expect(onOpenMemory).toHaveBeenCalled()
+  })
+
+  it('says plainly when nothing has been written down', async () => {
+    renderDesk()
+    const region = await screen.findByRole('region', { name: 'Written down' })
+    expect(region).toHaveTextContent('Nothing has been written down yet.')
+  })
+})

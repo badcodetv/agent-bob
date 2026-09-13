@@ -541,6 +541,7 @@ function ProjectWorkspace({
             onOpenChat={() => setView("chat")}
             inInterview={inInterview}
             onOpenOnboarding={openOnboarding}
+            onOpenMemory={() => setView("memory")}
           />
         )}
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link
