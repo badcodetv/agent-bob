@@ -22,26 +22,28 @@ Kai tried both apps as a new user and neither felt finished.
    signal, review screen hides the spec, seed shown as user bubble, "unknown writer", draft page
    says "No report template yet" after the interview, scoreboard 0.00 on day one.
 2. Bob chat-wiring fix is DONE and proven in a browser (mock model). Screens: `design/2026-09-13-first-run-screens/bob-01-*`.
-3. Bob team forming + "Run a cycle now" BUILT and MERGED (branch `feat/first-run-team-forming`),
-   polish fixes merged. Gates re-running on the merge. NEXT: a real-model Bob walk (interview →
-   approve → team forms → run a cycle) once the Wolf live walk frees the stack.
+3. Bob WALKED on the real model (screens `bob-02-*`, 11 sessions): goal → 3 questions → charter →
+   4 workers → one cycle. Fixed on the way: Activity/Desk showed nothing readable. Remaining: parked
+   jobs never clear, ~2 min silent start in the team panel, Q3 + label rules are walls of text,
+   stacked "now in the menu above" notices. NEXT: fix those + Wolf adopts `<agent-context>`, then
+   a last short live check.
 
 ## Checklist
 
 ### Bob: new project → watching a team work
 - ✅ **Interview chat actually works** (the panel loads the interview session; the goal is sent once; replies stream; reload keeps the conversation; also fixed: the goal was being forgotten a second after creation, so the interviewer was told there was none) — `652d702`..`56b49e5`, screens `bob-01-*`
-- ⬜ **Interview is short** (3–5 questions) and ends with a charter (the plan the human approves)
-- 🟡 **Approve → architect runs straight away** (built `c22c790`: the approve route writes the same `architect.run` event as POST /agent/events; not yet seen live)
-- 🟡 **Team forming is visible** (built `ad010b0`: "Your team is forming" panel lists workers as they land, then "Your team is ready — go to the Desk"; not yet seen live)
-- 🟡 **Speed-up control** (built `e6d7508`+`ad010b0`: "Run a cycle now" fires every enabled schedule once via new `POST /agent/schedules/{id}/run`, through the scheduler's own gate; not yet seen live)
-- ⬜ **Watching:** events, memories and architect changes readable from the Desk
-- ⬜ **Walked end to end on the real model, with screenshots**
+- 🟡 **Interview is short** (real model: 3 questions, charter on screen 2m29s after creating the project; Q3 and the label rules read as walls of text)
+- ✅ **Approve → architect runs straight away** (real model: exactly one run, team ready 5m32s after Approve; built `c22c790`: the approve route writes the same `architect.run` event as POST /agent/events; not yet seen live)
+- ✅ **Team forming is visible** (real model: numbers-clerk, copywriter, weekly-review, scribe landed live; ~2 min spinner-only at start still to fix; built `ad010b0`: "Your team is forming" panel lists workers as they land, then "Your team is ready — go to the Desk"; not yet seen live)
+- ✅ **Speed-up control** (real model: a cycle settled in ~4 min, workers asked sharp questions and wrote notes; built `e6d7508`+`ad010b0`: "Run a cycle now" fires every enabled schedule once via new `POST /agent/schedules/{id}/run`, through the scheduler's own gate; not yet seen live)
+- 🟡 **Watching:** Desk now has "Written down" (newest memories, live, by writer) and Activity shows each job's closing words `f03d814` `0c16728`; parked jobs never clear
+- ✅ **Walked end to end on the real model, with screenshots** (`bob-02-01`…`-18`)
 
 ### Wolf: sign in → locked hypothesis → research
 - ✅ **Bounded interview with a clear closing message** (real model: 1 question, 7 tool calls, closing message names the button; built: ≤3 questions, defaults stated for vague ideas, tool-call caps, template skeleton, new `report_validate` tool; not yet seen on the real model)
 - ✅ **The page notices when the interview is done** (real model: button appeared ≤6s after the closing message, no reload; built: polls every 5s while draft, progress line, primary "Review and go live" button; not yet seen live)
 - 🟡 **Go live → scoreboard + visible research progress** (built `d7b619d` `eebb79b`: "Research is running — started 2 minutes ago…" / "Last research run finished … · next run …", polls 10s while running; review screen now shows the spec being locked `8f83511`; report stamp names the researcher `c212f9e`; chart years `f0c0c00`; draft says a template is ready `825ea04`; day one says "Waiting for the first observation" `3521e1c`; seed bubble is one short line `d641d94`. NOT yet seen live. Earlier: go-live feedback fixed; report + scoreboard land without reload ~3.5/6.5 min after a run; still NO signal while research runs)
-- ⬜ **Walked end to end on the real model, with screenshots**
+- ✅ **Walked end to end on the real model, with screenshots** (`wolf-01-*`; re-check of the post-interview pass pending)
 
 ## Decisions taken (and why)
 
@@ -49,7 +51,7 @@ Kai tried both apps as a new user and neither felt finished.
   Kai's wish ("the architect says: here's the team I'd deploy") is met by running the architect
   the moment the charter is approved and showing its roster land, rather than making the
   interviewer design workers (the prompt forbids that on purpose — doc 18 §9a).
-- **Mock model for wiring, real model only to judge quality.** Real-session budget: 25; used: 4 (Wolf walks).
+- **Mock model for wiring, real model only to judge quality.** Real-session budget: 25; used: 15 (Wolf 4, Bob 11).
 - **Test logins turned on locally** (`AGENTKIT_TEST_LOGIN`, `--test-login`) so agents can drive the
   browser; Google sign-in still works alongside.
 
@@ -61,6 +63,12 @@ Kai tried both apps as a new user and neither felt finished.
   capacity and budget checks as a real 09:00 run. Same-minute double press fires once.
 - **Bob: "no charter yet" is 204, not 404** (only the read; both clients still accept 404), so
   the browser console stops filling with red every 4 seconds.
+
+- **Wolf: the board list keeps its day-one "+0.00".** The detail page is now honest; teaching the
+  board would make every board load heavier. Leave until someone minds.
+- **Bob: a generic `<agent-context summary="…">` block** (`ad3fc3c`, docs/19 §3a) collapses an
+  embedding app's machine instructions in a first message to one line, instead of each app
+  special-casing its own seed.
 
 ## Open questions for Kai
 
@@ -97,3 +105,8 @@ Kai tried both apps as a new user and neither felt finished.
 - 2026-09-13 — Wolf after-interview pass (code only, api 2002 / web 534 green): research state in the
   detail payload from Bob deliveries for the researcher schedule; review screen shows the spec;
   report writer, chart years, draft copy, day-one wording, shorter seed. Needs one live re-walk.
+- 2026-09-13 — Bob real-model walk (11 sessions), project `bakery-newsletter`. First question 20s;
+  charter 2m29s; Approve → team ready 5m32s (one architect run). Workers: numbers-clerk, copywriter,
+  weekly-review, scribe. A cycle settled in 4 min. Fixed: Activity shows closing words with Show all
+  (`f03d814`); Desk "Written down" + human schedule names (`0c16728`); cycle confirm names schedule
+  times (`701c091`); generic agent-context block (`ad3fc3c`). web 1781 / examples-web 11 green.
