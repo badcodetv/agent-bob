@@ -20,17 +20,18 @@ Kai tried both apps as a new user and neither felt finished.
 1. Wolf finish-line fixes are BUILT (agent-wolf `5c9291f`..`42601a2`, gates green). Needs a live
    real-model walk once the stack is free.
 2. Bob chat-wiring fix is DONE and proven in a browser (mock model). Screens: `design/2026-09-13-first-run-screens/bob-01-*`.
-3. Next for Bob: after Approve, run the architect **immediately** and show the team forming live;
-   then a "speed up" control for the first hour.
+3. Bob team forming + "Run a cycle now" BUILT and MERGED (branch `feat/first-run-team-forming`),
+   polish fixes merged. Gates re-running on the merge. NEXT: a real-model Bob walk (interview →
+   approve → team forms → run a cycle) once the Wolf live walk frees the stack.
 
 ## Checklist
 
 ### Bob: new project → watching a team work
 - ✅ **Interview chat actually works** (the panel loads the interview session; the goal is sent once; replies stream; reload keeps the conversation; also fixed: the goal was being forgotten a second after creation, so the interviewer was told there was none) — `652d702`..`56b49e5`, screens `bob-01-*`
 - ⬜ **Interview is short** (3–5 questions) and ends with a charter (the plan the human approves)
-- ⬜ **Approve → architect runs straight away** (no waiting for 09:00)
-- ⬜ **Team forming is visible** (the workers the architect creates appear as they land)
-- ⬜ **Speed-up control** (run a cycle now instead of waiting for schedules)
+- 🟡 **Approve → architect runs straight away** (built `c22c790`: the approve route writes the same `architect.run` event as POST /agent/events; not yet seen live)
+- 🟡 **Team forming is visible** (built `ad010b0`: "Your team is forming" panel lists workers as they land, then "Your team is ready — go to the Desk"; not yet seen live)
+- 🟡 **Speed-up control** (built `e6d7508`+`ad010b0`: "Run a cycle now" fires every enabled schedule once via new `POST /agent/schedules/{id}/run`, through the scheduler's own gate; not yet seen live)
 - ⬜ **Watching:** events, memories and architect changes readable from the Desk
 - ⬜ **Walked end to end on the real model, with screenshots**
 
@@ -54,6 +55,11 @@ Kai tried both apps as a new user and neither felt finished.
   template check; `report_validate` calls the same code (a test pins they agree), so the model can
   stop redesigning once the template passes.
 
+- **Bob: "Run a cycle now" fires schedules, not synthetic events,** so jobs get the same briefing,
+  capacity and budget checks as a real 09:00 run. Same-minute double press fires once.
+- **Bob: "no charter yet" is 204, not 404** (only the read; both clients still accept 404), so
+  the browser console stops filling with red every 4 seconds.
+
 ## Open questions for Kai
 
 (none yet)
@@ -75,3 +81,9 @@ Kai tried both apps as a new user and neither felt finished.
   interview is listed as "Untitled · Unknown · agent"; create-project field labels overlap text;
   "Activity is now in the sidebar" notice is wrong; failed `onboard` session keeps the name taken;
   `./stack clean` fails with login on; charter poll 404s spam the browser console.
+- 2026-09-13 — Bob polish: goal seed renders as "You set the goal: …"; interview listed as
+  "Onboarding interview · interviewer" (`POST /agent/session` takes an optional `title`); notice copy
+  fixed; charter read returns 204 when empty; "charter"/"architect" explained on first use. The
+  "overlapping labels" were a screenshot taken mid-animation, not a bug. `8fc85ce`..`a65deaa`.
+- 2026-09-13 — Bob team forming merged: approve starts the architect (`c22c790`), schedule run-now
+  route (`e6d7508`), team-forming panel + Run a cycle now (`ad010b0`), shell link + specs (`a56f444`).
