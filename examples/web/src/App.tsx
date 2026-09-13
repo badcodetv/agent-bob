@@ -15,7 +15,7 @@ import {
   ProjectSettingsPage,
   WorkersPage,
   buildGuideHash,
-  navRevealSentence,
+  navRevealSummary,
   parseGuideHash,
   projectIdFromLocation,
   useAsksCount,
@@ -612,11 +612,8 @@ function RevealNotice({ appeared, onDismiss }: { appeared: NavEntry[]; onDismiss
         transition: reduced ? "none" : "opacity 180ms ease-out",
       }}
     >
-      {appeared.map((entry) => (
-        <Box key={entry} sx={{ mb: 0.5 }}>
-          {navRevealSentence(entry)}
-        </Box>
-      ))}
+      {/* One line for everything revealed at once, not one line each. */}
+      <Box sx={{ mb: 0.5 }}>{navRevealSummary(appeared)}</Box>
       <Button size="small" onClick={onDismiss} sx={{ textTransform: "none", fontSize: 11, minWidth: 0, p: 0 }}>
         Got it
       </Button>

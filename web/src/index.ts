@@ -634,6 +634,7 @@ export {
   NAV_LABELS,
   everythingRevealed,
   navRevealSentence,
+  navRevealSummary,
   revealedNav,
 } from './navReveal.js'
 export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'

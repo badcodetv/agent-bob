@@ -143,7 +143,7 @@ test.describe('operator console', () => {
     await expect(page.getByTestId('nav-activity')).toBeVisible({ timeout: 30_000 })
     // Announced in words rather than by a badge (design 28 §3.2).
     await expect(page.getByTestId('nav-reveal-notice')).toContainText(
-      'lists everything this project does',
+      'everything this project does',
     )
 
     // One worker is not a SHAPE, though — there is nothing to wire it to.
@@ -156,7 +156,7 @@ test.describe('operator console', () => {
     await page.reload()
     await expect(page.getByTestId('nav-chart')).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('nav-reveal-notice')).toContainText(
-      'draws which worker wakes which',
+      'which worker wakes which',
     )
 
     // And an ordinary posted event reveals nothing new — Activity is sticky,
