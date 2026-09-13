@@ -26,11 +26,14 @@ goal, how she would know it worked in a month, and what is worth writing down.
 ![The charter panel, unapproved](img/your-first-hour-2.png)
 A charter appears as soon as there is enough to show. She reads it, recognises her own answers,
 and presses Approve. The panel says plainly what that does: "Approving this creates the architect
-and nothing else, it decides what workers this project needs, and creates them itself." She
-presses "Run the architect now."
+and nothing else, it decides what workers this project needs, and creates them itself." The
+architect starts the moment she approves.
 
-**This is the wait.** No progress bar, and it can take several minutes. Nothing is stuck, so she
-goes and makes tea, and the [Desk](the-desk.md) tells her when something happens.
+**This is the wait.** It can take several minutes, and the screen shows it happening: "Your team
+is forming", then each worker as the architect creates it, with a line saying what it is for.
+When the architect has said what it built, a button says "Your team is ready — go to the Desk".
+Beside it, "Run a cycle now" does what the daily clock would do later, so she can watch a day's
+work in the next few minutes instead of tomorrow morning.
 
 ![The Desk's first ask](img/your-first-hour-3.png)
 Then it lands: a rose diamond on the Desk says the architect is waiting for her. She opens it and

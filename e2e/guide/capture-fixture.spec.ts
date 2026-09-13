@@ -149,12 +149,8 @@ test.describe('guide fixture capture (B7)', () => {
     await page.getByTestId('charter-approve').click()
     await expect(page.getByTestId('charter-applied')).toBeVisible({ timeout: 60_000 })
 
-    // ── 3. run the architect; it builds a roster and ends in an ask ─────────
-    await expect(page.getByTestId('run-architect')).toBeVisible({ timeout: 30_000 })
-    await page.getByTestId('run-architect').click()
-    await expect(page.getByRole('button', { name: 'Run it' })).toBeVisible()
-    await page.getByRole('button', { name: 'Run it' }).click()
-    await expect(page.getByTestId('run-architect-emitted')).toBeVisible({ timeout: 30_000 })
+    // ── 3. approval starts the architect; it builds a roster and ends in an ask
+    await expect(page.getByTestId('team-forming')).toBeVisible({ timeout: 30_000 })
 
     await gotoView(page, 'desk')
     const firstAsk = page.getByTestId('first-first-ask')
