@@ -68,20 +68,22 @@ func applyCharter(t *testing.T, h *Handlers, body string) *httptest.ResponseReco
 	return rec
 }
 
-// Nothing deposited yet is a 404 carrying the sentence the console renders —
-// "not found" here means something specific and recoverable.
-func TestGetCharter_NoDepositIs404WithTheSentence(t *testing.T) {
+// Nothing deposited yet is a bodiless 204: the normal state for most of an
+// interview, which the onboarding screen polls, so it must not read as a failed
+// request in the browser.
+func TestGetCharter_NoDepositIs204(t *testing.T) {
 	mems := &fakeMemories{oneErr: agentdb.ErrMemoryNotFound}
 	rec := getCharter(t, charterHandlers(t, mems, newFakeTopologyStore(), newFakeWorkerStore()), "?session=onboard-1")
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "no charter has been proposed yet") {
-		t.Errorf("body = %q", rec.Body.String())
+	if rec.Body.Len() != 0 {
+		t.Errorf("body = %q, want none", rec.Body.String())
 	}
 	// The scope came from the credential, not the query string — which is what
-	// makes another project's session a 404 rather than an existence oracle.
+	// makes another project's session "no charter" rather than an existence
+	// oracle.
 	if mems.gotProject != "acme" {
 		t.Errorf("project passed to the store = %q, want acme", mems.gotProject)
 	}

@@ -10,10 +10,11 @@
 // revises, and the newest one wins). So the screen asks again, periodically,
 // and the panel appears when there is something to show.
 //
-// A 404 is the EMPTY STATE, not an error: "the interview has not deposited a
-// charter yet" is the normal condition for most of an interview's life, and
-// rendering it as a failure would put a red box on a screen where nothing is
-// wrong.
+// "No charter yet" is the EMPTY STATE, not an error: it is the normal condition
+// for most of an interview's life, and rendering it as a failure would put a
+// red box on a screen where nothing is wrong. The server says it with a 204
+// (it used to be a 404, which the browser logged as a failed request on every
+// poll); a 404 is still read the same way, for a server from before that.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { configApiStatus, useConfigApi, type ConfigApiOptions } from './configApi.js'
@@ -43,7 +44,8 @@ export interface CharterApi {
   charter: CharterCurrent | null
   /** True until the first fetch settles — distinct from "there is none". */
   loading: boolean
-  /** A read failure in the server's own words. A 404 is NOT one of these. */
+  /** A read failure in the server's own words. "No charter yet" (204, or a
+   *  404 from an older server) is NOT one of these. */
   error: string | null
   reload: () => Promise<void>
   /** POST /agent/charter/apply. Returns the read-back result, or null on
@@ -97,6 +99,9 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     setError(null)
     try {
       const raw = await request<unknown>(`${currentEndpoint}?session=${encodeURIComponent(session)}`)
+      // 204: nothing deposited yet. Same posture as the 404 below — keep any
+      // charter already on screen rather than clearing it.
+      if (raw === undefined) return
       setCharter(coerceCharterCurrent(raw))
     } catch (err) {
       if (configApiStatus(err) === 404) {

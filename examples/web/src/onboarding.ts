@@ -360,12 +360,13 @@ export function useInterviewState(opts: {
         );
         if (cancelled) return;
 
-        // A 404 is the ordinary case: the interview is running and has not
-        // deposited a charter yet. Any other non-OK answer also reads as "not
-        // applied", which errs towards showing the human their way back into
-        // setup — the same direction every other decision in this hook errs.
+        // A 204 is the ordinary case: the interview is running and has not
+        // deposited a charter yet (an older server says 404). Neither has a
+        // body to parse. Any other non-OK answer also reads as "not applied",
+        // which errs towards showing the human their way back into setup — the
+        // same direction every other decision in this hook errs.
         let applied = false;
-        if (charterRes.ok) {
+        if (charterRes.status === 200) {
           const body = (await charterRes.json()) as { applied?: unknown };
           applied = body.applied === true;
         }

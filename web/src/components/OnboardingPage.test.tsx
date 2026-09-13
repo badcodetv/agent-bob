@@ -53,7 +53,7 @@ const validCharterBody = {
 beforeEach(() => {
   chatSessionIds = []
   requests = []
-  charterResponse = { status: 404, body: 'no charter has been proposed yet' }
+  charterResponse = { status: 204, body: null }
   originalFetch = globalThis.fetch
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
@@ -63,6 +63,7 @@ beforeEach(() => {
       new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } })
 
     if (u.includes('/agent/charter/current')) {
+      if (charterResponse.status === 204) return new Response(null, { status: 204 })
       if (charterResponse.status !== 200) {
         return new Response(String(charterResponse.body), { status: charterResponse.status })
       }
@@ -106,6 +107,14 @@ describe('OnboardingPage', () => {
   })
 
   it('says there is no charter yet, without calling it an error', async () => {
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    await screen.findByTestId('onboarding-no-charter')
+    expect(screen.queryByTestId('onboarding-charter-error')).toBeNull()
+    expect(screen.queryByTestId('charter-panel')).toBeNull()
+  })
+
+  it('reads an older server\'s 404 as "no charter yet" too', async () => {
+    charterResponse = { status: 404, body: 'no charter has been proposed yet' }
     render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
     await screen.findByTestId('onboarding-no-charter')
     expect(screen.queryByTestId('onboarding-charter-error')).toBeNull()

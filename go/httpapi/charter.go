@@ -3,7 +3,7 @@ package httpapi
 // charter.go — the two routes onboarding needs (T11 of
 // design/2026-09-08-memory-coordinated-organisation.md):
 //
-//	GET  /agent/charter/current?session=<id>  — read the deposited charter
+//	GET  /agent/charter/current?session=<id>  — read the deposited charter (204: none yet)
 //	POST /agent/charter/apply                 — approve it, once, atomically
 //
 // The rule that shapes both: the charter is read from the STORE, never from
@@ -32,9 +32,11 @@ import (
 	"github.com/badcodetv/agent-bob/topology"
 )
 
-// charterMissing is the 404 body. It is a sentence rather than a code because
-// the console renders it directly, and because "not found" on this route means
-// something specific and recoverable: the interview has not finished yet.
+// charterMissing is apply's 404 body. It is a sentence rather than a code
+// because the console renders it directly, and because "not found" there means
+// something specific and recoverable: the interview has not finished yet. The
+// read route answers the same condition with a bodiless 204 (see
+// GetCurrentCharter).
 const charterMissing = "no charter has been proposed yet — the interview has to deposit an org-charter memory first"
 
 // charterResp is what GET /agent/charter/current answers. It carries the
@@ -131,8 +133,14 @@ func (h *Handlers) GetCurrentCharter(w http.ResponseWriter, r *http.Request) {
 	// applied afterwards. So a wrong project is "no charter", never "there is
 	// one but you may not see it" — no existence oracle. Anything else is a
 	// 500: a database refusing connections is not a charter that is missing.
+	//
+	// No charter yet is 204, not 404. It is the normal state for most of an
+	// interview, and the onboarding screen polls this route every few seconds:
+	// as a 404 every poll was logged by the browser as a failed request, a
+	// console full of red on a screen where nothing was wrong. Apply keeps its
+	// 404 — approving a charter that does not exist IS a failure.
 	if errors.Is(err, agentdb.ErrMemoryNotFound) {
-		http.Error(w, charterMissing, http.StatusNotFound)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err != nil {

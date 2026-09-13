@@ -54,7 +54,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = () => {}
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
-    if (u.includes('/agent/charter/current')) return new Response('no charter yet', { status: 404 })
+    if (u.includes('/agent/charter/current')) return new Response(null, { status: 204 })
     if (u.endsWith('/status')) return json({ sandboxState: 'running', activeQuery: null })
     if (u.includes('/query-events')) return json({ events: history.length ? [{ events: history }] : [] })
     if (u.includes('/messages')) return json({ messages: [], total: 0 })

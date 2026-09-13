@@ -40,10 +40,11 @@ interface World {
   /** The `onboard` session's id, or null for "no such session" (HTTP 404). */
   onboardSessionId: string | null
   /** What `GET /agent/charter/current` answers:
-   *  - 'none'     — 404, the interview is running and has deposited nothing
+   *  - 'none'     — 204, the interview is running and has deposited nothing
+   *  - 'none-404' — the same, as a server from before the 204 said it
    *  - 'proposed' — 200 applied:false, deposited and awaiting a human
    *  - 'applied'  — 200 applied:true, approved; the interview is over */
-  charter: 'none' | 'proposed' | 'applied'
+  charter: 'none' | 'none-404' | 'proposed' | 'applied'
   /** Every request fails while true — the transient-failure posture. */
   down: boolean
 }
@@ -69,7 +70,8 @@ function serve(world: World): { calls: Record<string, number>; charterQueries: s
     }
     if (path === CHARTER_PATH) {
       charterQueries.push(url.searchParams.get('session') ?? '')
-      if (world.charter === 'none') {
+      if (world.charter === 'none') return new Response(null, { status: 204 })
+      if (world.charter === 'none-404') {
         return new Response(
           'no charter has been proposed yet — the interview has to deposit an org-charter memory first',
           { status: 404 },
@@ -131,6 +133,17 @@ describe('useInterviewState', () => {
       { timeout: 2000 },
     )
   })
+
+  it.each(['none', 'none-404'] as const)(
+    'reads an interview with no charter (%s) as still in interview, not as a failure',
+    async (charter) => {
+      serve({ onboardSessionId: 'sess-onboard-1', charter, down: false })
+      const { result } = mount()
+      await waitFor(() => expect(result.current.resolved).toBe(true))
+      expect(result.current.inInterview).toBe(true)
+      expect(result.current.onboardSessionId).toBe('sess-onboard-1')
+    },
+  )
 
   it('stops polling only once the server says the charter is applied (DI10)', async () => {
     // Mid-interview: a charter is deposited and the human has not approved it.
