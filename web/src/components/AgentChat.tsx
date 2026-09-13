@@ -29,6 +29,8 @@ import type { RenderPlugin, AgentSSEEvent } from '../plugins.js'
 import type { AgentSSEEvent as CoreSSEEvent } from '../types.js'
 import { useAgentChatContextOptional } from '../AgentChatProvider.js'
 import { parseOnboardingSeed } from '../charter.js'
+import { parseAgentContext } from '../agentContext.js'
+import AgentContextLine from './AgentContextLine.js'
 
 /**
  * Fold plugin events into per-plugin, per-toolCallId state maps.
@@ -484,6 +486,35 @@ export default function AgentChat(props: AgentChatProps) {
             // An onboarding interview's first message is instructions for the
             // interviewer plus the goal the person typed. Show them their goal,
             // not the instructions (charter.ts, parseOnboardingSeed).
+            // Any application can mark a first message's instructions the same
+            // way (agentContext.ts): a compact line, then the person's own words.
+            const agentContext = message.role === 'user' ? parseAgentContext(message.content) : null
+            if (agentContext !== null) {
+              return (
+                <React.Fragment key={message.id}>
+                  <AgentContextLine context={agentContext} />
+                  {agentContext.rest !== '' && (
+                    <Box data-role="user" sx={{ mb: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <Box
+                        sx={{
+                          maxWidth: '80%',
+                          p: '12px 16px',
+                          borderRadius: 0,
+                          backgroundColor: 'primary.main',
+                          color: 'white',
+                          wordBreak: 'break-word',
+                          fontSize: '0.8125rem',
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {agentContext.rest}
+                      </Box>
+                    </Box>
+                  )}
+                </React.Fragment>
+              )
+            }
             const seed = message.role === 'user' ? parseOnboardingSeed(message.content) : null
             if (seed !== null) {
               return (

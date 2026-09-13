@@ -185,6 +185,10 @@ export {
   parseOnboardingSeed,
 } from './charter.js'
 export type { Charter, CharterIssue, CharterEffects, CharterCurrent, OnboardingSeed } from './charter.js'
+// The context marker any embedding application can put on a first message so
+// the chat shows it as one collapsed line, not as the person's words.
+export { parseAgentContext, formatAgentContext } from './agentContext.js'
+export type { AgentContextMessage } from './agentContext.js'
 export { default as useCharter } from './useCharter.js'
 export type { UseCharterOptions, CharterApi } from './useCharter.js'
 export {

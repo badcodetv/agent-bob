@@ -34,6 +34,30 @@ test('AgentChat disables the composer and says why when the provider has no sess
 // messages render
 // ---------------------------------------------------------------------------
 
+// docs/19-embedding.md §3a: an application's instructions arrive as a user
+// message; marked, they are one collapsed line and the person's words stay theirs.
+test('AgentChat shows a marked context block as one collapsed line, then the words after it', () => {
+  const messages: AgentMessage[] = [
+    {
+      id: 'u1',
+      role: 'user',
+      content: '<agent-context summary="Opened from the hypothesis page">\nLabel every candidate memory name: x\n</agent-context>\nIs gold a hedge?',
+      timestamp: '2024-01-01T00:00:00Z',
+    },
+  ]
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={messages} />
+    </AgentChatProvider>
+  )
+  const line = screen.getByTestId('agent-context')
+  expect(line).toHaveTextContent('Context sent to the agent: Opened from the hypothesis page')
+  expect(screen.queryByText(/Label every candidate memory/)).toBeNull()
+  expect(screen.getByText('Is gold a hedge?')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+  expect(screen.getByTestId('agent-context-body')).toHaveTextContent('Label every candidate memory name: x')
+})
+
 test('AgentChat renders user and assistant messages', () => {
   const messages: AgentMessage[] = [
     { id: 'm1', role: 'user', content: 'Hello agent!', timestamp: '2024-01-01T00:00:00Z' },
