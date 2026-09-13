@@ -545,7 +545,7 @@ function AskRow({
           </Typography>
         )}
       </Stack>
-      {ask.message !== '' && <ClampedText text={ask.message} sx={{ mt: 0.5 }} />}
+      {ask.message !== '' && <ClampedText text={ask.message} markdown sx={{ mt: 0.5 }} />}
       <Stack direction="row" spacing={2} alignItems="baseline" sx={{ mt: 0.5 }}>
         <ThreadLink
           sessionId={ask.sessionId}
@@ -584,7 +584,7 @@ function NoticeRow({
           {coarseAgeLabel(notice.ageSeconds)} ago
         </Typography>
       </Stack>
-      {notice.message !== '' && <ClampedText text={notice.message} sx={{ mt: 0.5 }} />}
+      {notice.message !== '' && <ClampedText text={notice.message} markdown sx={{ mt: 0.5 }} />}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 0.75 }}>
         <ResolveControl label="Got it" variant="button" onResolve={onAcknowledge} />
         <ThreadLink sessionId={notice.sessionId} url={notice.sessionUrl} onOpenSession={onOpenSession} />
@@ -649,7 +649,7 @@ function NoteRow({
           {note.writer} · {formatMemoryTimestamp(note.createdAtMs)}
         </Typography>
       </Stack>
-      {note.excerpt !== '' && <ClampedText text={note.excerpt} maxLines={4} maxChars={320} sx={{ mt: 0.5 }} />}
+      {note.excerpt !== '' && <ClampedText text={note.excerpt} markdown maxLines={4} maxChars={320} sx={{ mt: 0.5 }} />}
       {note.sessionId !== '' && (
         <Box sx={{ mt: 0.5 }}>
           <ThreadLink

@@ -6,7 +6,8 @@
 
 import { useState } from 'react'
 import { Box, Link, Typography, type TypographyProps } from '@mui/material'
-import { clampText } from '../clamp.js'
+import { clampText, stripMarkdown } from '../clamp.js'
+import AgentMarkdown from './AgentMarkdown.js'
 
 export interface ClampedTextProps {
   text: string
@@ -15,6 +16,12 @@ export interface ClampedTextProps {
   color?: TypographyProps['color']
   sx?: TypographyProps['sx']
   'data-testid'?: string
+  /**
+   * The text is model-written markdown: the collapsed preview has its marks
+   * stripped, and "Show all" (or a text short enough to need no clamp) renders
+   * it through the chat's markdown renderer.
+   */
+  markdown?: boolean
 }
 
 export default function ClampedText({
@@ -24,14 +31,25 @@ export default function ClampedText({
   color,
   sx,
   'data-testid': testId,
+  markdown = false,
 }: ClampedTextProps) {
   const [open, setOpen] = useState(false)
-  const { preview, clamped } = clampText(text, maxLines, maxChars)
+  const { preview, clamped } = clampText(markdown ? stripMarkdown(text) : text, maxLines, maxChars)
+  const whole = open || !clamped
   return (
     <Box data-testid={testId}>
-      <Typography variant="body2" color={color} sx={{ whiteSpace: 'pre-wrap', ...sx }}>
-        {open ? text : preview}
-      </Typography>
+      {markdown && whole ? (
+        <Box
+          sx={{ color, '& p': { my: 0.5 }, '& ul, & ol': { my: 0.5, pl: 3 }, '& > .agent-markdown > :first-of-type': { mt: 0 }, ...sx }}
+          data-testid="clamped-markdown"
+        >
+          <AgentMarkdown content={text} />
+        </Box>
+      ) : (
+        <Typography variant="body2" color={color} sx={{ whiteSpace: 'pre-wrap', ...sx }}>
+          {open ? text : preview}
+        </Typography>
+      )}
       {clamped && (
         <Link
           component="button"

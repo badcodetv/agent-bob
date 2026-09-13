@@ -314,6 +314,7 @@ function ActivityRow({
         {record.detail !== '' && (
           <ClampedText
             text={record.detail}
+            markdown
             color={record.detailIsQuote ? 'text.primary' : 'text.secondary'}
             sx={{ mt: 0.5 }}
           />

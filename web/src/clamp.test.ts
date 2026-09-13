@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampText, firstLine } from './clamp.js'
+import { clampText, firstLine, stripMarkdown } from './clamp.js'
 
 describe('clampText', () => {
   it('leaves short text alone', () => {
@@ -30,5 +30,18 @@ describe('firstLine', () => {
   it('skips leading blanks and cuts long lines', () => {
     expect(firstLine('\n\n  THE HEADLINE  \nrest')).toBe('THE HEADLINE')
     expect(firstLine('x'.repeat(10), 4)).toBe('xxxx…')
+  })
+})
+
+describe('stripMarkdown', () => {
+  it.each([
+    ['bold and code', '- **`kind=rolling-summary, worker=copywriter`** (2b8f93) — its first', '• kind=rolling-summary, worker=copywriter (2b8f93) — its first'],
+    ['emphasis between words', 'flagged as *not* a draft', 'flagged as not a draft'],
+    ['underscores inside a word stay', 'a snake_case_name and 2*3*4', 'a snake_case_name and 2*3*4'],
+    ['headings and links', '## Result\nsee [the thread](https://x/y)', 'Result\nsee the thread'],
+    ['fences and quotes', '```json\n{"a":1}\n```\n> quoted', '{"a":1}\nquoted'],
+    ['plain text is untouched', 'Nothing to strip here.', 'Nothing to strip here.'],
+  ])('%s', (_name, input, want) => {
+    expect(stripMarkdown(input)).toBe(want)
   })
 })
