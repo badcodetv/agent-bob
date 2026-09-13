@@ -12,16 +12,19 @@ let originalFetch: typeof globalThis.fetch
 let workers: unknown[]
 let deliveries: unknown[]
 let events: unknown[]
+let queryEvents: unknown
 
 beforeEach(() => {
   workers = [{ name: 'architect', enabled: true, created_at: 1 }]
   deliveries = []
   events = []
+  queryEvents = { events: [] }
   originalFetch = globalThis.fetch
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL) => {
     const u = String(url)
     const json = (v: unknown) =>
       new Response(JSON.stringify(v), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    if (u.includes('/query-events')) return json(queryEvents)
     if (u.includes('/agent/workers')) return json({ workers })
     if (u.includes('/agent/deliveries')) return json({ deliveries })
     if (u.includes('/agent/events')) return json({ events })
@@ -82,6 +85,32 @@ describe('TeamFormingPanel', () => {
     render(<TeamFormingPanel refreshMs={0} architectRunError="events are not configured on this host" />)
     await screen.findByTestId('team-forming-not-started')
     expect(screen.getByTestId('run-architect')).toBeTruthy()
+  })
+
+  it("says what the architect is doing, step by step, from its run's events", async () => {
+    deliveries = [{ id: 'd1', worker: 'architect', status: 'running', session_id: 'sess-arch', created_at: 10 }]
+    queryEvents = {
+      events: [
+        {
+          query_id: 'q1',
+          events: [
+            { type: 'tool_use_start', data: { toolCallId: 't1', toolName: 'mcp__agentkit-core__worker_list', input: {} } },
+            { type: 'tool_use_start', data: { toolCallId: 't2', toolName: 'mcp__agentkit-core__worker_create', input: { name: 'numbers-clerk' } } },
+          ],
+        },
+      ],
+    }
+    render(<TeamFormingPanel refreshMs={0} />)
+    const steps = await screen.findByTestId('team-forming-steps')
+    await waitFor(() => expect(steps.textContent).toMatch(/Creating numbers-clerk/))
+    expect(steps.textContent).toMatch(/Looking at who is on the team/)
+    expect(steps.querySelector('[aria-current="step"]')?.textContent).toMatch(/Creating numbers-clerk/)
+  })
+
+  it('shows a starting step before the job exists', async () => {
+    render(<TeamFormingPanel refreshMs={0} />)
+    const steps = await screen.findByTestId('team-forming-steps')
+    expect(steps.textContent).toMatch(/Starting the architect/)
   })
 
   it('shows what just happened, without config churn', async () => {

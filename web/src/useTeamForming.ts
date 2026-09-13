@@ -9,7 +9,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConfigApi, type ConfigApiOptions } from './configApi.js'
 import { coerceDelivery, coerceProjectEvent, EVENT_ENDPOINTS, type EventDelivery, type ProjectEvent } from './events.js'
 import { coerceWorker, WORKER_ENDPOINTS, type Worker } from './workers.js'
-import { recentActivity, summariseTeamForming, type TeamFormingState } from './teamForming.js'
+import {
+  recentActivity,
+  summariseFormingSteps,
+  summariseTeamForming,
+  type FormingStep,
+  type TeamFormingState,
+} from './teamForming.js'
 
 export interface UseTeamFormingOptions extends ConfigApiOptions {
   /** The architect's name; '' means the default. */
@@ -26,6 +32,8 @@ export interface UseTeamFormingOptions extends ConfigApiOptions {
 export interface TeamFormingApi extends TeamFormingState {
   /** Newest non-config events, for the "what just happened" strip. */
   activity: ProjectEvent[]
+  /** The architect's run in steps, newest last (summariseFormingSteps). */
+  steps: FormingStep[]
   /** True until the first poll settles. */
   loading: boolean
   /** The latest poll's failure, in the server's words; null once one succeeds. */
@@ -46,6 +54,10 @@ export default function useTeamForming(options: UseTeamFormingOptions = {}): Tea
   const [workers, setWorkers] = useState<Worker[]>([])
   const [deliveries, setDeliveries] = useState<EventDelivery[]>([])
   const [events, setEvents] = useState<ProjectEvent[]>([])
+  // The architect run's own query-events, re-read while it runs so the panel
+  // can say what it is doing rather than only that it is busy.
+  const [runEvents, setRunEvents] = useState<unknown>(null)
+  const runEventsFor = useRef<{ sessionId: string; settled: boolean }>({ sessionId: '', settled: false })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -56,16 +68,40 @@ export default function useTeamForming(options: UseTeamFormingOptions = {}): Tea
         request<{ deliveries?: unknown[] } | null>(`${EVENT_ENDPOINTS.deliveries}?limit=${deliveryLimit}`),
         request<{ events?: unknown[] } | null>(`${EVENT_ENDPOINTS.events}?limit=${eventLimit}`),
       ])
-      setWorkers((Array.isArray(w?.workers) ? w!.workers! : []).map((x) => coerceWorker(x)))
-      setDeliveries((Array.isArray(d?.deliveries) ? d!.deliveries! : []).map(coerceDelivery))
+      const nextWorkers = (Array.isArray(w?.workers) ? w!.workers! : []).map((x) => coerceWorker(x))
+      const nextDeliveries = (Array.isArray(d?.deliveries) ? d!.deliveries! : []).map(coerceDelivery)
+      setWorkers(nextWorkers)
+      setDeliveries(nextDeliveries)
       setEvents((Array.isArray(e?.events) ? e!.events! : []).map(coerceProjectEvent))
       setError(null)
+
+      // Read the run's steps while it is going, and once more when it settles
+      // so the last step lands; a settled run is never read again.
+      const run = summariseTeamForming({
+        workers: nextWorkers,
+        deliveries: nextDeliveries,
+        architectName,
+        sinceSeconds,
+      }).architectDelivery
+      const sessionId = run?.session_id ?? ''
+      const settled = run !== null && run.status !== 'running' && run.status !== 'pending'
+      const held = runEventsFor.current
+      if (sessionId !== '' && !(held.sessionId === sessionId && held.settled)) {
+        try {
+          const raw = await request<unknown>(EVENT_ENDPOINTS.queryEvents(sessionId))
+          runEventsFor.current = { sessionId, settled }
+          setRunEvents(raw ?? null)
+        } catch {
+          // Steps are a nicety beside the team list; a failed read keeps the
+          // last steps rather than blanking them or failing the panel.
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to read the team')
     } finally {
       setLoading(false)
     }
-  }, [deliveryLimit, eventLimit, request])
+  }, [architectName, deliveryLimit, eventLimit, request, sinceSeconds])
 
   // Ref-guarded first load and an interval over a ref — the useCharter shape,
   // so the timer is not torn down every time `request` changes identity.
@@ -87,6 +123,10 @@ export default function useTeamForming(options: UseTeamFormingOptions = {}): Tea
     [architectName, deliveries, sinceSeconds, workers],
   )
   const activity = useMemo(() => recentActivity(events), [events])
+  const steps = useMemo(
+    () => summariseFormingSteps({ phase: state.phase, events: runEvents }),
+    [runEvents, state.phase],
+  )
 
-  return { ...state, activity, loading, error, reload }
+  return { ...state, activity, steps, loading, error, reload }
 }

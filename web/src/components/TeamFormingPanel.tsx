@@ -23,7 +23,12 @@ import {
 } from '@mui/material'
 import type { ConfigApiOptions } from '../configApi.js'
 import useTeamForming from '../useTeamForming.js'
-import { describeMemberStatus, type TeamFormingPhase, type TeamMember } from '../teamForming.js'
+import {
+  describeMemberStatus,
+  type FormingStep,
+  type TeamFormingPhase,
+  type TeamMember,
+} from '../teamForming.js'
 import { agoShort } from '../timefmt.js'
 import RunArchitectControl from './RunArchitectControl.js'
 import RunCycleControl from './RunCycleControl.js'
@@ -53,12 +58,12 @@ function heading(phase: TeamFormingPhase, who: string): { title: string; body: s
     case 'starting':
       return {
         title: 'Your team is forming',
-        body: `${who} is starting. It reads the goal and the label registry, then decides which workers this project needs and creates them. The first container can take a minute or two — nothing is stuck, and you do not need to reload.`,
+        body: `${capitalise(who)} is starting. It reads the goal, decides which workers this project needs, and creates them. The first container can take a minute or two — you do not need to reload.`,
       }
     case 'designing':
       return {
         title: `${capitalise(who)} is designing your team`,
-        body: 'Workers appear below as they are created, with what each one is for. It will tell you what it built, and why, when it finishes.',
+        body: 'Its steps show below as it takes them, and each worker appears as it is created. It will tell you what it built, and why, when it finishes.',
       }
     case 'ready':
       return {
@@ -75,6 +80,29 @@ function heading(phase: TeamFormingPhase, who: string): { title: string; body: s
 
 function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+/** The architect's latest few steps: done ones ticked, the current one spinning. */
+function StepList({ steps }: { steps: FormingStep[] }) {
+  return (
+    <Box component="ol" sx={{ m: 0, p: 0 }} data-testid="team-forming-steps" aria-live="polite">
+      {steps.map((step) => (
+        <Box
+          component="li"
+          key={step.key}
+          sx={{ listStyle: 'none', py: 0.25, display: 'flex', alignItems: 'center', gap: 1 }}
+          aria-current={step.current ? 'step' : undefined}
+        >
+          <Box sx={{ width: 14, display: 'inline-flex', justifyContent: 'center', color: 'text.secondary' }} aria-hidden>
+            {step.current ? <CircularProgress size={10} /> : '✓'}
+          </Box>
+          <Typography variant="body2" color={step.current ? 'text.primary' : 'text.secondary'}>
+            {step.text}
+          </Typography>
+        </Box>
+      ))}
+    </Box>
+  )
 }
 
 function MemberRow({ m, nowMs }: { m: TeamMember; nowMs: number }) {
@@ -143,6 +171,10 @@ export default function TeamFormingPanel({
           <Typography variant="body2" color="text.secondary">
             {body}
           </Typography>
+        )}
+
+        {!notStarted && (team.phase === 'starting' || team.phase === 'designing') && team.steps.length > 0 && (
+          <StepList steps={team.steps} />
         )}
 
         {team.phase === 'failed' && (

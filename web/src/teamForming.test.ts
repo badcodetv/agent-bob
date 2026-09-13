@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { describeFormingTool, summariseFormingSteps } from './teamForming.js'
 import { coerceDelivery, coerceProjectEvent } from './events.js'
 import { coerceSchedule } from './schedules.js'
 import { coerceWorker } from './workers.js'
@@ -124,5 +125,64 @@ describe('describeRunOutcome', () => {
     expect(describeRunOutcome('scout', 'already_fired').ok).toBe(true)
     expect(describeRunOutcome('scout', 'target_missing').ok).toBe(false)
     expect(describeRunOutcome('scout', 'error', 'schedule not found').text).toBe('scout — schedule not found')
+  })
+})
+
+describe('summariseFormingSteps', () => {
+  const start = (id: string, toolName: string, input: Record<string, unknown> = {}) => ({
+    type: 'tool_use_start',
+    data: { toolCallId: id, toolName, input },
+  })
+  const run = (...evs: unknown[]) => ({ events: [{ query_id: 'q', events: evs }] })
+
+  it('is one starting step before the job exists', () => {
+    expect(summariseFormingSteps({ phase: 'starting', events: null })).toEqual([
+      { key: 'starting', text: 'Starting the architect', current: true },
+    ])
+  })
+
+  it('reads the goal before the first tool call', () => {
+    const steps = summariseFormingSteps({ phase: 'designing', events: run() })
+    expect(steps.map((s) => s.text)).toEqual(['Starting the architect', 'Reading your goal and the charter'])
+    expect(steps.map((s) => s.current)).toEqual([false, true])
+  })
+
+  it('names each tool call in words, collapses repeats, skips validation, and keeps the last few', () => {
+    const steps = summariseFormingSteps({
+      phase: 'designing',
+      limit: 4,
+      events: run(
+        start('a', 'mcp__agentkit-core__memory_current'),
+        start('b', 'mcp__agentkit-core__memory_search'),
+        start('c', 'mcp__agentkit-core__charter_validate'),
+        start('d', 'mcp__agentkit-core__worker_create', { name: 'scribe' }),
+        start('e', 'mcp__agentkit-core__schedule_create', { worker: 'scribe', cron: '0 9 * * *' }),
+        start('f', 'mcp__agentkit-core__subscription_create', { worker: 'scribe', event_type: 'worker.finished' }),
+      ),
+    })
+    expect(steps.map((s) => s.text)).toEqual([
+      'Reading what the project has written down',
+      'Creating scribe',
+      expect.stringMatching(/^Putting scribe on a schedule — /),
+      'Wiring scribe to wake on worker.finished',
+    ])
+    expect(steps.filter((s) => s.current).map((s) => s.key)).toEqual(['f'])
+  })
+
+  it('marks nothing current once the run has settled', () => {
+    const steps = summariseFormingSteps({ phase: 'ready', events: run(start('a', 'worker_list')) })
+    expect(steps.some((s) => s.current)).toBe(false)
+  })
+})
+
+describe('describeFormingTool', () => {
+  it.each([
+    ['mcp__agentkit-core__worker_prompt_write', { name: 'copywriter' }, "Writing copywriter's instructions"],
+    ['mcp__agentkit-core__memory_create', { labels: { kind: 'architect-verdict' } }, 'Writing a note down: architect verdict'],
+    ['mcp__agentkit-core__request_human_attention', {}, 'Writing you a note about what it did'],
+    ['mcp__agentkit-core__config_history', {}, 'Checking what changed last time'],
+    ['mcp__agentkit-core__charter_validate', {}, ''],
+  ])('%s', (tool, input, want) => {
+    expect(describeFormingTool(tool, input)).toBe(want)
   })
 })

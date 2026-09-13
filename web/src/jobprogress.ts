@@ -59,15 +59,16 @@ export const EMPTY_JOB_PROGRESS: JobProgress = {
   produced: [],
 }
 
-interface Envelope {
+export interface QueryEventEnvelope {
   type: string
   data: Record<string, unknown>
 }
+type Envelope = QueryEventEnvelope
 
 /** Every `{type, data}` envelope anywhere in the response, in document order.
  *  The route nests them one level (a row per query) and the legacy one does
  *  not; a walk costs nothing at these sizes and cannot pick the wrong one. */
-function collectEnvelopes(raw: unknown): Envelope[] {
+export function collectEnvelopes(raw: unknown): Envelope[] {
   const out: Envelope[] = []
   const walk = (node: unknown): void => {
     if (Array.isArray(node)) {

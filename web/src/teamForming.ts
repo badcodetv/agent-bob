@@ -12,7 +12,9 @@
 
 import { DEFAULT_ARCHITECT_NAME } from './charter.js'
 import type { EventDelivery, ProjectEvent } from './events.js'
-import type { Schedule } from './schedules.js'
+import { collectEnvelopes } from './jobprogress.js'
+import { describeCron, type Schedule } from './schedules.js'
+import { getToolDisplayName, stripMcpPrefix } from './tool-formatters.js'
 import type { Worker } from './workers.js'
 
 /** The onboarding worker (go/topology's OnboardingWorker). Never "the team". */
@@ -187,6 +189,125 @@ export function recentActivity(events: ProjectEvent[], limit = 6): ProjectEvent[
     .slice()
     .sort((a, b) => (b.occurred_at || b.created_at) - (a.occurred_at || a.created_at))
     .slice(0, limit)
+}
+
+// ---------------------------------------------------------------------------
+// The architect's first run, step by step
+// ---------------------------------------------------------------------------
+
+/** One line of "what the architect is doing". */
+export interface FormingStep {
+  /** Stable within one run: the tool call id, or a fixed key for the phases. */
+  key: string
+  text: string
+  /** True for the newest step while the run is still going. */
+  current: boolean
+}
+
+const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+
+/**
+ * One tool call in words a person who has never seen the tool list can read.
+ * '' means "not worth a line" — a validation call, or a tool with nothing to say.
+ */
+export function describeFormingTool(toolName: string, input: Record<string, unknown>): string {
+  const tool = stripMcpPrefix(toolName)
+  const name = str(input.name)
+  const worker = str(input.worker)
+  switch (tool) {
+    case 'worker_list':
+      return 'Looking at who is on the team'
+    case 'worker_get':
+      return name === '' ? 'Reading a worker' : `Reading ${name}`
+    case 'worker_create':
+      return name === '' ? 'Creating a worker' : `Creating ${name}`
+    case 'worker_update':
+      return name === '' ? 'Adjusting a worker' : `Adjusting ${name}`
+    case 'worker_prompt_write':
+      return name === '' ? "Writing a worker's instructions" : `Writing ${name}'s instructions`
+    case 'worker_delete':
+      return name === '' ? 'Removing a worker' : `Removing ${name}`
+    case 'schedule_create': {
+      const when = describeCron(str(input.cron))
+      const whenText = when === null ? '' : ` — ${when.replace(/\.$/, '').toLowerCase()}`
+      return worker === '' ? `Setting a schedule${whenText}` : `Putting ${worker} on a schedule${whenText}`
+    }
+    case 'schedule_update':
+    case 'schedule_delete':
+      return 'Adjusting a schedule'
+    case 'subscription_create': {
+      const type = str(input.event_type)
+      if (worker === '') return 'Wiring a trigger'
+      return type === '' ? `Wiring ${worker} to wake on an event` : `Wiring ${worker} to wake on ${type}`
+    }
+    case 'subscription_update':
+    case 'subscription_delete':
+      return 'Adjusting a trigger'
+    case 'schedule_list':
+    case 'subscription_list':
+      return 'Checking what wakes whom'
+    case 'memory_current':
+    case 'memory_search':
+    case 'memory_get':
+      return 'Reading what the project has written down'
+    case 'memory_create': {
+      const labels = input.labels && typeof input.labels === 'object' ? (input.labels as Record<string, unknown>) : {}
+      const kind = str(labels.kind)
+      return kind === '' ? 'Writing a note down' : `Writing a note down: ${kind.replace(/-/g, ' ')}`
+    }
+    case 'config_history':
+      return 'Checking what changed last time'
+    case 'project_prompt_read':
+      return 'Reading the project background'
+    case 'project_prompt_write':
+      return 'Updating the project background'
+    case 'request_human_attention':
+      return 'Writing you a note about what it did'
+    case 'charter_validate':
+      return ''
+    default:
+      return getToolDisplayName(toolName, input)
+  }
+}
+
+/**
+ * The architect's run as a short list of steps, newest last, capped to the
+ * last `limit`.
+ *
+ * Read from the run's `query-events` (flushed every couple of seconds while it
+ * runs), so it is what the architect has actually DONE — never a guess at what
+ * it will do next. Before its job exists the one step is the container
+ * starting; once the job is running but has called nothing yet, it is reading
+ * the goal. Repeated identical lines collapse into one: "Reading what the
+ * project has written down" three times says nothing the first did not.
+ */
+export function summariseFormingSteps(input: {
+  phase: TeamFormingPhase
+  /** The architect's run's `GET /agent/session/{id}/query-events` response, or null. */
+  events: unknown
+  limit?: number
+}): FormingStep[] {
+  const { phase, events, limit = 5 } = input
+  const going = phase === 'starting' || phase === 'designing'
+  const steps: Omit<FormingStep, 'current'>[] = [{ key: 'starting', text: 'Starting the architect' }]
+  if (phase !== 'starting') {
+    steps.push({ key: 'reading', text: 'Reading your goal and the charter' })
+    let n = 0
+    for (const env of collectEnvelopes(events)) {
+      if (env.type !== 'tool_use_start') continue
+      const toolName = str(env.data.toolName)
+      const toolInput =
+        env.data.input && typeof env.data.input === 'object' ? (env.data.input as Record<string, unknown>) : {}
+      const text = toolName === '' ? '' : describeFormingTool(toolName, toolInput)
+      n += 1
+      if (text === '' || steps[steps.length - 1]!.text === text) continue
+      steps.push({ key: str(env.data.toolCallId) || `step-${n}`, text })
+    }
+  }
+  return steps.slice(-Math.max(1, limit)).map((step, i, all) => ({
+    ...step,
+    current: going && i === all.length - 1,
+  }))
 }
 
 // ---------------------------------------------------------------------------
