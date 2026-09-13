@@ -390,7 +390,6 @@ function ProjectWorkspace({
   const { sessionId: onboardSessionId, error: onboardError } = useOnboardingSession({
     apiBase: API,
     token: projectToken,
-    goal: onboardingGoal,
     enabled: view === "onboarding",
   });
   // Whether this PROJECT (not this browser tab) is still in its interview —
@@ -417,7 +416,14 @@ function ProjectWorkspace({
 
   // URL ⇄ active session, both directions: a pasted /p/<project>/s/<session>
   // resumes that session, and whatever session is open is already permalinked.
-  const { openSession, routeSessionId } = useSessionPermalink({ projectId: project });
+  //
+  // Not while onboarding: that screen resumes the interview into the provider,
+  // and a permalink written for it would, on a reload, resume the interview
+  // into the CHAT view below before the onboarding screen could claim it.
+  const { openSession, routeSessionId } = useSessionPermalink({
+    projectId: project,
+    enabled: shownView !== "onboarding",
+  });
 
   // Whenever the routed session CHANGES, show it. Same reasoning as
   // `showSession` below, applied to the two paths that do not go through it: a
@@ -430,6 +436,11 @@ function ProjectWorkspace({
   // wrong view first. Switching only on a *change* leaves the human free to
   // walk to Workers or Settings with a session open.
   const shownSession = useRef<string | null>(null);
+  // The interview is already "shown" — by the onboarding screen, which binds
+  // the provider to it. Without this, walking from onboarding to the Desk
+  // re-enables the permalink, it notices the provider's session, and this
+  // check would yank the human into Chat.
+  if (view === "onboarding" && onboardSessionId !== "") shownSession.current = onboardSessionId;
   if (routeSessionId !== null && shownSession.current !== routeSessionId) {
     shownSession.current = routeSessionId;
     setView("chat");
@@ -555,6 +566,7 @@ function ProjectWorkspace({
           <OnboardingPage
             sessionId={onboardSessionId}
             sessionError={onboardError}
+            goal={onboardingGoal}
             refreshMs={4000}
             projectId={project}
           />

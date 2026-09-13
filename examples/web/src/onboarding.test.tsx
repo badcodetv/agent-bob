@@ -24,7 +24,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useInterviewState, ONBOARD_SESSION_NAME } from './onboarding.js'
+import { useInterviewState, startOnboarding, ONBOARD_SESSION_NAME } from './onboarding.js'
 
 const API = 'http://api.test'
 const TOKEN = 'test-token'
@@ -218,5 +218,78 @@ describe('useInterviewState', () => {
 
     expect(Object.keys(calls)).toEqual([])
     expect(result.current.resolved).toBe(false)
+  })
+})
+
+// `startOnboarding` — the half of the shell that gets a container up. The
+// seed is NOT sent here any more (OnboardingPage sends it through the chat
+// provider, so the reply streams into the rail); these pin the two ways the old
+// version handed the screen a session it could not use.
+describe('startOnboarding', () => {
+  /** A scripted by-name status sequence; the last entry repeats. */
+  function fakeServer(opts: { exists: boolean; statuses: { status: string; create_error?: string }[] }) {
+    const posts: string[] = []
+    let polls = 0
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const path = new URL(String(input)).pathname
+      if (init?.method === 'POST' || init?.method === 'PUT') posts.push(path)
+      if (path === SESSION_PATH) {
+        if (!opts.exists && posts.every((p) => p !== '/agent/session')) {
+          return new Response('no such session', { status: 404 })
+        }
+        const row = opts.statuses[Math.min(polls++, opts.statuses.length - 1)]
+        return new Response(JSON.stringify({ id: 'sess-onboard-9', ...row }), { status: 200 })
+      }
+      if (path === '/agent/topologies/apply') return new Response('{}', { status: 200 })
+      if (path === '/agent/workers/interviewer') {
+        return new Response(JSON.stringify({ name: 'interviewer', enabled: true }), { status: 200 })
+      }
+      if (path === '/agent/session') {
+        return new Response(JSON.stringify({ id: 'sess-onboard-9' }), { status: 200 })
+      }
+      return new Response('unexpected path ' + path, { status: 500 })
+    })
+    return { fetchImpl: fetchImpl as unknown as typeof fetch, posts }
+  }
+
+  it('creates the session, waits out `creating`, and sends no message itself', async () => {
+    const { fetchImpl, posts } = fakeServer({
+      exists: false,
+      statuses: [{ status: 'creating' }, { status: 'creating' }, { status: 'running' }],
+    })
+    const id = await startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })
+    expect(id).toBe('sess-onboard-9')
+    expect(posts).toContain('/agent/session')
+    expect(posts.some((p) => p.endsWith('/message'))).toBe(false)
+  })
+
+  it('refuses a session that failed to start, with the engine’s reason', async () => {
+    const { fetchImpl } = fakeServer({
+      exists: false,
+      statuses: [{ status: 'creating' }, { status: 'error', create_error: 'host port pool is exhausted' }],
+    })
+    await expect(startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })).rejects.toThrow(
+      /failed to start: host port pool is exhausted/,
+    )
+  })
+
+  it('waits for the container on the reuse path too (a reload mid-provisioning)', async () => {
+    const { fetchImpl, posts } = fakeServer({
+      exists: true,
+      statuses: [{ status: 'creating' }, { status: 'creating' }, { status: 'creating' }, { status: 'running' }],
+    })
+    const id = await startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })
+    expect(id).toBe('sess-onboard-9')
+    // Reused, not recreated.
+    expect(posts).not.toContain('/agent/session')
+    // It polled past every `creating` answer before returning.
+    expect((fetchImpl as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBeGreaterThanOrEqual(5)
+  })
+
+  it('refuses a reused session that is in error', async () => {
+    const { fetchImpl } = fakeServer({ exists: true, statuses: [{ status: 'error' }] })
+    await expect(startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })).rejects.toThrow(
+      /no reason was recorded/,
+    )
   })
 })

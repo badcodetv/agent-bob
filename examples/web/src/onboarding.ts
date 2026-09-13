@@ -7,7 +7,20 @@
 //   1. is there already an `onboard` session in this project?  reuse it.
 //   2. apply onboarding@v1                                     409 = already applied.
 //   3. re-enable the interviewer if a previous charter disabled it (A8).
-//   4. create the session, wait for it to leave `creating`, seed it.
+//   4. create the session and wait for it to leave `creating`.
+//
+// Both paths — reuse and create — wait for the container, and both refuse a
+// session that failed to start.
+//
+// THIS FILE DOES NOT SEND THE SEED any more. It used to POST the first message
+// itself and throw the SSE response away, while the rail was bound to nothing
+// (it passed an id to <AgentChat/>, which reads messages and `send` from the
+// provider's CURRENT session, and nothing had resumed it): the interviewer's
+// first reply streamed into a void, and the human's Send was a silent no-op
+// (reported 2026-09-13). OnboardingPage now resumes the session into the chat
+// provider and sends the seed THROUGH it, once, when the transcript has no
+// human message — so the reply streams into the rail, and a reload before the
+// seed went out still starts the interview.
 //
 // Two details that are easy to get wrong and silent when you do:
 //
@@ -23,7 +36,6 @@
 // against a 64-byte limit.
 
 import { useEffect, useRef, useState } from "react";
-import { buildOnboardingSeed } from "@agentkit/chat-ui";
 
 export const ONBOARD_SESSION_NAME = "onboard";
 const INTERVIEWER = "interviewer";
@@ -35,23 +47,23 @@ const POLL_MS = 1_500;
 export interface StartOnboardingOptions {
   apiBase: string;
   token: string;
-  goal: string;
   /** Injected in tests; defaults to the global. */
   fetchImpl?: typeof fetch;
-  /** Told the session id as soon as it exists, before it is ready — so the
-   *  screen can stop saying "starting" the moment there is something to bind
-   *  the rail to. */
-  onSession?: (sessionId: string) => void;
+  /** Injected in tests so the container wait does not take real seconds. */
+  pollMs?: number;
 }
 
 /**
- * Returns the interview session's id. Throws with the server's own words —
- * "host port pool is exhausted" is a sentence an operator can act on, and the
- * screen renders it verbatim.
+ * Returns the interview session's id once its container is up — never
+ * before, because a rail bound to a `creating` session has nothing to show
+ * and nowhere to send. Throws with the server's own words: "host port pool is
+ * exhausted" is a sentence an operator can act on, and the screen renders it
+ * verbatim.
  */
 export async function startOnboarding(opts: StartOnboardingOptions): Promise<string> {
-  const { apiBase, token, goal } = opts;
+  const { apiBase, token } = opts;
   const doFetch = opts.fetchImpl ?? fetch;
+  const pollMs = opts.pollMs ?? POLL_MS;
 
   const call = async (path: string, init?: RequestInit): Promise<Response> =>
     doFetch(`${apiBase}${path}`, {
@@ -76,7 +88,9 @@ export async function startOnboarding(opts: StartOnboardingOptions): Promise<str
     const row = (await existing.json()) as { id?: string };
     if (typeof row.id === "string" && row.id !== "") {
       await enableInterviewer(call);
-      opts.onSession?.(row.id);
+      // A reload while the container was still starting lands here too, so
+      // the reuse path waits exactly as the create path does.
+      await waitForContainer(call, pollMs);
       return row.id;
     }
   }
@@ -105,38 +119,46 @@ export async function startOnboarding(opts: StartOnboardingOptions): Promise<str
   const createdRow = (await created.json()) as { id?: string; sessionId?: string };
   const sessionId = createdRow.id ?? createdRow.sessionId ?? "";
   if (sessionId === "") throw new Error("the server created a session with no id");
-  opts.onSession?.(sessionId);
 
-  // The session is `creating` until its container is up, and a message sent
-  // before then is lost. Poll the NAME rather than the id: the name is the
-  // thing that is unique and the row is the same either way.
+  await waitForContainer(call, pollMs);
+  return sessionId;
+}
+
+/**
+ * Waits for the `onboard` session to leave `creating`. Polls the NAME rather
+ * than the id: the name is the thing that is unique and the row is the same
+ * either way.
+ *
+ * `error` is a way of leaving `creating` too, and it used to count as ready:
+ * the loop broke, the seed went to a session with no container, and the
+ * screen showed an empty rail with no reason. It throws now, with the
+ * engine's recorded cause when there is one.
+ */
+async function waitForContainer(
+  call: (path: string, init?: RequestInit) => Promise<Response>,
+  pollMs: number,
+): Promise<void> {
   const deadline = Date.now() + CREATE_TIMEOUT_MS;
   for (;;) {
     const res = await call(`/agent/sessions/by-name/${ONBOARD_SESSION_NAME}`);
     if (res.ok) {
-      const row = (await res.json()) as { status?: string };
-      if (row.status !== "creating") break;
+      const row = (await res.json()) as { status?: string; create_error?: string };
+      if (row.status === "error") {
+        const cause = (row.create_error ?? "").trim();
+        throw new Error(
+          `The interview's container failed to start: ${cause === "" ? "no reason was recorded on the session" : cause}. ` +
+            "The session named `onboard` keeps its name, so delete it from the session list and reload to try again.",
+        );
+      }
+      if (row.status !== "creating") return;
     }
     if (Date.now() > deadline) {
       throw new Error(
         "the interview's container did not start within three minutes — check `docker compose logs agentd`",
       );
     }
-    await sleep(POLL_MS);
+    await sleep(pollMs);
   }
-
-  // The seed. Fire-and-forget: the response is the turn's SSE stream, and the
-  // rail is already attached to it — awaiting it here would block the screen
-  // for the length of the model's first reply.
-  void call(`/agent/session/${sessionId}/message`, {
-    method: "POST",
-    body: JSON.stringify({ content: buildOnboardingSeed(sessionId, goal) }),
-  }).then(
-    (res) => void res.text().catch(() => {}),
-    () => {},
-  );
-
-  return sessionId;
 }
 
 /**
@@ -174,7 +196,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 // ---------------------------------------------------------------------------
 
 export interface UseOnboardingSession {
-  /** Empty until the session exists — which is the screen's waiting state. */
+  /** Empty until the session's container is up — which is the screen's waiting state. */
   sessionId: string;
   /** The server's own words, or null. */
   error: string | null;
@@ -191,7 +213,6 @@ export interface UseOnboardingSession {
 export function useOnboardingSession(opts: {
   apiBase: string;
   token: string;
-  goal: string | null;
   enabled: boolean;
 }): UseOnboardingSession {
   const [sessionId, setSessionId] = useState("");
@@ -204,14 +225,12 @@ export function useOnboardingSession(opts: {
     void startOnboarding({
       apiBase: opts.apiBase,
       token: opts.token,
-      goal: opts.goal ?? "",
-      onSession: setSessionId,
     })
       .then(setSessionId)
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
       });
-  }, [opts.apiBase, opts.enabled, opts.goal, opts.token]);
+  }, [opts.apiBase, opts.enabled, opts.token]);
 
   return { sessionId, error };
 }
