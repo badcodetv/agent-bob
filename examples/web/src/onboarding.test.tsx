@@ -24,7 +24,8 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useInterviewState, startOnboarding, ONBOARD_SESSION_NAME, ONBOARD_SESSION_TITLE } from './onboarding.js'
+import { useInterviewState, startOnboarding, deskPath, ONBOARD_SESSION_NAME, ONBOARD_SESSION_TITLE } from './onboarding.js'
+import { parseSessionPermalink, projectIdFromLocation } from '@agentkit/chat-ui'
 
 const API = 'http://api.test'
 const TOKEN = 'test-token'
@@ -314,5 +315,13 @@ describe('startOnboarding', () => {
     await expect(startOnboarding({ apiBase: API, token: TOKEN, fetchImpl, pollMs: 1 })).rejects.toThrow(
       /no reason was recorded/,
     )
+  })
+})
+
+describe('deskPath', () => {
+  it('is the project\'s Desk, which names the project but no session', () => {
+    expect(deskPath('bakery-newsletter')).toBe('/p/bakery-newsletter/desk')
+    expect(parseSessionPermalink(deskPath('bakery-newsletter'))).toBeNull()
+    expect(projectIdFromLocation(deskPath('bakery-newsletter'))).toBe('bakery-newsletter')
   })
 })

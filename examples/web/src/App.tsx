@@ -18,6 +18,7 @@ import {
   navRevealSummary,
   parseGuideHash,
   projectIdFromLocation,
+  useAgentChat,
   useAsksCount,
   useNavReveal,
   usePrefersReducedMotion,
@@ -30,7 +31,7 @@ import GuidePage from "./GuidePage";
 import { GUIDE_PAGES } from "./guide/pages.generated.js";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
-import { useInterviewState, useOnboardingSession } from "./onboarding";
+import { deskPath, useInterviewState, useOnboardingSession } from "./onboarding";
 import Sidebar from "./Sidebar";
 import { darkTheme, lightTheme } from "./theme";
 
@@ -402,6 +403,15 @@ function ProjectWorkspace({
   const { inInterview, onboardSessionId: interviewSessionId, resolved: interviewResolved } =
     useInterviewState({ apiBase: API, token: projectToken });
   const openOnboarding = useCallback(() => setView("onboarding"), []);
+  // Leaving the interview for the Desk lets go of the interview session first:
+  // with it still bound, the permalink would write it into the address bar and
+  // a reload would land on the transcript instead of the Desk.
+  const { clearSession } = useAgentChat();
+  const openDeskAfterOnboarding = useCallback(() => {
+    clearSession();
+    window.history.pushState(null, "", deskPath(project) + window.location.search);
+    setView("desk");
+  }, [clearSession, project]);
   // The pending goal is only a carrier for the text between project creation
   // and the interview's first seed message (design §3 G1) — once the server
   // says the interview is over, forget it, or a later reload of this project
@@ -578,7 +588,7 @@ function ProjectWorkspace({
             goal={onboardingGoal}
             refreshMs={4000}
             projectId={project}
-            onOpenDesk={() => setView("desk")}
+            onOpenDesk={openDeskAfterOnboarding}
           />
         )}
         {shownView === "guide" && <GuidePage slug={guideSlug} />}

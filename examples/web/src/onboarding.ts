@@ -43,6 +43,19 @@ export const ONBOARD_SESSION_NAME = "onboard";
 export const ONBOARD_SESSION_TITLE = "Onboarding interview";
 const INTERVIEWER = "interviewer";
 
+/**
+ * Where "Your team is ready — go to the Desk" lands: `/p/<project>/desk`.
+ *
+ * Not a session permalink. The onboarding screen binds the chat provider to the
+ * interview, so simply switching the view re-enabled the permalink and wrote
+ * the INTERVIEW's session into the address bar — a reload of the Desk then
+ * opened the interview transcript. `projectIdFromLocation` still reads the
+ * project out of this path.
+ */
+export function deskPath(project: string): string {
+  return `/p/${encodeURIComponent(project)}/desk`;
+}
+
 /** How long to wait for a container before giving up and saying so. */
 const CREATE_TIMEOUT_MS = 180_000;
 const POLL_MS = 1_500;
