@@ -97,6 +97,14 @@ describe('numbers and cost', () => {
     expect(await screen.findByText(/today: 120 tokens · cost not reported/i)).toBeInTheDocument()
   })
 
+  it('on the subscription, shows tokens and says why there is no dollar figure', async () => {
+    usageBody.credential_mode = 'subscription'
+    usageBody.today = { ...(usageBody.today as object), cost_usd: 4.34 }
+    render(<BudgetPanel collapsible />)
+    const line = await screen.findByText(/today: 120 tokens \(subscription — not billed per token\)/i)
+    expect(line.textContent).not.toMatch(/\$/)
+  })
+
   it('shows the credential-mode sentence', async () => {
     render(<BudgetPanel />)
     expect(await screen.findByText(/billed to the api key/i)).toBeInTheDocument()

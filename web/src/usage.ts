@@ -165,6 +165,7 @@ export default function useUsage(options: UseUsageOptions = {}): UsageApi {
 // package's "one definition" convention. Not re-exported a THIRD time from
 // `index.ts`, where `events.ts`'s copy already is.
 export { formatTokens } from './events.js'
+import { formatTokens as formatTokensLocal } from './events.js'
 
 /** "$1.23", or "cost not reported" when the transport never recorded a cost
  *  for tokens it admits were spent (§1.4's `cost_known: false`) — never
@@ -172,6 +173,17 @@ export { formatTokens } from './events.js'
 export function formatCost(costUsd: number, costKnown: boolean): string {
   if (!costKnown) return 'cost not reported'
   return `$${costUsd.toFixed(2)}`
+}
+
+/**
+ * One spend figure: `1,252,927 tokens · $1.78`. On the subscription the dollar
+ * figure is left out and the tokens say why — `1,252,927 tokens (subscription
+ * — not billed per token)` — because a dollar amount beside a subscription's
+ * usage reads as a bill that will never arrive.
+ */
+export function formatSpend(tokens: number, costUsd: number, costKnown: boolean, credentialMode: string): string {
+  if (credentialMode === 'subscription') return `${formatTokensLocal(tokens)} tokens (subscription — not billed per token)`
+  return `${formatTokensLocal(tokens)} tokens · ${formatCost(costUsd, costKnown)}`
 }
 
 /** The credential-mode sentence, verbatim per the ticket (A5 scope): which of
@@ -182,7 +194,7 @@ export function credentialModeSentence(mode: string): string {
     case 'api-key':
       return 'Billed to the API key'
     case 'subscription':
-      return 'Running on the subscription — the cost shown is what this would cost on the API'
+      return 'Running on the subscription — tokens are counted against its limits, not billed one by one'
     case 'mock':
       return 'Mock model — nothing is billed'
     default:

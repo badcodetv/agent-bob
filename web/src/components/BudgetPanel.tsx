@@ -34,7 +34,7 @@ import useUsage, { type UseUsageOptions } from '../usage.js'
 import useWhoami from '../whoami.js'
 import useProjectSettings, { type ProjectSettingsApi } from '../useProjectSettings.js'
 import { consoleTokenColor } from '../spine.js'
-import { budgetFraction, budgetTier, credentialModeSentence, formatCost, formatTokens } from '../usage.js'
+import { budgetFraction, budgetTier, credentialModeSentence, formatSpend, formatTokens } from '../usage.js'
 
 export interface BudgetPanelProps extends UseUsageOptions {
   /** Heading text. Pass '' to render no heading. */
@@ -138,7 +138,7 @@ function BudgetPanelBody({
       <Box sx={{ p: 1.5 }} data-testid="budget-panel-collapsed">
         <Stack direction="row" spacing={1.5} alignItems="baseline">
           <Typography variant="body2">
-            Today: {formatTokens(todayTokens)} tokens · {formatCost(usage.today.cost_usd, usage.cost_known)}
+            Today: {formatSpend(todayTokens, usage.today.cost_usd, usage.cost_known, usage.credential_mode)}
           </Typography>
           <Typography variant="caption" color="text.secondary">
             under budget
@@ -174,15 +174,15 @@ function BudgetPanelBody({
 
       <Stack spacing={0.5} sx={{ mt: 1.5 }}>
         <Typography variant="body2">
-          Today: {formatTokens(todayTokens)} tokens · {formatCost(usage.today.cost_usd, usage.cost_known)}
+          Today: {formatSpend(todayTokens, usage.today.cost_usd, usage.cost_known, usage.credential_mode)}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Last 7 days: {formatTokens(usage.last_7d.input_tokens + usage.last_7d.output_tokens)} tokens ·{' '}
-          {formatCost(usage.last_7d.cost_usd, usage.cost_known)}
+          Last 7 days:{' '}
+          {formatSpend(usage.last_7d.input_tokens + usage.last_7d.output_tokens, usage.last_7d.cost_usd, usage.cost_known, usage.credential_mode)}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Last 30 days: {formatTokens(usage.last_30d.input_tokens + usage.last_30d.output_tokens)} tokens ·{' '}
-          {formatCost(usage.last_30d.cost_usd, usage.cost_known)}
+          Last 30 days:{' '}
+          {formatSpend(usage.last_30d.input_tokens + usage.last_30d.output_tokens, usage.last_30d.cost_usd, usage.cost_known, usage.credential_mode)}
         </Typography>
         {sentence !== '' && (
           <Typography variant="caption" color="text.secondary">

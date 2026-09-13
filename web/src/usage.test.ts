@@ -12,6 +12,7 @@ import useUsage, {
   credentialModeSentence,
   defaultUsage,
   formatCost,
+  formatSpend,
   formatTokens,
 } from './usage.js'
 
@@ -67,7 +68,7 @@ describe('credentialModeSentence', () => {
   it('gives the exact three sentences the ticket specifies', () => {
     expect(credentialModeSentence('api-key')).toBe('Billed to the API key')
     expect(credentialModeSentence('subscription')).toBe(
-      'Running on the subscription — the cost shown is what this would cost on the API',
+      'Running on the subscription — tokens are counted against its limits, not billed one by one',
     )
     expect(credentialModeSentence('mock')).toBe('Mock model — nothing is billed')
   })
@@ -143,5 +144,16 @@ describe('useUsage', () => {
     const { result } = renderHook(() => useUsage())
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.error).toMatch(/usage is not configured/)
+  })
+})
+
+describe('formatSpend', () => {
+  it.each([
+    ['api-key', 1252927, 1.78, true, '1,252,927 tokens · $1.78'],
+    ['mock', 120, 0, true, '120 tokens · $0.00'],
+    ['', 120, 0, false, '120 tokens · cost not reported'],
+    ['subscription', 2887489, 4.34, true, '2,887,489 tokens (subscription — not billed per token)'],
+  ])('%s', (mode, tokens, cost, known, want) => {
+    expect(formatSpend(tokens, cost, known, mode)).toBe(want)
   })
 })
