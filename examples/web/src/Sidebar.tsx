@@ -63,9 +63,13 @@ export default function Sidebar({
   // server's refusal, and cannot say what the goal is FOR.
   const [newProjectOpen, setNewProjectOpen] = useState(false);
 
+  // Re-read when the project's interview session appears, not only when the
+  // filter changes: the sidebar mounts before a new project's `onboard`
+  // session exists, and a list read at mount said "No sessions yet" for the
+  // whole interview.
   useEffect(() => {
     void refresh({ userEmail: userFilter === "me" ? undefined : userFilter });
-  }, [refresh, userFilter]);
+  }, [refresh, userFilter, project, onboardSessionId]);
 
   // Distinct creators among the loaded sessions feed the per-user filter options.
   const users = useMemo(
