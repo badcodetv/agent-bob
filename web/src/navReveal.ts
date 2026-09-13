@@ -177,12 +177,12 @@ export const NAV_LABELS: Record<NavEntry, string> = {
 export function navRevealSentence(entry: NavEntry): string {
   switch (entry) {
     case 'memory':
-      return 'Memory is now in the sidebar — it holds what your workers have written down.'
+      return 'Memory is now in the menu above — it holds what your workers have written down.'
     case 'activity':
-      return 'Activity is now in the sidebar — it lists everything this project does.'
+      return 'Activity is now in the menu above — it lists everything this project does.'
     case 'chart':
-      return 'Chart is now in the sidebar — it draws which worker wakes which.'
+      return 'Chart is now in the menu above — it draws which worker wakes which.'
     default:
-      return `${NAV_LABELS[entry]} is now in the sidebar.`
+      return `${NAV_LABELS[entry]} is now in the menu above.`
   }
 }

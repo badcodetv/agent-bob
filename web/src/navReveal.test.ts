@@ -125,6 +125,16 @@ describe('appeared — what the confirmation gets to name', () => {
     }
     expect(navRevealSentence('chart')).toContain('which worker wakes which')
   })
+
+  // The entries sit in the menu at the top of the sidebar, and the notice sits
+  // below that menu. "Now in the sidebar" sent people looking for a new row
+  // in the session list.
+  it('points at the menu, not at "the sidebar"', () => {
+    for (const entry of NAV_ENTRIES) {
+      expect(navRevealSentence(entry)).toContain('in the menu above')
+      expect(navRevealSentence(entry)).not.toMatch(/sidebar/)
+    }
+  })
 })
 
 describe('order is fixed', () => {
