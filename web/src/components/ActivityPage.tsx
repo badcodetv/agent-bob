@@ -44,6 +44,7 @@ import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
 import AboutThisScreen from './AboutThisScreen.js'
+import ClampedText from './ClampedText.js'
 
 export interface ActivityPageProps extends UseActivityOptions {
   projectId: string
@@ -311,13 +312,11 @@ function ActivityRow({
           )}
         </Stack>
         {record.detail !== '' && (
-          <Typography
-            variant="body2"
+          <ClampedText
+            text={record.detail}
             color={record.detailIsQuote ? 'text.primary' : 'text.secondary'}
-            sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}
-          >
-            {record.detail}
-          </Typography>
+            sx={{ mt: 0.5 }}
+          />
         )}
         {record.sessionId !== '' && onOpenSession !== undefined && (
           <Box sx={{ mt: 0.5 }}>

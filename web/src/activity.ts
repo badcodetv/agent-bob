@@ -258,6 +258,14 @@ function buildWorkRecords(input: BuildActivityInput): ActivityRecord[] {
   const nowSeconds = Math.floor(nowMs / 1000)
 
   const eventById = new Map(events.map((e) => [e.id, e]))
+  // A finished job's own words are on the worker.finished event its session
+  // emitted, not on the delivery row — without this join a successful job was
+  // a headline and a duration, and nobody could see what the worker did.
+  const finishedBySession = new Map(
+    events
+      .filter((e) => e.type === 'worker.finished' && e.envelope.session_id !== '')
+      .map((e) => [e.envelope.session_id, e]),
+  )
   const workerBySubscription = new Map(subscriptions.map((s) => [s.id, s.worker]))
   const openBySession = openRequestsBySession(attentionRequests)
 
@@ -313,6 +321,8 @@ function buildWorkRecords(input: BuildActivityInput): ActivityRecord[] {
     const failed = delivery.status === 'failed'
     const reason = (delivery.failure_reason ?? '').trim()
     const ran = deliveryDurationSeconds(delivery, nowSeconds)
+    const finished = finishedBySession.get(delivery.session_id)
+    const said = finished === undefined ? '' : finishedConclusion(finished.text)
 
     return {
       id: `job:${delivery.id}`,
@@ -327,8 +337,8 @@ function buildWorkRecords(input: BuildActivityInput): ActivityRecord[] {
         ? reason === ''
           ? 'No reason is recorded on this delivery. The agentd log and the job are where the reason is.'
           : reason
-        : '',
-      detailIsQuote: false,
+        : said,
+      detailIsQuote: !failed && said !== '',
       meta: ran === null ? delivery.status : `ran ${formatDuration(ran)}`,
       worker,
       sessionId: delivery.session_id,
@@ -398,6 +408,7 @@ function buildUnparkedAskRecords(
 function buildEventRecords(input: BuildActivityInput): ActivityRecord[] {
   const { events, deliveries } = input
   const deliveredEventIds = new Set(deliveries.map((d) => d.event_id))
+  const jobSessions = new Set(deliveries.map((d) => d.session_id).filter((id) => id !== ''))
   const out: ActivityRecord[] = []
 
   for (const event of events) {
@@ -430,18 +441,28 @@ function buildEventRecords(input: BuildActivityInput): ActivityRecord[] {
     }
 
     if (deliveredEventIds.has(event.id)) continue
+    // A job's finish that nobody listens for is already on that job's row, as
+    // what the worker said (buildWorkRecords) — a second row would repeat it.
+    if (event.type === 'worker.finished' && jobSessions.has(event.envelope.session_id)) continue
 
     // Nothing woke. That is a fact worth showing — a subscription that should
     // have matched and did not is invisible everywhere else in the console.
     const emitter = event.envelope.worker
+    // A worker finishing that nobody listens for is ordinary — the summary
+    // writer's own finish, say. Its text is the whole transcript; what the
+    // worker concluded is the part a person wants.
+    const finishedText = event.type === 'worker.finished' ? finishedConclusion(event.text) : ''
     out.push({
       id: `event:${event.id}`,
       kind: 'event',
       lens: ACTIVITY_HOME.event,
       glyph: emitter === '' ? 'human' : 'agent',
       atMs,
-      headline: `${event.type} woke nobody`,
-      detail: event.text,
+      headline:
+        event.type === 'worker.finished' && emitter !== ''
+          ? `${emitter} finished`
+          : `${event.type} woke nobody`,
+      detail: finishedText !== '' ? finishedText : event.text,
       detailIsQuote: true,
       meta: emitter === '' ? '' : `from ${emitter}`,
       worker: emitter,
@@ -528,4 +549,32 @@ export function oldestShownMs(records: ActivityRecord[]): number {
     if (oldest === 0 || record.atMs < oldest) oldest = record.atMs
   }
   return oldest
+}
+
+/**
+ * What a worker said at the end of its job, read out of a `worker.finished`
+ * event's text.
+ *
+ * That text is the rendered transcript (go/runner.go renderConversation):
+ * `role:\n content` blocks joined by a blank line, with each tool call as a
+ * `[tool] …` line inside the assistant's block. The LAST assistant block is the
+ * outer one — a transcript quoted inside the first user message comes earlier —
+ * and without its tool lines it is the worker's closing words. '' when the text
+ * has no assistant block, so the caller can fall back to the raw text.
+ */
+export function finishedConclusion(text: string): string {
+  const normalised = text.replace(/\r\n/g, '\n')
+  const marker = '\n\nassistant:\n'
+  const at = normalised.lastIndexOf(marker)
+  const body = at >= 0
+    ? normalised.slice(at + marker.length)
+    : normalised.startsWith('assistant:\n')
+      ? normalised.slice('assistant:\n'.length)
+      : ''
+  return body
+    .split('\n')
+    .filter((line) => !line.startsWith('[tool] '))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
