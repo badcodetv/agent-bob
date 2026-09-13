@@ -5,10 +5,18 @@
 //
 // Three things here are deliberate and easy to undo by accident.
 //
-// 1. The rail is bound to the onboarding session EXPLICITLY. `AgentChat` takes
-//    all-optional props and falls back to `AgentChatProvider`'s *current*
-//    session for each one it is not given, so a bare <AgentChat/> here would
-//    render whichever session the shell happened to have selected.
+// 1. The rail is bound to the onboarding session by RESUMING it into
+//    `AgentChatProvider`. Passing `sessionId` to <AgentChat/> is not enough,
+//    and for most of this screen's life that was all it did: the prop names
+//    the session, but messages, questions and `send` still come from the
+//    provider's CURRENT session, which nothing had set. The rail sat empty, the
+//    interviewer's first question never appeared, and Send did nothing at all
+//    (reported from real use, 2026-09-13). The old test mocked AgentChat and
+//    checked only the id prop, which is why it passed throughout.
+//
+//    The seed goes through the provider too, once, and only when the resumed
+//    transcript holds no human message: that makes it safe on a reload, and
+//    it is what puts the interviewer's first reply on screen as it streams.
 //
 // 2. The waiting state NAMES ITS CAUSE. Session creation provisions a
 //    container, which is slow by construction; a screen that just sits there
@@ -19,6 +27,7 @@
 //    chat receives no briefing at all, so an architect talked to rather than
 //    woken has never seen the label registry (B1/C5).
 
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Box,
@@ -32,6 +41,8 @@ import CharterPanel from './CharterPanel.js'
 import RunArchitectControl from './RunArchitectControl.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import useCharter from '../useCharter.js'
+import { useAgentChatContextOptional } from '../AgentChatProvider.js'
+import { buildOnboardingSeed } from '../charter.js'
 import type { ConfigApiOptions } from '../configApi.js'
 
 export interface OnboardingPageProps extends ConfigApiOptions {
@@ -46,6 +57,14 @@ export interface OnboardingPageProps extends ConfigApiOptions {
    * "could not start the interview" tells them nothing.
    */
   sessionError?: string | null
+  /**
+   * The goal typed when the project was created. When this is given (null
+   * counts: the seed then asks the interviewer to start from "what is this
+   * project for?"), the screen sends the interview's first message itself —
+   * once, and only if the session has no human message yet. Leave it
+   * undefined to send nothing.
+   */
+  goal?: string | null
   /** Poll interval for the charter read; forwarded to useCharter. */
   refreshMs?: number
   /** Scopes the "About this screen" disclosure's dismissal (C2). The project
@@ -70,12 +89,44 @@ function StartingUp() {
 export default function OnboardingPage({
   sessionId,
   sessionError = null,
+  goal,
   refreshMs,
   projectId = '',
   ...apiOptions
 }: OnboardingPageProps) {
   const charter = useCharter({ ...apiOptions, session: sessionId, refreshMs })
   const current = charter.charter
+  const chat = useAgentChatContextOptional()
+
+  // Note 1: bind the provider to this session. `bound` is the id whose resume
+  // has FINISHED — the seed decision below must read the replayed transcript,
+  // not the empty one resume starts from.
+  const [bound, setBound] = useState('')
+  const resumedFor = useRef('')
+  const resumeSession = chat?.resumeSession
+  const providerSessionId = chat?.session?.id ?? ''
+  useEffect(() => {
+    if (!resumeSession || sessionId === '' || resumedFor.current === sessionId) return
+    resumedFor.current = sessionId
+    // Already current (the human walked away and back): its state is live, and
+    // a resume would throw it away mid-stream.
+    if (providerSessionId === sessionId) {
+      setBound(sessionId)
+      return
+    }
+    void resumeSession(sessionId).finally(() => setBound(sessionId))
+  }, [resumeSession, sessionId, providerSessionId])
+
+  const seededFor = useRef('')
+  const ready =
+    chat !== null && goal !== undefined && bound === sessionId && sessionId !== '' &&
+    providerSessionId === sessionId && !chat.isStreaming && chat.session?.status !== 'error'
+  useEffect(() => {
+    if (!ready || chat === null || seededFor.current === sessionId) return
+    seededFor.current = sessionId
+    if (chat.messages.some((m) => m.role === 'user')) return
+    void chat.sendMessage(buildOnboardingSeed(sessionId, goal ?? ''))
+  }, [ready, chat, sessionId, goal])
 
   return (
     <Box

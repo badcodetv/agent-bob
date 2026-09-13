@@ -12,9 +12,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import OnboardingPage from './OnboardingPage.js'
 
-// AgentChat drags a whole session client behind it; this screen's contract is
-// only that the rail is bound to the RIGHT session, so the stub records the
-// session id it was given and nothing else.
+// AgentChat drags a whole session client behind it, so here the stub records
+// the session id it was given and nothing else. That is NOT proof the rail
+// works — this stub passed throughout the time the real rail showed nothing and
+// sent nothing. OnboardingPage.chat.test.tsx mounts the real chat for that.
 let chatSessionIds: (string | undefined)[] = []
 vi.mock('./AgentChat.js', () => ({
   default: (props: { sessionId?: string }) => {
