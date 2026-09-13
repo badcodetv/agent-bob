@@ -19,14 +19,14 @@ Kai tried both apps as a new user and neither felt finished.
 
 1. Wolf finish-line fixes are BUILT (agent-wolf `5c9291f`..`42601a2`, gates green). Needs a live
    real-model walk once the stack is free.
-2. Bob chat-wiring fix is being built by a subagent that owns the local stack.
+2. Bob chat-wiring fix is DONE and proven in a browser (mock model). Screens: `design/2026-09-13-first-run-screens/bob-01-*`.
 3. Next for Bob: after Approve, run the architect **immediately** and show the team forming live;
    then a "speed up" control for the first hour.
 
 ## Checklist
 
 ### Bob: new project → watching a team work
-- 🟡 **Interview chat actually works** (the panel is connected to the interview session; the first question appears; answers reach it)
+- ✅ **Interview chat actually works** (the panel loads the interview session; the goal is sent once; replies stream; reload keeps the conversation; also fixed: the goal was being forgotten a second after creation, so the interviewer was told there was none) — `652d702`..`56b49e5`, screens `bob-01-*`
 - ⬜ **Interview is short** (3–5 questions) and ends with a charter (the plan the human approves)
 - ⬜ **Approve → architect runs straight away** (no waiting for 09:00)
 - ⬜ **Team forming is visible** (the workers the architect creates appear as they land)
@@ -67,3 +67,11 @@ Kai tried both apps as a new user and neither felt finished.
 - 2026-09-13 — Wolf: interviewer rewritten (≤3 questions, hard tool caps, closing message naming the
   "Review and go live" button), `report_validate` added, detail page polls while draft, NextStep
   shows progress. api 1992 / web 506 tests green. Commits `5c9291f` `d2f59bf` `2a65124` `42601a2`.
+- 2026-09-13 — Bob: onboarding chat wired to its session; goal seeded through the chat once; wait for
+  the container on reload; error shown if the session fails; goal no longer lost after creation;
+  input disabled with a reason when no session is open. web 1720 / examples-web 9 tests green.
+  Local stack left in mock mode with test login `test@example.com` / `bob-e2e`.
+  Noticed, not yet fixed: goal message shows as a big user bubble with internal instructions; the
+  interview is listed as "Untitled · Unknown · agent"; create-project field labels overlap text;
+  "Activity is now in the sidebar" notice is wrong; failed `onboard` session keeps the name taken;
+  `./stack clean` fails with login on; charter poll 404s spam the browser console.
