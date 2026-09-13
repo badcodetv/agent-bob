@@ -26,6 +26,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useConfigApi, type ConfigApiOptions } from '../configApi.js'
+import { coerceDelivery, EVENT_ENDPOINTS, type EventDelivery } from '../events.js'
 import { coerceSchedule, describeCron, SCHEDULE_ENDPOINTS, type Schedule } from '../schedules.js'
 import {
   coerceScheduleRunResult,
@@ -33,7 +34,9 @@ import {
   planCycle,
   scheduleRunEndpoint,
   scheduleTarget,
+  splitCycleByRecentRuns,
   type CycleLine,
+  type CycleSkip,
 } from '../teamForming.js'
 
 export interface RunCycleControlProps extends ConfigApiOptions {
@@ -42,17 +45,21 @@ export interface RunCycleControlProps extends ConfigApiOptions {
   disabled?: boolean
   /** Told what the cycle started, so a host can refresh what it shows. */
   onRan?: (lines: CycleLine[]) => void
+  /** Fixed "now" for tests, unix ms. */
+  nowMs?: number
 }
 
 export default function RunCycleControl({
   primary = false,
   disabled = false,
   onRan,
+  nowMs,
   ...apiOptions
 }: RunCycleControlProps) {
   const { request } = useConfigApi(apiOptions)
   const [planning, setPlanning] = useState(false)
   const [plan, setPlan] = useState<Schedule[] | null>(null)
+  const [skipped, setSkipped] = useState<CycleSkip[]>([])
   const [running, setRunning] = useState(false)
   const [lines, setLines] = useState<CycleLine[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -62,9 +69,21 @@ export default function RunCycleControl({
     setError(null)
     setLines(null)
     try {
-      const data = await request<{ schedules?: unknown[] } | null>(SCHEDULE_ENDPOINTS.list)
+      const [data, jobs] = await Promise.all([
+        request<{ schedules?: unknown[] } | null>(SCHEDULE_ENDPOINTS.list),
+        // Recent jobs, to leave out a worker that has only just run. A failed
+        // read skips nothing rather than refusing to run a cycle.
+        request<{ deliveries?: unknown[] } | null>(`${EVENT_ENDPOINTS.deliveries}?limit=100`).catch(() => null),
+      ])
       const raw = Array.isArray(data?.schedules) ? data!.schedules! : []
-      setPlan(planCycle(raw.map((s) => coerceSchedule(s))))
+      const deliveries: EventDelivery[] = (Array.isArray(jobs?.deliveries) ? jobs!.deliveries! : []).map(coerceDelivery)
+      const split = splitCycleByRecentRuns(
+        planCycle(raw.map((s) => coerceSchedule(s))),
+        deliveries,
+        Math.floor((nowMs ?? Date.now()) / 1000),
+      )
+      setSkipped(split.skipped)
+      setPlan(split.run)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'failed to read the schedules')
     } finally {
@@ -95,10 +114,12 @@ export default function RunCycleControl({
   // The same worker can be on several clocks (an end-of-week ask and a
   // send-day ask, say); the confirmation names each by when it would have run,
   // or it lists one worker twice and reads like a bug.
-  const who = plan?.map((s) => {
+  const nameOf = (s: Schedule) => {
     const when = describeCron(s.cron)
     return when === null ? scheduleTarget(s) : `${scheduleTarget(s)} — ${when.charAt(0).toLowerCase()}${when.slice(1).replace(/\.$/, '')}`
-  }) ?? []
+  }
+  const who = plan?.map(nameOf) ?? []
+  const nothingToRun = plan !== null && plan.length === 0
 
   return (
     <Box>
@@ -141,7 +162,11 @@ export default function RunCycleControl({
       <Dialog open={plan !== null} onClose={() => (running ? undefined : setPlan(null))}>
         <DialogTitle>Run a cycle now?</DialogTitle>
         <DialogContent>
-          {plan !== null && plan.length === 0 ? (
+          {nothingToRun && skipped.length > 0 ? (
+            <DialogContentText data-testid="run-cycle-all-skipped">
+              Everyone on a clock has just run, so there is nothing new to start yet.
+            </DialogContentText>
+          ) : nothingToRun ? (
             <DialogContentText data-testid="run-cycle-nothing">
               Nothing in this project is on a clock yet, so there is nothing to run. Workers that
               wake on events will run when those events arrive.
@@ -163,10 +188,26 @@ export default function RunCycleControl({
               </p>
             </DialogContentText>
           )}
+          {plan !== null && skipped.length > 0 && (
+            <DialogContentText component="div" sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                Left out, because they only just ran:
+              </Typography>
+              <Box component="ul" sx={{ pl: 2.5, my: 0.5 }} data-testid="run-cycle-skipped">
+                {skipped.map((s, i) => (
+                  <li key={`${s.schedule.id}-${i}`}>
+                    <Typography variant="body2" color="text.secondary">
+                      {nameOf(s.schedule)} · {s.reason}
+                    </Typography>
+                  </li>
+                ))}
+              </Box>
+            </DialogContentText>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPlan(null)} disabled={running}>
-            {plan !== null && plan.length === 0 ? 'Close' : 'Cancel'}
+            {nothingToRun ? 'Close' : 'Cancel'}
           </Button>
           {plan !== null && plan.length > 0 && (
             <Button variant="contained" onClick={() => void run(plan)} disabled={running}>

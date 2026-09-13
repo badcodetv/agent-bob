@@ -205,6 +205,10 @@ export {
   scheduleTarget,
   planCycle,
   describeRunOutcome,
+  splitCycleByRecentRuns,
+  CYCLE_RECENT_RUN_SECONDS,
+  summariseFormingSteps,
+  describeFormingTool,
 } from './teamForming.js'
 export type {
   TeamFormingPhase,
@@ -213,6 +217,8 @@ export type {
   TeamFormingState,
   ScheduleRunResult,
   CycleLine,
+  CycleSkip,
+  FormingStep,
 } from './teamForming.js'
 export { default as useTeamForming } from './useTeamForming.js'
 export type { UseTeamFormingOptions, TeamFormingApi } from './useTeamForming.js'

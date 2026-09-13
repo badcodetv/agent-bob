@@ -12,6 +12,7 @@ let originalFetch: typeof globalThis.fetch
 let requests: { url: string; method: string }[]
 let schedules: unknown[]
 let runAnswers: Record<string, { status: number; body: unknown }>
+let deliveries: unknown[]
 
 beforeEach(() => {
   requests = []
@@ -21,6 +22,7 @@ beforeEach(() => {
     { id: 's3', worker: 'retired', cron: '0 11 * * *', enabled: false },
   ]
   runAnswers = {}
+  deliveries = []
   originalFetch = globalThis.fetch
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
@@ -38,6 +40,7 @@ beforeEach(() => {
       return json({ schedule_id: run[1], outcome: 'requested', event_id: `ev-${run[1]}` })
     }
     if (u.endsWith('/agent/schedules')) return json({ schedules })
+    if (u.includes('/agent/deliveries')) return json({ deliveries })
     return json({})
   }) as typeof globalThis.fetch
 })
@@ -88,6 +91,30 @@ describe('RunCycleControl', () => {
     const result = await screen.findByTestId('run-cycle-result')
     expect(result.textContent).toMatch(/scout — this schedule is disabled/)
     expect(result.textContent).toMatch(/writer — started/)
+  })
+
+  it('leaves out a worker that only just ran, says so, and does not fire it', async () => {
+    const NOW_MS = 1_800_000_000_000
+    deliveries = [{ id: 'd1', worker: 'scout', status: 'ok', started_at: NOW_MS / 1000 - 400, ended_at: NOW_MS / 1000 - 240 }]
+    render(<RunCycleControl nowMs={NOW_MS} />)
+    await userEvent.click(screen.getByTestId('run-cycle'))
+    const plan = await screen.findByTestId('run-cycle-plan')
+    expect(plan.textContent).not.toMatch(/scout/)
+    expect(plan.textContent).toMatch(/writer/)
+    expect(screen.getByTestId('run-cycle-skipped').textContent).toMatch(/scout — .* · ran 4 min ago — skipped/)
+    await userEvent.click(screen.getByRole('button', { name: /run them/i }))
+    await screen.findByTestId('run-cycle-result')
+    expect(requests.filter((r) => r.method === 'POST').map((r) => r.url)).toEqual(['/agent/schedules/s2/run'])
+  })
+
+  it('says everyone just ran when every schedule is skipped', async () => {
+    const NOW_MS = 1_800_000_000_000
+    schedules = [{ id: 's1', worker: 'scout', cron: '0 9 * * *', enabled: true }]
+    deliveries = [{ id: 'd1', worker: 'scout', status: 'running', started_at: NOW_MS / 1000 - 30 }]
+    render(<RunCycleControl nowMs={NOW_MS} />)
+    await userEvent.click(screen.getByTestId('run-cycle'))
+    await screen.findByTestId('run-cycle-all-skipped')
+    expect(screen.queryByRole('button', { name: /run them/i })).toBeNull()
   })
 
   it('says there is nothing on a clock when no schedule is enabled', async () => {

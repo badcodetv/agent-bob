@@ -360,6 +360,58 @@ export function planCycle(schedules: Schedule[]): Schedule[] {
     .sort((a, b) => scheduleTarget(a).localeCompare(scheduleTarget(b)) || a.id.localeCompare(b.id))
 }
 
+/** How recent a worker's last run must be for a cycle to skip it: 30 minutes. */
+export const CYCLE_RECENT_RUN_SECONDS = 30 * 60
+
+/** A schedule a cycle leaves out, and why, in words. */
+export interface CycleSkip {
+  schedule: Schedule
+  /** `ran 4 min ago — skipped`, or `running now — skipped`. */
+  reason: string
+}
+
+/**
+ * Split a cycle's plan into what fires and what is skipped because its worker
+ * ran moments ago (or is running now). Approving a charter runs the architect,
+ * and "Run a cycle now" pressed straight afterwards used to start it again —
+ * a second design pass over evidence that cannot exist yet, for real tokens.
+ *
+ * Only a worker schedule is ever skipped; a session-mode schedule has no worker
+ * run to compare. A job parked waiting on a person counts as having run.
+ * Anyone wanting that worker anyway runs it on its own, deliberately.
+ */
+export function splitCycleByRecentRuns(
+  plan: Schedule[],
+  deliveries: EventDelivery[],
+  nowSeconds: number,
+  recentSeconds = CYCLE_RECENT_RUN_SECONDS,
+): { run: Schedule[]; skipped: CycleSkip[] } {
+  const newest = newestDeliveryByWorker(deliveries)
+  const run: Schedule[] = []
+  const skipped: CycleSkip[] = []
+  for (const schedule of plan) {
+    const d = schedule.worker === '' ? undefined : newest.get(schedule.worker)
+    if (d && (d.status === 'running' || d.status === 'pending')) {
+      skipped.push({ schedule, reason: 'running now — skipped' })
+      continue
+    }
+    if (d && (d.status === 'ok' || d.status === 'awaiting_human')) {
+      const at = d.ended_at || d.started_at || d.created_at
+      const ago = nowSeconds - at
+      if (at > 0 && ago < recentSeconds) {
+        const minutes = Math.max(0, Math.floor(ago / 60))
+        skipped.push({
+          schedule,
+          reason: minutes < 1 ? 'ran just now — skipped' : `ran ${minutes} min ago — skipped`,
+        })
+        continue
+      }
+    }
+    run.push(schedule)
+  }
+  return { run, skipped }
+}
+
 /** One line of the confirmation a cycle leaves behind. */
 export interface CycleLine {
   target: string

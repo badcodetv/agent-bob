@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeFormingTool, summariseFormingSteps } from './teamForming.js'
+import { describeFormingTool, splitCycleByRecentRuns, summariseFormingSteps } from './teamForming.js'
 import { coerceDelivery, coerceProjectEvent } from './events.js'
 import { coerceSchedule } from './schedules.js'
 import { coerceWorker } from './workers.js'
@@ -184,5 +184,37 @@ describe('describeFormingTool', () => {
     ['mcp__agentkit-core__charter_validate', {}, ''],
   ])('%s', (tool, input, want) => {
     expect(describeFormingTool(tool, input)).toBe(want)
+  })
+})
+
+describe('splitCycleByRecentRuns', () => {
+  const NOW = 10_000
+  const plan = [
+    coerceSchedule({ id: 'arch', worker: 'architect', cron: '0 9 * * *', enabled: true }),
+    coerceSchedule({ id: 'clerk', worker: 'numbers-clerk', cron: '0 17 * * 0', enabled: true }),
+    coerceSchedule({ id: 'copy', worker: 'copywriter', cron: '30 9 * * 2', enabled: true }),
+    coerceSchedule({ id: 'review', worker: 'weekly-review', cron: '0 7 * * 1', enabled: true }),
+    coerceSchedule({ id: 'sess', worker: '', target_session: 'desk-bot', cron: '0 8 * * *', enabled: true }),
+  ]
+  const deliveries = [
+    coerceDelivery({ id: 'd1', worker: 'architect', status: 'ok', started_at: NOW - 400, ended_at: NOW - 240 }),
+    coerceDelivery({ id: 'd2', worker: 'numbers-clerk', status: 'awaiting_human', started_at: NOW - 20, ended_at: 0 }),
+    coerceDelivery({ id: 'd3', worker: 'copywriter', status: 'ok', started_at: NOW - 7200, ended_at: NOW - 3600 }),
+    coerceDelivery({ id: 'd4', worker: 'weekly-review', status: 'running', started_at: NOW - 60 }),
+  ]
+
+  it('skips a worker that ran in the last 30 minutes or is running now, and says why', () => {
+    const { run, skipped } = splitCycleByRecentRuns(plan, deliveries, NOW)
+    expect(run.map((s) => s.id)).toEqual(['copy', 'sess'])
+    expect(skipped.map((s) => [s.schedule.id, s.reason])).toEqual([
+      ['arch', 'ran 4 min ago — skipped'],
+      ['clerk', 'ran just now — skipped'],
+      ['review', 'running now — skipped'],
+    ])
+  })
+
+  it('a failed last run is not a reason to skip', () => {
+    const failed = [coerceDelivery({ id: 'f', worker: 'architect', status: 'failed', started_at: NOW - 60, ended_at: NOW - 30 })]
+    expect(splitCycleByRecentRuns(plan.slice(0, 1), failed, NOW).run).toHaveLength(1)
   })
 })
