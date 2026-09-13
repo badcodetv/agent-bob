@@ -793,6 +793,14 @@ Then, outside the transaction, it disables the `interviewer` — otherwise it
 would persist enabled and unwired, and the architect's first reconciliation
 pass would find an orphan worker it is free to rewrite or delete.
 
+And then it **starts the architect's first run**: it writes one `architect.run`
+event (external envelope — the same write `POST /agent/events` performs), so the
+router wakes the architect through the subscription it just created, with its
+briefing. The response names it as `architect_run_event_id`; if the event could
+not be written the charter still stands and `architect_run_error` says why. A
+re-apply is refused by the store (409) before this point, so it never
+double-fires. The console follows it with a "Your team is forming" view.
+
 ### The architect's standing loop
 
 Every run, in order:
