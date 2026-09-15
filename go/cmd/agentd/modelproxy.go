@@ -136,26 +136,40 @@ func loadMockModelScript() (*modelproxy.ScriptTable, error) {
 	return t, nil
 }
 
+// Every model variable either mode sets is written by BOTH modes — as an empty
+// string by the mode that does not use it — because a key left out is not a key
+// left unset. `docker commit` copies the container's env into the snapshot
+// image's config, so a session archived under one mode and restored under the
+// other inherits the old mode's wiring for any key the new env omits. That was a
+// real production failure: sessions snapshotted in API-key mode, restored after
+// the box moved to subscription mode, kept ANTHROPIC_BASE_URL=…/agent-proxy and
+// talked to the proxy — which in subscription mode serves the mock. An explicit
+// `KEY=` overrides the image value, and both the sandbox (`if
+// (config.ANTHROPIC_BASE_URL)`) and the in-image CLI treat empty as unset.
+
 // sandboxSessionEnv is injected into every session container. It points the
 // in-sandbox model SDK at agentd's own /agent-proxy route (reachable from inside
 // DinD at selfURL) and supplies a dummy key so the CLI boots.
 func sandboxSessionEnv(selfURL string) map[string]string {
 	return map[string]string{
-		"ANTHROPIC_BASE_URL": selfURL + "/agent-proxy",
-		"HOST_API_URL":       selfURL,
-		"ANTHROPIC_API_KEY":  dummyPassthroughKey,
+		"ANTHROPIC_BASE_URL":      selfURL + "/agent-proxy",
+		"HOST_API_URL":            selfURL,
+		"ANTHROPIC_API_KEY":       dummyPassthroughKey,
+		"CLAUDE_CODE_OAUTH_TOKEN": "", // blank one a subscription-mode snapshot baked in
 	}
 }
 
 // subscriptionSessionEnv is the session env for subscription mode: the in-image
 // `claude` CLI authenticates to api.anthropic.com directly with the Claude Code
-// OAuth token (from `claude setup-token`). No ANTHROPIC_BASE_URL (the sandbox
-// skips its model proxy plumbing) and no ANTHROPIC_API_KEY (the CLI must fall
-// through to the OAuth token; the Runner's JWT override is disabled too, via
-// Policy.DisableModelAPIKeyOverride).
+// OAuth token (from `claude setup-token`). ANTHROPIC_BASE_URL is blank (the
+// sandbox skips its model proxy plumbing) and so is ANTHROPIC_API_KEY (the CLI
+// must fall through to the OAuth token; the Runner's JWT override is disabled
+// too, via Policy.DisableModelAPIKeyOverride).
 func subscriptionSessionEnv(selfURL, oauthToken string) map[string]string {
 	return map[string]string{
 		"HOST_API_URL":            selfURL,
 		"CLAUDE_CODE_OAUTH_TOKEN": oauthToken,
+		"ANTHROPIC_BASE_URL":      "",
+		"ANTHROPIC_API_KEY":       "",
 	}
 }
