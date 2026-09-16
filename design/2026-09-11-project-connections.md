@@ -39,6 +39,10 @@ The intended outcome: Kai adds a `connections` block to a project in the project
 the environment; the architect sees the connection and grants it to the workers that need it; those
 workers get `mcp__github__*` (etc.) tools whose traffic flows through agentd, which swaps in the real
 credential. The token never enters a container, the database, or git.
+*(Amended 2026-09-16 by the addendum "Connect Google button (decision A)" at the end of this
+document: a Google credential obtained through the console is stored in Postgres, encrypted with a
+key that lives only in agentd's environment. It still never enters a container, git, a config event
+payload or a log.)*
 
 Two facts about upstreams, checked 2026-09-11:
 - **GitHub** hosts an MCP server at `https://api.githubcopilot.com/mcp/` that accepts
@@ -147,7 +151,9 @@ Two facts about upstreams, checked 2026-09-11:
 - **Token in the container via `AGENTKIT_MCP_ENV`** (today's path): every container, every project,
   readable by Bash, exfiltratable over open egress.
 - **A browser OAuth "connect" loop / secrets in the DB**: real work for one user; revisit if Bob
-  becomes a product. Secrets stay in the environment.
+  becomes a product. Secrets stay in the environment. *(Reversed for Google on 2026-09-16: see the
+  addendum at the end — a non-technical user has to connect an account, so a console connect loop
+  with an encrypted refresh token in Postgres is now planned as T16–T28.)*
 - **"Only the architect may grant"**: would make the architect an engine role with its own code path;
   the delegation rule gives the same safety with no role.
 - **Hosting a third-party Gmail MCP server beside agentd**: unnecessary now Google hosts one.
@@ -420,7 +426,9 @@ and `.env.example` documents `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-m
 
 - Any UI for connections or grants (the worker editor in `web/` is untouched; the PUT route keeps an
   omitted `connections` field, so the current UI cannot wipe grants).
-- An OAuth "connect" loop, storing secrets in the database, token rotation automation.
+- An OAuth "connect" loop, storing secrets in the database, token rotation automation. *(The first
+  two are now in scope for Google only, via the 2026-09-16 addendum; the connections panel it adds
+  is the one UI exception to the line above.)*
 - Credentials for Bash/CLI tools (`gh`, `git push` from inside a container).
 - Per-tool filtering at the proxy (e.g. GitHub read-only); a scoped token does this for now.
 - Restricting container egress; removing or migrating `mcp_config` / `AGENTKIT_MCP_ENV`.
@@ -874,6 +882,13 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
      live — a stolen token dies with the session), unrestricted egress, steering through memories
      and events is not blocked, an embedded chat running as a worker can *use* (not grant) that
      worker's connections, `mcp_config` is the old leaky path.
+  8. **Connect Google** (addendum 2026-09-16): the amended credential rule; the `google_account`
+     auth type and `operators` list; `AGENTKIT_CONNECTIONS_KEY` (format, where it goes, never in
+     compose `environment:`, lose it → reconnect every account) and `GOOGLE_CLIENT_SECRET`; the
+     callback path and both redirect URIs to register; the reason codes and the proxy's
+     google_account rows in Troubleshooting; that tools appear from the next session; link
+     `docs/guides/connect-google-for-a-project.md` (T27). §5's hand-held Google route stays, as the
+     alternative for `google_oauth` connections.
   Also: add a `docs/22-connections.md` row to the docs table in `CLAUDE.md`; add `connections` to the
   worker field list in `docs/18-workers-memory-events.md`; add the embedded-chat note to
   `docs/19-embedding.md`'s hazards.
@@ -886,7 +901,8 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
 - **Validation:** `grep -n "connections" docs/22-connections.md CLAUDE.md
   docs/18-workers-memory-events.md` shows the new sections; `cd go && go test ./... -count=1` still
   PASS (doc-pinning tests, if any).
-- **Depends on:** T12, T13
+- **Depends on:** T12, T13, T16–T27 (re-sequenced 2026-09-16 so the doc describes the Connect
+  Google button as merged)
 - [ ] done
 - Notes:
 
@@ -900,6 +916,12 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
      `tools/list` round-trips; upstream saw `Bearer <fake>` and never the JWT; revoke via
      `worker_update` from a second worker holding `"*"` → next call 403; the composed MCP map for a
      dispatched job contains the `/connect/` entry.
+     **Plus the Connect Google flow** (addendum): fake Google authorize/token/tokeninfo/revoke
+     endpoints via T21's test-only seams; a project map with a `google_account` `gmail`
+     connection pointing at the fake MCP upstream; an operator JWT POSTs connect, the test follows
+     the authorize URL's `state` into the real callback with the cookie; assert the row is
+     ciphertext, a worker holding `gmail` then gets `Bearer <fake access token>` upstream with **no
+     Registry rebuild**, disconnect → the next proxy call is 503 not connected.
   2. **Full gates:** `cd go && go build ./... && go vet ./... && go test ./... -count=1`;
      `cd sandbox && npm ci && npm test && git checkout yarn.lock`;
      `cd web && npm ci && npm run typecheck && npm test`.
@@ -910,16 +932,21 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
      grep 'HTTP/'` → shows `401` (the agentd image is alpine with no curl,
      `deploy/agentd.Dockerfile:9-12`; wget exits non-zero on 401, which is expected);
      a chat turn in the UI still works in mock mode (proves T13 did not break `/agent-proxy/`).
+     With a dummy `AGENTKIT_CONNECTIONS_KEY` + `GOOGLE_CLIENT_SECRET` and one `google_account`
+     connection: boot log says `connect google: enabled`; Settings shows "Google — Not connected"
+     and an enabled **Connect Google**; pressing it navigates to a URL on `accounts.google.com`
+     carrying `redirect_uri=http://localhost:8080/auth/connections/google/callback` (intercept,
+     do not sign in); without the key the button is disabled with the reason.
      Tear down.
   4. **Manual live checklist for Kai** (appended to `docs/22-connections.md` §Verify, not run by the
      executor): real GitHub PAT → a worker holding `github` lists an issue; real Google refresh
      token → a worker holding `gmail` searches threads and creates a draft; record whether a
-     consumer `@gmail.com` account works.
+     consumer `@gmail.com` account works. (The Connect Google live run is T28.)
 - **Files:** modify `go/cmd/agentd/connections_test.go`, `docs/22-connections.md`.
 - **Acceptance criteria:** items 1–3 pass and their output is pasted into Notes; item 4 is written.
 - **TDD:** no (verification)
 - **Validation:** the commands in items 1–3.
-- **Depends on:** T1–T14
+- **Depends on:** T1–T14, T16–T27
 - [ ] done
 - Notes:
 
@@ -1030,3 +1057,768 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   no connections — the route is mounted whenever Postgres is, and then refuses every request (403 or 404). Harmless;
   noted so nobody reads the line as "connections are configured".
 - (T10) None beyond what's in the ticket notes above — the topology_apply hand-copy concern the ticket flagged was already handled by T6's UpsertWorker change; nothing new to log.
+
+## Addendum 2026-09-16: Connect Google button (decision A)
+
+Status: planned (2026-09-16). Everything above this heading stays true except where this section
+says otherwise. Tickets T16–T28 below; T14 and T15 were re-sequenced to come after them.
+
+### Why
+
+Richard, a non-technical person at ENC, has to connect ENC's Google account (a plain consumer
+`@gmail.com` account) to an Agent Bob project. Kai decided on 2026-09-16 that he does it by
+pressing **Connect Google** in the console, signing in with Google and approving. No token
+copying, no playground, no agentd restart. The hand-held refresh token of T14 §5 stays available
+for operators; this adds a second way to get the same kind of credential.
+
+### The amended rule
+
+The original design said (Context, and Rejected alternatives → "secrets in the DB"): *the token
+never enters a container, the database, or git.* **Decision A deliberately amends that.** From
+this addendum on the rule reads:
+
+> **A connection credential never enters a container, never enters git, never appears in a config
+> event payload, and is never logged. A credential obtained through the console (a Google refresh
+> token) IS stored in Postgres, but only encrypted (AES-256-GCM) under a key that exists only in
+> agentd's environment (`AGENTKIT_CONNECTIONS_KEY`). A database backup on its own must be useless.
+> Env-var credentials (`bearer`, `google_oauth`) are unchanged: they still never enter the
+> database.**
+
+What "useless on its own" means concretely, and what T28 checks: the row holds ciphertext, a
+random nonce and a key id; the AES-GCM additional data binds the ciphertext to `(project,
+account)`, so a row copied into another project will not decrypt; the key is never written to
+the database, a config event, a log line, git, or a session container.
+
+### Decisions (A1–A12)
+
+- **A1. One Google sign-in, many connections.** A project declares its Google-backed
+  connections in the project map with a new auth type, `google_account`, naming an **account**
+  (default `"google"`). Every connection that names the same account shares one stored refresh
+  token, so Richard presses Connect once and Gmail, Drive, Docs and Sheets all work. The account
+  name follows the connection-name rule (`agentdb.ValidateConnectionName`).
+- **A2. The OAuth client is the login client.** `google_account` has **no** `*_env` fields: it
+  always uses `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`. The refresh token is tied to the client
+  that issued it, and the redirect URI is registered on that one client, so letting the project
+  map name another client would only create a way to break it.
+- **A3. Scopes are fixed in code, not in the map.**
+  `openid email https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.compose
+  https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets`.
+  `openid email` are added to Kai's four because the ID token is how the account email is
+  recorded ("Connected as …") without another API call. The list lives in one Go constant
+  (`googleConnectScopes`). A project-map edit cannot widen what Richard is asked to approve.
+  If Google's consent screen lets Richard untick a box, the callback refuses to store a token
+  that lacks any of the four product scopes, and says which one is missing.
+- **A4. Who may connect or disconnect.** Only a request whose principal is a **console login JWT
+  with the operator claim**: `principal.operator && !principal.apiKey && embedSession == "" &&
+  datasetScope == ""`, and only when `AGENTKIT_JWT_SECRET` is set (dev-open mode has no login, so
+  the button is disabled there with a reason). An API key is an operator for budgets but is
+  **refused** here; so is a worker via MCP (there is no MCP tool for this, on purpose). The
+  callback re-checks that the initiating email still has operator authority for the project in
+  the *current* project map (it reloads), so removing someone from the map mid-flow stops them.
+- **A5. Richard needs operator authority for one project, not for all.** Today the operator
+  claim is stamped only for wildcard logins (`writeLoginResponse`, `googleauth.go`), and a
+  wildcard login sees every project. So the project map's object form gains a per-project
+  `operators: ["email", …]` list; `mintProjectTokens` stamps `operator:true` on a project's
+  token when the login is a wildcard **or** the email is in that project's `operators`. This also
+  lets Richard edit that project's budgets (the other thing the operator claim gates) — see Open
+  questions.
+- **A6. The OAuth state is signed, bound, short-lived and single-use.** `state` =
+  `base64url(json{v:1, p:project, a:account, u:email, n:nonce, exp})` + `"."` +
+  `base64url(HMAC-SHA256(stateKey, payload))`, where `stateKey = HMAC-SHA256(AGENTKIT_CONNECTIONS_KEY,
+  "bob-connect-state-v1")` (never the raw encryption key, never the JWT secret). Expiry 10 minutes.
+  Three more locks:
+  1. **Browser binding (CSRF / consent phishing).** Starting a connect also sets a cookie
+     `bob_connect=<nonce>` (`HttpOnly; SameSite=Lax; Path=/auth/connections/; Max-Age=600`,
+     `Secure` when the public base URL is https). The callback refuses unless the cookie equals
+     the state's nonce (constant-time). Without this, someone could start a connect for their own
+     project, send the Google link to a victim, and have the *victim's* Google account connected
+     to the attacker's project. `SameSite=Lax` is still sent on the top-level GET redirect back
+     from accounts.google.com.
+  2. **Single use (replay).** agentd keeps pending connects in memory (`nonce → {project,
+     account, email, pkceVerifier, exp}`, at most 256 entries, expired entries reaped on insert).
+     The callback removes the entry before exchanging the code; a second use finds nothing. An
+     agentd restart during the 10 minutes loses the entry, and the page says "start again". This
+     assumes one agentd process, which is how Bob runs (singleton service; one box).
+  3. **PKCE (S256)** on top of the client secret, the verifier kept in the pending entry.
+- **A7. Getting a refresh token that actually comes back.** Authorize with
+  `response_type=code&access_type=offline&prompt=consent&include_granted_scopes=false`. The
+  callback refuses a token response with no `refresh_token` ("Google did not return a long-lived
+  token; press Connect Google again").
+- **A8. The account email comes from the ID token**, verified with the existing `googleVerifier`
+  (tokeninfo: `aud == GOOGLE_CLIENT_ID`, `email_verified`), lowercased. It is metadata: stored in
+  plain text, shown in the console, and carried in the config event.
+- **A9. Connect and disconnect are config mutations.** Two new actions, `connection_connect` and
+  `connection_disconnect`, and a new entity kind `connection` keyed by account name (the
+  `topology_apply` precedent: a recorded decision). Payload is **metadata only**, built from an
+  explicit struct rather than the row so a future column cannot leak: `{account, provider,
+  account_email, scopes, connected_by, connected_at}` (+ `disconnected_by` on disconnect).
+  `ConfigWrite` has no human identity, so the human's email travels in the payload. Rationale is a
+  fixed sentence with no email in it. **Revert is refused** for both actions (the credential is
+  not in the log, so there is nothing to put back; the refusal says "use Connect/Disconnect").
+  `connection_disconnect` is a delete action (tombstone) for the fold. The table goes under the
+  write guard, and `Connection` joins the classifier's entity nouns, so `TestMutationsAreLogged`
+  catches any future unlogged method on it.
+- **A10. Git projection: not rendered, decided explicitly.** There is no `ConnectionCredential`
+  struct in `gitproj.ProjectState`, and the git fold skips `EntityConnection` exactly as it skips
+  `EntityTopology`, so a connect produces no tree change and therefore no commit (the renderer
+  already commits nothing on an unchanged tree). The account email therefore never reaches git.
+  A test pins it. The allowlist reflection guard needs no entry because no guarded struct gains a
+  field.
+- **A11. No restart.** The Registry is still built once at boot from the map, but a
+  `google_account` connection's availability and token are **looked up at use time** through an
+  `AccountSource` agentd installs on the Registry. Connect/disconnect invalidate its in-process
+  cache immediately; otherwise it re-reads the row at most every 30 s. Access tokens are cached per
+  stored credential (keyed on `connected_at`), reusing T3's `GoogleRefresh`, so a reconnect swaps
+  the source and a disconnect drops it. A worker session that started before the connect gets the
+  Google tools from its **next** session or job (the MCP map is fixed at session start, T8); the
+  proxy itself honours the connect on the very next request.
+- **A12. Disconnect revokes at Google, best effort.** `DELETE` first calls
+  `https://oauth2.googleapis.com/revoke` with the decrypted refresh token, then deletes the row
+  through the config log **whether or not** the revoke succeeded; the response says which
+  (`revoked: true|false`). Revoking ends that Google account's grant to Bob's whole OAuth client;
+  if the same Google account also signs in to the console, it just sees the consent screen again.
+
+### Flow
+
+```
+ Richard's browser            web (nginx)       agentd                          Google
+ ─────────────────            ───────────       ──────                          ──────
+ Settings → Connections
+ [Connect Google] ──POST /agent/connections/google/connect (Bearer console JWT)──►
+                                                 A4 authority check
+                                                 nonce, PKCE, signed state
+                                                 pending[nonce] (10 min)
+ ◄──── 200 {authorize_url} + Set-Cookie bob_connect=<nonce> ──────────────────────
+ window.location = authorize_url ─────────────────────────────────────────────────► sign in,
+                                                                                    "unverified
+                                                                                    app" warning,
+                                                                                    approve scopes
+ ◄──── 302 ${PUBLIC_BASE}/auth/connections/google/callback?code&state ─────────────
+ GET …/callback (Cookie) ─────► /auth/ ────────► verify HMAC + exp
+                                                 cookie == nonce, take pending (single use)
+                                                 code+verifier ─────── token ────► 
+                                                 ◄──── refresh_token, id_token, scope
+                                                 tokeninfo(id_token) → email ────►
+                                                 scopes ⊇ required, operator re-check
+                                                 seal(refresh) → Put (config event,
+                                                 metadata only); cache invalidated
+ ◄──── 303 ${PUBLIC_BASE}/p/<project>/settings?connect=google&result=connected ────
+ Settings shows "Connected as emperor…@gmail.com"
+
+ later, a worker's MCP call ─► /connect/gmail/… ► grant ok → AccountSource: open(row)
+                                                 → GoogleRefresh (cached) → Bearer ───► gmailmcp
+```
+
+### Interfaces
+
+#### Project map (object form)
+
+```json
+{
+  "users": { "richard@example.com": ["enc"] },
+  "projects": {
+    "enc": {
+      "operators": ["richard@example.com"],
+      "connections": {
+        "gmail":  { "description": "ENC's Gmail: find and draft emails (cannot send)",
+                    "url": "https://gmailmcp.googleapis.com/mcp/v1",
+                    "auth": { "type": "google_account", "account": "google" } },
+        "drive":  { "description": "ENC's Google Drive",
+                    "url": "https://drivemcp.googleapis.com/mcp/v1",
+                    "auth": { "type": "google_account" } },
+        "docs":   { "description": "ENC's Google Docs",
+                    "url": "https://docsmcp.googleapis.com/mcp/v1",
+                    "auth": { "type": "google_account" } },
+        "sheets": { "description": "ENC's Google Sheets",
+                    "url": "https://sheetsmcp.googleapis.com/mcp/v1",
+                    "auth": { "type": "google_account" } }
+      }
+    }
+  }
+}
+```
+
+- `operators` (new, optional): emails, lowercased at parse; each must also appear in `users` with
+  this project (or `"*"`), else a boot/reload parse error naming the email — an operator who
+  cannot log in is a typo.
+- Upstream URLs: Gmail, Docs and Drive are the ones recorded in Context (checked 2026-09-11).
+  **Sheets** `https://sheetsmcp.googleapis.com/mcp/v1` is taken from Google's "Configure the
+  Sheets MCP server" page and MCP reference (`developers.google.com/workspace/sheets/api/guides/
+  configure-mcp-server`, `…/sheets/api/reference/mcp`), found 2026-09-16 and **not yet called**.
+  All four are Developer Preview; each needs its `*mcp.googleapis.com` service enabled (Kai says
+  they are). **Whether they accept a consumer `@gmail.com` account is unconfirmed**, settled by
+  T28.
+
+#### `go/connections` additions
+
+```go
+const AuthGoogleAccount AuthType = "google_account"
+const DefaultGoogleAccount = "google"
+
+// Auth gains (google_account only; every *_env field must be empty for this type):
+Account string `json:"account,omitempty"` // "" → DefaultGoogleAccount at validation
+
+// sealed.go
+// ParseKey decodes AGENTKIT_CONNECTIONS_KEY: standard base64 of exactly 32 bytes
+// (`openssl rand -base64 32`). Any other shape is an error naming the variable, never the value.
+func ParseKey(b64 string) ([]byte, error)
+type Sealer struct{ /* aead cipher.AEAD, keyID string */ }
+func NewSealer(key []byte) (*Sealer, error)
+// KeyID: first 16 hex chars of SHA-256("bob-connections-key-id\x00" || key). Stored beside the
+// ciphertext so "wrong key" is a readable reason, not a GCM failure.
+func (s *Sealer) KeyID() string
+// Seal/Open with a fresh 12-byte random nonce; aad = AccountAAD(project, account).
+func (s *Sealer) Seal(plaintext, aad []byte) (nonce, ciphertext []byte, err error)
+func (s *Sealer) Open(nonce, ciphertext, aad []byte) ([]byte, error)
+func AccountAAD(project, account string) []byte // "bob-connection-credential/v1\x00"+project+"\x00"+account
+// StateKey derives the OAuth-state HMAC key; never equal to the encryption key.
+func (s *Sealer) StateKey() []byte
+
+// account.go
+var ErrNotConnected = errors.New("connections: the account is not connected")
+type AccountStatus struct {
+    Connected   bool
+    Email       string
+    Unavailable string // "" when usable; else why (not connected, sealed with another key, …)
+}
+// AccountSource is how a google_account connection reaches its credential at use time.
+type AccountSource interface {
+    Status(project, account string) AccountStatus                  // cached; no I/O on the hot path
+    Token(ctx context.Context, project, account string) (string, error) // access token; ErrNotConnected, ErrCredentialRevoked
+}
+// SetAccounts installs the source once at boot, before serving. With no source, every
+// google_account connection is Unavailable with DisabledReason (set by agentd, e.g.
+// "Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set").
+func (r *Registry) SetAccounts(src AccountSource, disabledReason string)
+// Availability is the ONE availability check: static Unavailable first, then (google_account)
+// the AccountSource's Status. List, Servers and the proxy all switch to it.
+func (r *Registry) Availability(project, name string) (ok bool, reason string)
+// Accounts lists the distinct google_account accounts a project declares, sorted, with the
+// connection names that use each.
+func (r *Registry) Accounts(project string) []AccountInfo
+type AccountInfo struct { Account string; Connections []string }
+```
+
+Proxy table rows added/changed (google_account only):
+
+| Condition | Status | Body |
+|---|---|---|
+| account not connected | 503 | "NAME uses the Google account ACCOUNT, which is not connected — a project operator presses Connect Google in Settings" |
+| stored credential sealed with a different key | 503 | "the stored Google connection for ACCOUNT can no longer be read (the encryption key changed) — connect Google again" |
+| Google refuses the refresh token | 502 | "Google refused the stored token for ACCOUNT — connect Google again in Settings" |
+
+#### agentdb
+
+Migration `052_connection_credentials` (after `051_attention_request_kind`; renumber if main
+has moved on — migrations are tracked by name):
+
+```sql
+CREATE TABLE IF NOT EXISTS connection_credentials (
+    project        TEXT   NOT NULL,
+    account        TEXT   NOT NULL,
+    provider       TEXT   NOT NULL,            -- 'google'
+    account_email  TEXT   NOT NULL,
+    scopes         JSONB  NOT NULL DEFAULT '[]',
+    key_id         TEXT   NOT NULL,
+    nonce          BYTEA  NOT NULL,
+    ciphertext     BYTEA  NOT NULL,
+    connected_by   TEXT   NOT NULL,
+    connected_at   BIGINT NOT NULL,            -- unix ms
+    PRIMARY KEY (project, account)
+);
+```
+
+```go
+type ConnectionCredential struct {
+    Project, Account, Provider, AccountEmail string
+    Scopes      []string
+    KeyID       string
+    Nonce       []byte `json:"-"`
+    Ciphertext  []byte `json:"-"`
+    ConnectedBy string
+    ConnectedAt int64
+}
+// PutConnectionCredential inserts or replaces (reconnect) — action connection_connect.
+func (s *Store) PutConnectionCredential(ctx context.Context, c *ConnectionCredential) error
+// DeleteConnectionCredential — action connection_disconnect; ErrConnectionCredentialNotFound.
+func (s *Store) DeleteConnectionCredential(ctx context.Context, project, account, by string) error
+func (s *Store) GetConnectionCredential(ctx context.Context, project, account string) (*ConnectionCredential, error)
+func (s *Store) ListConnectionCredentials(ctx context.Context, project string) ([]*ConnectionCredential, error) // no bytes needed by callers, but returned
+const ActionConnectionConnect, ActionConnectionDisconnect = "connection_connect", "connection_disconnect"
+const EntityConnection EntityKind = "connection"
+```
+
+Postgres-only, like the rest of the product layer.
+
+#### HTTP (agentd, `go/cmd/agentd/googleconnect*.go`)
+
+All JSON errors are `{"error": "..."}`. All four mounted only when `agentDB != nil`.
+
+| Route | Mux | Who | Result |
+|---|---|---|---|
+| `GET /agent/connections` | apiMux (authenticated) | any project principal except embed/dataset scope (403) | `{connections:[{name, description, account?, available, unavailable?}], accounts:[{account, provider:"google", connected, account_email?, connected_by?, connected_at?, unavailable?, connections:[names]}], can_connect: bool, connect_disabled_reason?: string}` |
+| `POST /agent/connections/{account}/connect` | apiMux | A4 | 200 `{authorize_url}` + `Set-Cookie: bob_connect=…`; 403 not allowed; 404 project declares no such account; 503 Connect Google disabled (reason) |
+| `DELETE /agent/connections/{account}` | apiMux | A4 | 200 `{revoked: bool}`; 404 not connected |
+| `GET /auth/connections/google/callback` | root (unauthenticated; nginx already proxies `/auth/`) | the browser that started | 303 → `${AGENTKIT_PUBLIC_BASE_URL}/p/<project>/settings?connect=<account>&result=connected` or `&result=error&reason=<code>`; a state that does not verify cannot name a project, so it gets a tiny plain HTML 400 page linking to the public base URL |
+
+`reason` codes (closed set, never Google's own text): `cancelled` (user pressed Cancel /
+`error=access_denied`), `expired` (state past exp or pending entry gone), `other_browser` (cookie
+missing or different), `not_allowed` (A4 re-check failed), `no_refresh_token`, `missing_scopes`,
+`exchange_failed`, `store_failed`. `state_invalid` is the HTML page.
+
+Redirect URI: **`${AGENTKIT_PUBLIC_BASE_URL}/auth/connections/google/callback`**. Kai adds to the
+OAuth client's *Authorised redirect URIs*:
+- `http://localhost:8080/auth/connections/google/callback`
+- `https://bob.box.badcode.tv/auth/connections/google/callback`
+
+Log lines: one per start, callback outcome and disconnect: project, account, user email,
+result/reason. Never code, state, cookie, token, or ciphertext.
+
+#### Environment
+
+| Variable | Format | Where | If missing |
+|---|---|---|---|
+| `AGENTKIT_CONNECTIONS_KEY` (new) | standard base64 of 32 random bytes: `openssl rand -base64 32` | local: `local-config/connections.env`; box: `/srv/apps/bob/.env` | Connect Google disabled with that reason; `google_account` connections unavailable. **Set but malformed, or equal to `AGENTKIT_JWT_SECRET`'s bytes → boot fails.** |
+| `GOOGLE_CLIENT_SECRET` | the login OAuth client's secret | same | Connect Google disabled, reason names it |
+| `GOOGLE_CLIENT_ID` | existing | local `.env` (compose `environment:` forwards it), box `.env` | disabled |
+| `AGENTKIT_PUBLIC_BASE_URL` | existing; must be the browser origin | compose default / box compose | redirect URI would be wrong — already defaulted |
+
+No `docker-compose.yml` change: `GOOGLE_CLIENT_SECRET` and `AGENTKIT_CONNECTIONS_KEY` must
+**not** be added to agentd's `environment:` block, or they would blank the `connections.env`
+values (Decision 8's trap). On the box, `.env` is the whole `env_file`, so they only need adding
+there and to `ops/apps/bob/env.example` (ops repo, Kai's). **Losing the key means every stored
+connection must be reconnected**; it is not recoverable from the database, by design.
+
+#### web / examples/web
+
+```ts
+// web/src/connections.ts (pure; exported from ./pure)
+export const CONNECTIONS_ENDPOINT = '/agent/connections'
+export interface ConnectionRow { name: string; description: string; account?: string; available: boolean; unavailable?: string }
+export interface AccountRow { account: string; provider: 'google'; connected: boolean; account_email?: string; connected_by?: string; connected_at?: number; unavailable?: string; connections: string[] }
+export interface ConnectionsState { connections: ConnectionRow[]; accounts: AccountRow[]; can_connect: boolean; connect_disabled_reason?: string }
+export function coerceConnections(raw: unknown): ConnectionsState        // fail closed: can_connect only on literal true
+export type ConnectResult = { account: string; ok: true } | { account: string; ok: false; reason: string }
+export function parseConnectResult(search: string): ConnectResult | null // ?connect=&result=&reason=
+export function describeConnectError(reason: string): string            // plain English per reason code
+// web/src/useConnections.ts: { state, loading, error, reload, connect(account) → assigns window.location, disconnect(account) }
+// web/src/components/ConnectionsPanel.tsx: props { projectId, connectResult?: ConnectResult | null }
+```
+
+Panel, deliberately plain: a heading "Connections"; per Google account one line —
+"Google — Connected as x@y" with **Disconnect**, or "Google — Not connected" with **Connect
+Google** (disabled, with the reason under it, when `can_connect` is false); under it the
+connection names that use it, each with a dot for available/unavailable and the reason on hover
+or as secondary text; then any env-var connections (`bearer`/`google_oauth`) as read-only lines.
+A one-line result banner when `connectResult` is set. Nothing else. Mounted in
+`ProjectSettingsPage`'s "You may want to change these" tier, above the budget panel.
+
+Shell: a URL `/p/<project>/settings?connect=…` selects that project (the existing
+`projectIdFromLocation` path) and opens the Settings view, passes the parsed result to the page,
+then strips the query with `history.replaceState`.
+
+### Tickets
+
+### T16: Sealer — key parsing and AES-256-GCM   [Status: pending | Model: sonnet]
+- **Scope:** create `go/connections/sealed.go` with `ParseKey`, `Sealer`, `NewSealer`, `KeyID`,
+  `Seal`, `Open`, `AccountAAD`, `StateKey` exactly as in the addendum's Interfaces. Standard
+  library only (`crypto/aes`, `crypto/cipher`, `crypto/rand`, `crypto/hmac`, `crypto/sha256`).
+  Error strings name `AGENTKIT_CONNECTIONS_KEY`, never any byte of the value.
+- **Files:** create `go/connections/sealed.go`, `go/connections/sealed_test.go`.
+- **Acceptance criteria:** round trip; a different key → `Open` error; same key, different
+  project or account AAD → `Open` error; tampered ciphertext or nonce → error; two seals of the
+  same plaintext differ; `ParseKey` refuses empty, non-base64, 16/31/33/64-byte keys and a hex
+  string, with messages containing no part of the input; `KeyID` is stable for a key and differs
+  across keys; `StateKey()` differs from the key and from `KeyID`.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./connections/... -count=1 -race` → PASS; `go vet ./...` clean.
+- **Depends on:** —
+- [ ] done
+- Notes:
+
+### T17: `connection_credentials` table, store methods, config log   [Status: pending | Model: sonnet]
+- **Scope:** migration `052_connection_credentials` (addendum SQL); `agentdb.ConnectionCredential`
+  and the four store methods; actions `connection_connect`/`connection_disconnect` appended to
+  `ConfigActions`; `EntityConnection` added to `EntityKinds` and `entityKindForAction`;
+  `connection_disconnect` in `deleteActions`; `ConfigMutations` entries for
+  `PutConnectionCredential` and `DeleteConnectionCredential` with table `connection_credentials`
+  (puts it under the write guard); `"Connection"` appended to `configEntityNouns` in
+  `config_events_test.go` (check no existing `*Store` method name now trips it; if one does,
+  register or exempt it with a reason). Payload built from an explicit metadata struct (A9), never
+  from the row. `revertableKind` refuses `EntityConnection` with "a connection credential is not
+  in the log, so there is nothing to put back — use Connect Google or Disconnect in Settings".
+  Rationale: `"Google account connected from the console"` / `"… disconnected …"`.
+- **Files:** modify `go/agentdb/migrations.go`, `go/agentdb/config_events.go`,
+  `go/agentdb/config_fold.go`, `go/agentdb/config_revert.go`, `go/agentdb/config_events_test.go`;
+  create `go/agentdb/connection_credentials.go`, `go/agentdb/connection_credentials_test.go`.
+- **Acceptance criteria:** live-Postgres round trip preserves every field incl. bytes; Put twice
+  replaces (reconnect) and writes two `connection_connect` events; Delete writes one
+  `connection_disconnect` and a second Delete returns `ErrConnectionCredentialNotFound` and writes
+  nothing; **the marshalled payload of both events contains neither the ciphertext, the nonce
+  (raw or base64) nor the key id**; `EntityRefFor` keys both on `connection:<account>`; revert of
+  either is refused with `ErrRevertRefused`; `TestMutationsAreLogged` passes with the new noun;
+  `ListConfigEvents` for entity `connection:google` returns both.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./agentdb/... -count=1` → PASS; with a throwaway database
+  `AGENTKIT_TEST_POSTGRES_URL=<url> go test ./agentdb/... -run 'Connection|ConfigEvent|Mutation|Revert|Migration' -count=1`
+  → PASS, not skipped.
+- **Depends on:** —
+- [ ] done
+- Notes:
+
+### T18: The two new actions reach every reader of the log   [Status: pending | Model: sonnet]
+- **Scope:** every place that switches on the closed action vocabulary or entity kinds learns
+  the new ones. `go/cmd/agentd/gitbackfill.go` `gitFold.Apply`: `EntityConnection` skipped with a
+  comment naming A10 (and the delete branch ignores it). `go/cmd/agentd/configchanged.go`
+  `configChangePhrase`: "connected Google account %q" / "disconnected Google account %q" — the
+  account name only, no email. `go/cmd/agentd/mcp_config_log.go`: check it renders the entity;
+  fix if it switches on kind. `web/src/configLog.ts`: add both actions to its action list and give
+  them a label/entity (`connection`), and make the changelog's Revert action hidden or disabled for
+  them (look at how `topology_apply` is handled in `ChangelogView`). grep the whole tree for
+  `topology_apply` / `EntityTopology` and treat every hit as a place to check.
+- **Files:** modify `go/cmd/agentd/gitbackfill.go`, `go/cmd/agentd/configchanged.go`,
+  `go/cmd/agentd/mcp_config_log.go` (if needed), `web/src/configLog.ts`,
+  `web/src/components/ChangelogView.tsx` (if needed), and their tests.
+- **Acceptance criteria:** a git render of a project whose log holds a `connection_connect`
+  event produces a tree byte-identical to the same project without it, and no commit
+  (`gitprojection_test.go`-style test); the rendered tree and commit messages never contain the
+  account email; `describeConfigChange` for both actions is a readable sentence without the email;
+  `configLog.test.ts` covers both actions' labels and that Revert is not offered.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./cmd/agentd/ -run 'Git|ConfigChanged|ConfigLog' -count=1` →
+  PASS; `cd web && npm run typecheck && npx vitest run src/configLog.test.ts src/components/ChangelogRevert.test.tsx` → PASS.
+- **Depends on:** T17
+- [ ] done
+- Notes:
+
+### T19: `google_account` auth type and use-time availability   [Status: pending | Model: opus]
+- **Scope:** in `go/connections`: `AuthGoogleAccount`, `DefaultGoogleAccount`, `Auth.Account`;
+  `Spec.Validate` for the new type (no `*_env`, account defaulted then name-checked; `account`
+  set on another type is refused); `NewRegistry` builds no token for it and marks nothing
+  unavailable yet; create `account.go` with `ErrNotConnected`, `AccountStatus`, `AccountSource`,
+  `AccountInfo`, `Registry.SetAccounts`, `Registry.Availability`, `Registry.Accounts`. Switch
+  `List`, `Servers` (`resolve.go:24`) and the proxy (`proxy.go:176-184`) to `Availability`; for a
+  `google_account` connection the proxy gets its token from `AccountSource.Token(ctx, project,
+  account)` and maps `ErrNotConnected`/`ErrCredentialRevoked`/wrong-key to the addendum's rows.
+  Update `go/cmd/agentd/connections.go`'s boot log (a `google_account` connection logs
+  `name=google_account(<account>)`, availability decided at use) and `connectionServersFor`'s
+  skipped-grant reason to use `Availability`. Also `go/cmd/agentd/googleauth.go` T5 validation
+  already calls `Spec.Validate` — confirm the new type parses. Update `doc.go`'s last sentence of
+  its second paragraph to the amended rule.
+- **Files:** modify `go/connections/{spec,resolve,proxy,doc}.go`, `go/cmd/agentd/connections.go`;
+  create `go/connections/account.go`, `go/connections/account_test.go`; extend
+  `spec_test.go`, `resolve_test.go`, `proxy_test.go`, `go/cmd/agentd/connections_test.go`.
+- **Acceptance criteria:** validation table for the new type; a registry with no source → every
+  `google_account` connection unavailable with the disabled reason, bearer connections unaffected;
+  with a fake source: not connected → `List` unavailable, `Servers` omits it, proxy 503 with the
+  addendum body; connected → `Servers` includes it and the proxy sends `Bearer <fake access>`;
+  flipping the fake source to disconnected between two requests turns 200 into 503 (no rebuild);
+  `ErrCredentialRevoked` → 502 body; two connections naming the same account share one
+  `Token` call path (the fake counts calls per account); `Accounts(project)` groups and sorts;
+  every T1–T4 test still passes unchanged.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./connections/... ./cmd/agentd/ -run 'Connect|Registry|Proxy|Spec|Servers|ProjectMap' -count=1 -race`
+  → PASS; `go build ./... && go vet ./...` clean.
+- **Depends on:** T1–T4 (done), T12 (done)
+- [ ] done
+- Notes:
+
+### T20: Per-project `operators` in the project map   [Status: pending | Model: sonnet]
+- **Scope:** `projectConfig.Operators []string` (`json:"operators"`), lowercased; parse error when
+  an operator email has no `users` entry covering the project (the project itself or `"*"`).
+  `mintProjectTokens` takes a per-project operator decision instead of one bool: operator =
+  wildcard login **or** email in `projects[p].operators`. Apply at both mint sites
+  (`writeLoginResponse`, `authProjectTokenHandler`) reading the live `projectSettingsHolder`, so a
+  reload changes the next login. Add `func (s *projectSettings) isOperator(project, email string,
+  wildcard bool) bool` for T23's callback re-check.
+- **Files:** modify `go/cmd/agentd/googleauth.go`, `go/cmd/agentd/googleauth_test.go`,
+  `go/cmd/agentd/auth_test.go` (if the claim is asserted there).
+- **Acceptance criteria:** a non-wildcard user listed in `enc.operators` gets `operator:true` on
+  the `enc` token and `false` on any other project token; a user not listed gets `false` (today's
+  behaviour); wildcard unchanged; unknown operator email → parse error naming it; the legacy flat
+  form yields no operators; `GET /agent/whoami` reports `operator:true` for the listed user.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./cmd/agentd/ -run 'ProjectMap|ProjectSettings|Login|Operator|Whoami|Auth' -count=1` → PASS.
+- **Depends on:** —
+- [ ] done
+- Notes:
+
+### T21: OAuth state, pending connects, authorize URL   [Status: pending | Model: opus]
+- **Scope:** create `go/cmd/agentd/googleconnect_state.go`:
+  - `googleConnectConfig{clientID, clientSecret, publicBase string; sealer *connections.Sealer;
+    disabledReason string; authURL, tokenURL, tokeninfoURL, revokeURL string}` and
+    `loadGoogleConnectConfig(getenv, publicBase, jwtSecret) (googleConnectConfig, error)`: key
+    unset → disabled reason "Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set"; key
+    malformed or equal to `jwtSecret` → **error** (boot fails); `GOOGLE_CLIENT_ID` or
+    `GOOGLE_CLIENT_SECRET` unset → disabled naming the variable. The four Google URLs default to
+    Google's and are overridable **only** from test code (unexported fields, like
+    `Auth.tokenURL`), never from env or the map.
+  - `googleConnectScopes` constant (A3) and `requiredProductScopes`.
+  - `signState`/`verifyState` (A6 format; `verifyState` distinguishes malformed/bad-signature from
+    expired), constant-time compare.
+  - `pendingConnects` (mutex map, cap 256, reap expired on insert, `take(nonce)` removes).
+  - PKCE verifier/challenge (S256).
+  - `authorizeURL(cfg, state, challenge) string` with every A7 parameter and
+    `redirect_uri = publicBase + "/auth/connections/google/callback"`.
+- **Files:** create `go/cmd/agentd/googleconnect_state.go`, `go/cmd/agentd/googleconnect_state_test.go`.
+- **Acceptance criteria:** config table (unset/malformed/equal-to-JWT-secret/missing client
+  vars); state round trip; a flipped byte in payload or signature → invalid; expired → expired;
+  a state signed with another key → invalid; pending: take twice → second misses; cap evicts
+  expired first, then refuses new entries past 256 with an error; PKCE challenge matches RFC 7636
+  appendix B's test vector; the authorize URL carries `access_type=offline`, `prompt=consent`,
+  `code_challenge_method=S256`, every scope, the exact redirect URI for both
+  `http://localhost:8080` and `https://bob.box.badcode.tv`.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleConnect' -count=1 -race` → PASS.
+- **Depends on:** T16
+- [ ] done
+- Notes:
+
+### T22: Store-backed `AccountSource`   [Status: pending | Model: sonnet]
+- **Scope:** create `go/cmd/agentd/googleaccounts.go`: `googleAccounts` implementing
+  `connections.AccountSource` over a narrow store interface (`GetConnectionCredential`) and the
+  `Sealer`. `Status` reads a per-(project, account) cache entry refreshed at most every 30 s
+  (background context, 2 s timeout; a store error keeps the last known status and logs once);
+  `Invalidate(project, account)` for T23. `Status.Unavailable` when the row's `key_id` differs:
+  the wrong-key reason. `Token`: get row → `ErrNotConnected` if none → `Open` with
+  `AccountAAD` → `connections.GoogleRefresh(clientID, clientSecret, refresh, cfg.tokenURL)` cached
+  in a map keyed `(project, account, connected_at)`; entries for an older `connected_at` are
+  dropped. The decrypted refresh token is held only inside the oauth2 source, never logged or
+  returned. Nil-store trap as in T13: without a store, T24 does not install the source.
+- **Files:** create `go/cmd/agentd/googleaccounts.go`, `go/cmd/agentd/googleaccounts_test.go`.
+- **Acceptance criteria:** with an in-memory fake store and an `httptest` token endpoint: not
+  connected → `ErrNotConnected`; connected → access token, second call makes no token request;
+  reconnect (new `connected_at`, new refresh token) → the next call exchanges the **new** refresh
+  token; row deleted + `Invalidate` → `Status` not connected immediately and `Token` →
+  `ErrNotConnected`; wrong key id → wrong-key reason and no decrypt attempt; tampered ciphertext →
+  error that names neither token nor bytes; `invalid_grant` → `ErrCredentialRevoked`; 20
+  concurrent `Token` calls → one token request.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleAccounts' -count=1 -race` → PASS.
+- **Depends on:** T16, T17, T19, T21 (config struct)
+- [ ] done
+- Notes:
+
+### T23: The four HTTP routes   [Status: pending | Model: opus]
+- **Scope:** create `go/cmd/agentd/googleconnect.go` implementing the addendum's route table:
+  `connectAuthority(r, jwtSecretSet) (email, project string, err)` (A4);
+  `GET /agent/connections` (Registry `List` + `Accounts` + store rows' metadata + `can_connect`);
+  `POST /agent/connections/{account}/connect` (authority → account declared → config enabled →
+  nonce/PKCE/pending/state → cookie → `{authorize_url}`);
+  `GET /auth/connections/google/callback` (A6 checks in order: state signature → expiry →
+  cookie == nonce → `pending.take` → `error=` param → exchange code with verifier (oauth2
+  `Exchange` + `VerifierOption`) → refresh token present → `googleVerifier{clientID,
+  tokeninfoURL}.Verify` on the ID token → required scopes granted (token response `scope`) → A4
+  re-check via `projectSettings.isOperator` on the current holder → seal → `PutConnectionCredential`
+  → `Invalidate` → clear cookie → 303); `DELETE /agent/connections/{account}` (authority → row →
+  best-effort revoke → `DeleteConnectionCredential` → `Invalidate` → `{revoked}`). Register
+  function `registerGoogleConnect(apiMux, root, deps)` for T24. Every response and log follows the
+  addendum (no code/state/cookie/token in logs, reason codes only in redirects).
+- **Files:** create `go/cmd/agentd/googleconnect.go`, `go/cmd/agentd/googleconnect_test.go`.
+- **Acceptance criteria:** with fake Google endpoints (`httptest` for token, tokeninfo, revoke)
+  and a fake store: happy path stores a row whose ciphertext opens to the fake refresh token, the
+  email from tokeninfo, and redirects to `/p/<project>/settings?connect=google&result=connected`;
+  authority table — wildcard operator JWT OK, `operators`-listed JWT OK, non-operator JWT 403, API
+  key 403, embed-scoped 403, dataset-scoped 403, dev-open (no JWT secret) 403 with reason; account
+  not declared 404; disabled config 503; callback: bad signature → HTML 400; expired → `expired`;
+  no cookie / other cookie → `other_browser` and the pending entry is **not** consumed; replayed
+  callback → `expired`; `error=access_denied` → `cancelled`; no refresh token → `no_refresh_token`
+  and nothing stored; a missing `gmail.compose` → `missing_scopes`; `aud` mismatch →
+  `exchange_failed`; operator removed from the map between start and callback → `not_allowed`;
+  reconnect replaces; disconnect with revoke 200 → `revoked:true`, revoke 500 → `revoked:false`
+  but the row is still deleted; the GET list never contains ciphertext, nonce, key id or token
+  bytes (assert on the raw body); captured log output contains none of code, state, cookie value,
+  refresh or access token.
+- **TDD:** yes
+- **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleConnect|Connections' -count=1 -race` → PASS.
+- **Depends on:** T17, T19, T20, T21, T22
+- [ ] done
+- Notes:
+
+### T24: Wire Connect Google into agentd   [Status: pending | Model: sonnet]
+- **Scope:** in `go/cmd/agentd/main.go`: after the Registry is built (`main.go:279`) and the
+  public base URL is resolved (`:173`), `loadGoogleConnectConfig` (boot fails on its error); when
+  `agentDB != nil` and the config is enabled, build `googleAccounts` and
+  `connRegistry.SetAccounts(src, "")`; otherwise `SetAccounts(nil, <disabled reason or "Connect
+  Google needs DATABASE_URL">)`. Call `registerGoogleConnect` only when `agentDB != nil` (untyped
+  nil trap from T13). One boot line: `connect google: enabled (redirect <uri>)` or `connect
+  google: DISABLED (<reason>)` — never a value. Document the two new variables in `.env.example`
+  and `local-config/README.md` (with the "do not add to compose `environment:`" warning and "losing
+  the key means reconnecting"), and add an ENC-shaped `google_account` example (placeholder email)
+  to `local-config/project-map.example.json`. Confirm `deploy/web.nginx.conf`'s `location /auth/`
+  already reaches the callback (no change expected; record in Notes).
+- **Files:** modify `go/cmd/agentd/main.go`, `.env.example`, `local-config/README.md`,
+  `local-config/project-map.example.json`; test in `go/cmd/agentd/main_test.go` or
+  `googleconnect_test.go`.
+- **Acceptance criteria:** a wiring test proves the routes are absent with no store, present
+  with one, and that a malformed key fails boot config; the example map still parses and builds a
+  Registry; `docker compose config` still exits 0 with and without `local-config/connections.env`.
+- **TDD:** yes (wiring test); no (doc/env edits)
+- **Validation:** `cd go && go build ./... && go vet ./... && go test ./cmd/agentd/ -count=1` →
+  PASS; `cd .. && docker compose config >/dev/null` → exit 0.
+- **Depends on:** T23
+- [ ] done
+- Notes:
+
+### T25: `ConnectionsPanel` in the component library   [Status: pending | Model: sonnet]
+- **Scope:** `web/src/connections.ts` (pure, exported through `src/pure.ts` and `src/index.ts`),
+  `web/src/useConnections.ts`, `web/src/components/ConnectionsPanel.tsx` exactly as in the
+  addendum; mount the panel in `ProjectSettingsPage` in the "You may want to change these" tier
+  above the budget panel, accepting a new optional `connectResult` prop passed through. Plain MUI,
+  the host's theme, no new dependency. `connect()` POSTs through `useConfigApi` (same-origin, so
+  the cookie is stored) and then `window.location.assign(authorize_url)`. Disconnect asks once
+  ("Disconnect Google? Workers lose Gmail, Drive, Docs and Sheets until someone connects again.").
+  `describeConnectError` covers every reason code in plain English.
+- **Files:** create `web/src/connections.ts`, `web/src/connections.test.ts`,
+  `web/src/useConnections.ts`, `web/src/components/ConnectionsPanel.tsx`,
+  `web/src/components/ConnectionsPanel.test.tsx`; modify `web/src/components/ProjectSettingsPage.tsx`,
+  `web/src/pure.ts`, `web/src/index.ts`.
+- **Acceptance criteria:** coercion fails closed (`can_connect` only on literal `true`); "Not
+  connected" shows an enabled **Connect Google** when `can_connect`, a disabled one with the reason
+  otherwise; "Connected as x@y" shows **Disconnect**; connect calls the POST then assigns the
+  returned URL (mock `window.location.assign`); a 403 from the POST shows its message; a result
+  banner renders for `connected` and for each error reason; `src/pure.test.ts` still passes (no
+  React in `connections.ts`'s graph); `web/scripts/verify-package.sh` passes.
+- **TDD:** yes
+- **Validation:** `cd web && npm run typecheck && npm test && npm run build && ./scripts/verify-package.sh` → PASS.
+- **Depends on:** T23 (the JSON contract; may be built in parallel against the addendum)
+- [ ] done
+- Notes:
+
+### T26: Shell returns from Google to Settings   [Status: pending | Model: sonnet]
+- **Scope:** in `examples/web/src/App.tsx`: when the location is `/p/<project>/settings` and
+  carries `?connect=`, select that project through the existing permalink-project path, open the
+  `settings` view once, pass `parseConnectResult(location.search)` to `ProjectSettingsPage`, then
+  `history.replaceState` the query away so a reload does not re-show the banner. A user without a
+  token for that project lands where a foreign permalink lands today.
+- **Files:** modify `examples/web/src/App.tsx`; add a test beside `examples/web/src/onboarding.test.tsx`.
+- **Acceptance criteria:** the test proves the view becomes `settings`, the result reaches the
+  page, and the query is stripped; existing shell tests pass; `yarn` (not npm) is used here.
+- **TDD:** yes
+- **Validation:** `cd web && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck && yarn test` → PASS.
+- **Depends on:** T25
+- [ ] done
+- Notes:
+
+### T27: "How to connect Google" for Richard   [Status: pending | Model: sonnet]
+- **Scope:** finalise the draft below so every button label, screen name and message matches the
+  merged UI (re-read T25/T26 and the running mock stack; do not copy blindly), and save it as
+  `docs/guides/connect-google-for-a-project.md` in this repo **with no real email address** (use
+  "your organisation's Google account"). Kai commits a copy to the ENC repo later; this ticket does
+  not touch that repo.
+- **Files:** create `docs/guides/connect-google-for-a-project.md`.
+- **Acceptance criteria:** plain English, no jargon (no "OAuth", "token", "scope"); every label
+  matches the UI; says what the "Google hasn't verified this app" warning is and that it is
+  expected; says Bob can write drafts but will not send email; says how to disconnect; says who
+  to ask if the button is greyed out.
+- **TDD:** no
+- **Validation:** `grep -n "Connect Google" docs/guides/connect-google-for-a-project.md` shows the
+  steps; `grep -niE "oauth|token|scope|@gmail" docs/guides/connect-google-for-a-project.md` prints
+  nothing.
+- **Depends on:** T25, T26
+- [ ] done
+- Notes: Draft text —
+
+  > **Connecting your Google account to Agent Bob**
+  >
+  > This lets Bob's workers find and read files in your Google Drive, Docs and Sheets, and write
+  > email drafts in your Gmail. Bob can write drafts but will not send email: you send them
+  > yourself.
+  >
+  > 1. Go to Agent Bob and sign in as usual.
+  > 2. Pick your project, then click **Settings** in the menu.
+  > 3. Find **Connections**. Next to **Google** it says **Not connected**. Click **Connect Google**.
+  > 4. Google opens. Choose your organisation's Google account.
+  > 5. Google may say **"Google hasn't verified this app"**. That is expected for Bob. Click
+  >    **Advanced**, then **Go to Agent Bob (unsafe)**.
+  > 6. Google lists what Bob is asking for. Leave every box ticked and click **Continue**.
+  > 7. You come back to Settings. It now says **Connected as** and your account.
+  >
+  > That's it. Workers pick it up on their next run.
+  >
+  > **If it says something went wrong**, click **Connect Google** again. If the button is grey,
+  > ask Kai: your login may not be allowed to connect accounts yet.
+  >
+  > **To stop**, go to Settings → Connections and click **Disconnect**. You can also remove Bob
+  > from your Google account at myaccount.google.com → Security → Your connections to third-party
+  > apps.
+
+### T28: Live verification with a real Google sign-in   [Status: pending | Model: human (Kai + Richard)]
+- **Scope:** a human runs this; an executor may only prepare the checklist output file. On the
+  local stack first (`http://localhost:8080`), then on the box (`https://bob.box.badcode.tv`)
+  after a deploy: set `AGENTKIT_CONNECTIONS_KEY` and `GOOGLE_CLIENT_SECRET`; add both redirect
+  URIs to the OAuth client; add the ENC project's `operators` and four `google_account`
+  connections to the project map; make sure the ENC architect holds `"*"` (T14 §4); then:
+  1. Sign in as the operator (Richard, or Kai as a stand-in on local), Settings → **Connect
+     Google**, sign in as the ENC Gmail account, accept the unverified-app warning, approve.
+     Record whether Google showed every scope and whether it let any be unticked.
+  2. Settings shows "Connected as …" **without restarting agentd** (`docker compose ps` uptime
+     unchanged).
+  3. A worker holding `gmail`: search threads and create a draft. **Record whether a consumer
+     `@gmail.com` account is accepted by `gmailmcp`**, and whether search works with
+     `gmail.compose` alone (see Open questions). Confirm no send tool exists.
+  4. The same for `drive` (list files), `docs` (read a doc), `sheets` (read a sheet). Record each
+     server's answer for a consumer account and the exact URL that worked (Sheets is untested).
+  5. `psql`: `SELECT account, account_email, key_id, length(ciphertext) FROM
+     connection_credentials` shows ciphertext only. Nobody ever sees the refresh token itself, so
+     check for its shape instead: Google refresh tokens start with `1//`, and access tokens with
+     `ya29.`. `grep -E '1//|ya29\.'` over the agentd log, `pg_dump` of the database, and the
+     project's `config_events` payloads → nothing.
+  6. Restart agentd with a **different** key → Settings says the connection must be reconnected;
+     the proxy answers 503 with the wrong-key text; put the right key back → works again.
+  7. Disconnect → `revoked:true`; the ENC account's Google "third-party apps" page no longer lists
+     Bob; a worker call → 503 not connected. Reconnect works.
+  8. Changelog shows `connection_connect` / `connection_disconnect` with no Revert button, and
+     the git mirror (if the project has one) has no new commit.
+- **Files:** append results to this ticket's Notes and, for the operator-facing parts, to
+  `docs/22-connections.md` §Verify.
+- **Acceptance criteria:** items 1–8 recorded with dates. **What it proves:** the redirect URIs,
+  cookie and state survive a real Google round trip on both origins; an unverified "In
+  production" app with these restricted scopes can still be approved and returns a refresh token;
+  the button takes effect with no restart; the stored credential is unreadable without the key;
+  disconnect really revokes. **What it settles:** whether Google's hosted MCP servers accept a
+  consumer `@gmail.com` account. **If they do not:** the fallback is to run a self-hosted Google
+  Workspace MCP server as a sidecar next to agentd that accepts an access token as `Bearer` —
+  the button, the stored credential, `GoogleRefresh` and the `/connect/` proxy all stay; only each
+  connection's `url` changes. That needs one code change (T4/T1's `http` rule allows only
+  localhost, so a sidecar on the compose network needs an explicit internal-host allowance) and a
+  review of the chosen server; the other route, needing no code, is moving ENC to a Google
+  Workspace account. Kai picks between them with T28's evidence.
+- **TDD:** no (manual)
+- **Validation:** the checklist above, run by a human.
+- **Depends on:** T15, T24, T26, T27, and a deploy to the box
+- [ ] done
+- Notes:
+
+### Re-sequencing of T14 and T15
+
+T14 and T15 now come **after** T16–T27 (their Depends on lines above are updated). T14's doc
+gains a "Connect Google" section (the amended rule, A1–A12 in operator terms, the two env vars,
+redirect URIs, reason codes, the wrong-key/lost-key consequence, and that `/connect/` Google tools
+appear from the next session) and its §5 *Google* keeps the hand-held refresh-token route as the
+alternative. T15 gains an offline Go test of the whole connect flow and a mock-stack UI check.
+
+### Open questions for Kai (the only ones)
+
+1. **Gmail scope.** `gmail.compose` lets Bob create drafts but, as far as Google documents it,
+   not read or search the inbox; the Gmail MCP server lists `gmail.readonly` + `gmail.compose`
+   (Context). Also, `gmail.compose` itself permits *sending* through the Gmail API — "drafts only"
+   holds because Google's Gmail MCP server has no send tool, not because of the scope. Recommend
+   adding `gmail.readonly`. T21's constant takes Kai's four as specified until he says otherwise;
+   T28 step 3 shows the consequence either way.
+2. **Richard as operator.** A5 gives Richard operator authority for ENC through the new
+   `operators` list, which also lets him change ENC's token budgets. The alternative (a separate
+   "may connect" list) is more code for a distinction nobody has asked for. Recommend A5 as
+   written.
+
+### Decisions recorded here rather than asked
+
+- Callback under `/auth/` (not `/agent/`): nginx already proxies it, it must be unauthenticated,
+  and `/auth/` is where the other unauthenticated login routes live. No nginx change.
+- One agentd process assumed for pending connects (A6.2): true of every deployment Bob has; a
+  restart mid-flow costs one extra click.
+- Env-var credentials are untouched: `bearer` and `google_oauth` keep working exactly as T1–T13
+  built them, so nothing already configured breaks.
+- No MCP tool can connect, disconnect or read credential rows: reach into a Google account is
+  granted by a person, and `connection_list` (T9) already tells workers what exists and is
+  available.
