@@ -35,6 +35,9 @@ package agentdb
 //     a human may have edited since. Revert the individual changes instead.
 //   - images and skills are append-only at the tool surface (§13, §14): there
 //     is no delete verb to compensate a create with.
+//   - `connection_connect`/`connection_disconnect` carry metadata only; the
+//     sealed credential is deliberately kept out of the log, so there is no
+//     state to write forward. The console's buttons are the way back.
 
 import (
 	"context"
@@ -128,6 +131,10 @@ func revertableKind(ref EntityRef, target *ConfigEvent) error {
 		return fmt.Errorf("%w: %s is append-only — %ss have no delete verb at the tool surface, "+
 			"so there is nothing to compensate a create with",
 			ErrRevertRefused, target.Action, ref.Kind)
+	case EntityConnection:
+		return fmt.Errorf("%w: %s — a connection credential is not in the log, so there is nothing "+
+			"to put back — use Connect Google or Disconnect in Settings",
+			ErrRevertRefused, target.Action)
 	}
 	return nil
 }

@@ -93,6 +93,12 @@ const (
 	// folds it back into a table, but leaving it unmapped would make the whole
 	// fold fail loudly on any project that ever applied a topology.
 	EntityTopology EntityKind = "topology"
+	// EntityConnection keys `connection_connect`/`connection_disconnect` by the
+	// ACCOUNT name ("connection:google"), not by a connection name: one stored
+	// Google sign-in serves every connection that names its account (addendum
+	// A1). Like topology, nothing folds it back into a table — the payload is
+	// metadata, and the credential itself is deliberately not in the log.
+	EntityConnection EntityKind = "connection"
 )
 
 // EntityRef identifies one folded entity: its kind plus the key that is unique
@@ -126,6 +132,7 @@ var EntityKinds = []EntityKind{
 	EntityProjectSettings,
 	EntityProjectPrompt,
 	EntityTopology,
+	EntityConnection,
 }
 
 // ParseEntityRef reads the rendered form back — "worker:email-answerer",
@@ -190,25 +197,27 @@ func ActionsForEntityKind(kind EntityKind) []string {
 // the fold failing loudly is far better than a snapshot that silently omits an
 // entity kind.
 var entityKindForAction = map[string]EntityKind{
-	ActionWorkerCreate:       EntityWorker,
-	ActionWorkerUpdate:       EntityWorker,
-	ActionWorkerEnable:       EntityWorker,
-	ActionWorkerDisable:      EntityWorker,
-	ActionWorkerFreeze:       EntityWorker,
-	ActionWorkerUnfreeze:     EntityWorker,
-	ActionWorkerDelete:       EntityWorker,
-	ActionWorkerPromptWrite:  EntityWorker,
-	ActionProjectPromptWrite: EntityProjectPrompt,
-	ActionProjectSettingsPut: EntityProjectSettings,
-	ActionSubscriptionCreate: EntitySubscription,
-	ActionSubscriptionUpdate: EntitySubscription,
-	ActionSubscriptionDelete: EntitySubscription,
-	ActionScheduleCreate:     EntitySchedule,
-	ActionScheduleUpdate:     EntitySchedule,
-	ActionScheduleDelete:     EntitySchedule,
-	ActionImageCreate:        EntityImage,
-	ActionSkillCreate:        EntitySkill,
-	ActionTopologyApply:      EntityTopology,
+	ActionWorkerCreate:         EntityWorker,
+	ActionWorkerUpdate:         EntityWorker,
+	ActionWorkerEnable:         EntityWorker,
+	ActionWorkerDisable:        EntityWorker,
+	ActionWorkerFreeze:         EntityWorker,
+	ActionWorkerUnfreeze:       EntityWorker,
+	ActionWorkerDelete:         EntityWorker,
+	ActionWorkerPromptWrite:    EntityWorker,
+	ActionProjectPromptWrite:   EntityProjectPrompt,
+	ActionProjectSettingsPut:   EntityProjectSettings,
+	ActionSubscriptionCreate:   EntitySubscription,
+	ActionSubscriptionUpdate:   EntitySubscription,
+	ActionSubscriptionDelete:   EntitySubscription,
+	ActionScheduleCreate:       EntitySchedule,
+	ActionScheduleUpdate:       EntitySchedule,
+	ActionScheduleDelete:       EntitySchedule,
+	ActionImageCreate:          EntityImage,
+	ActionSkillCreate:          EntitySkill,
+	ActionTopologyApply:        EntityTopology,
+	ActionConnectionConnect:    EntityConnection,
+	ActionConnectionDisconnect: EntityConnection,
 }
 
 // deleteActions are the tombstones: the record stays, the key goes (§15.3
@@ -219,6 +228,9 @@ var deleteActions = map[string]bool{
 	ActionWorkerDelete:       true,
 	ActionSubscriptionDelete: true,
 	ActionScheduleDelete:     true,
+	// A disconnect removes the stored credential, so for the fold the account
+	// is gone until the next connect.
+	ActionConnectionDisconnect: true,
 }
 
 // IsDeleteAction reports whether an action is a tombstone in the fold.
@@ -285,6 +297,12 @@ func EntityRefFor(ev *ConfigEvent) (EntityRef, error) {
 			return EntityRef{}, err
 		}
 		return EntityRef{Kind: kind, Key: ref}, nil
+	case EntityConnection:
+		account, err := payloadKeyField(ev, "account")
+		if err != nil {
+			return EntityRef{}, err
+		}
+		return EntityRef{Kind: kind, Key: account}, nil
 	default: // subscriptions and schedules are keyed by their generated id
 		id, err := payloadKeyField(ev, "id")
 		if err != nil {

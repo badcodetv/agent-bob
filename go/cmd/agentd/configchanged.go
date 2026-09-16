@@ -312,6 +312,15 @@ func configChangePhrase(ev *agentdb.ConfigEvent) string {
 		// not "name"; the rows it created each announced themselves already.
 		ref, _ := ev.PayloadString("topology")
 		return fmt.Sprintf("applied topology %s — the workers, subscriptions and schedules it created were each recorded in their own config events", orUnset(ref))
+	case agentdb.ActionConnectionConnect, agentdb.ActionConnectionDisconnect:
+		// The account NAME only. The payload also carries the Google account's
+		// email, but this sentence is routed into worker sessions as event text,
+		// and who owns the mailbox is not something every subscriber needs.
+		account, _ := ev.PayloadString("account")
+		if ev.Action == agentdb.ActionConnectionConnect {
+			return fmt.Sprintf("connected Google account %q", account)
+		}
+		return fmt.Sprintf("disconnected Google account %q", account)
 	default:
 		// Unreachable while the §15.3 vocabulary is closed and validated at the
 		// seam — but a new verb must degrade to something readable rather than

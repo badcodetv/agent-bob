@@ -1223,6 +1223,37 @@ var agentMigrations = []migration{
 			ALTER TABLE attention_requests ADD COLUMN IF NOT EXISTS kind VARCHAR(16) NOT NULL DEFAULT 'ask';
 		`,
 	},
+	{
+		// design/2026-09-11-project-connections.md, addendum T17: the one table
+		// that holds a connection credential. It deliberately amends the
+		// original rule ("a credential never enters the database"): a Google
+		// refresh token obtained through Connect Google is stored here, but
+		// ONLY as AES-256-GCM ciphertext under a key that exists solely in
+		// agentd's environment (AGENTKIT_CONNECTIONS_KEY). key_id sits beside
+		// it so "sealed with a different key" is a readable reason rather than
+		// a GCM failure. One row per (project, account): every google_account
+		// connection naming the same account shares it.
+		//
+		// Written only through the config log (connection_connect /
+		// connection_disconnect), whose payload carries metadata and never
+		// these bytes.
+		Name: "052_connection_credentials",
+		SQL: `
+			CREATE TABLE IF NOT EXISTS connection_credentials (
+				project        TEXT   NOT NULL,
+				account        TEXT   NOT NULL,
+				provider       TEXT   NOT NULL,
+				account_email  TEXT   NOT NULL,
+				scopes         JSONB  NOT NULL DEFAULT '[]',
+				key_id         TEXT   NOT NULL,
+				nonce          BYTEA  NOT NULL,
+				ciphertext     BYTEA  NOT NULL,
+				connected_by   TEXT   NOT NULL,
+				connected_at   BIGINT NOT NULL,
+				PRIMARY KEY (project, account)
+			);
+		`,
+	},
 }
 
 // migrationLockKey is the Postgres advisory-lock key that serialises migration

@@ -1066,6 +1066,23 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   valid base64 and decode to 48 bytes, so it is refused on length ("must decode to 32 bytes, got
   48"), not as "not base64". The message still points at `openssl rand -base64 32`. `ParseKey`
   does not trim whitespace, so a value with a trailing space is refused too.
+- (T17) Adding the two actions to `ConfigActions` turns
+  `TestConfigChangedEventTextCoversEveryAction` (`go/cmd/agentd/configchanged_test.go`) red: it
+  demands a fixture and a phrase for every verb. So T17 cannot pass its own "`go test ./cmd/agentd/`"
+  gate alone. T17 therefore added only T18's two `configChangePhrase` cases ("connected Google
+  account %q" / "disconnected Google account %q", account name only) and their fixtures. T18 still
+  owns the git fold comment, `mcp_config_log.go`, `web/` and the email-free assertions.
+- (T17) The interface block gives `Scopes []string` for a `JSONB NOT NULL DEFAULT '[]'` column.
+  Stored with gorm's `serializer:json`; a nil slice would serialise as JSON `null` (legal jsonb,
+  so NOT NULL does not catch it), so Put, Get and List normalise nil to `[]`.
+- (T17) `EntityConnection` in `deleteActions` means `FoldTo` now records a tombstone for a
+  disconnected account. Nothing reads it (revert refuses the kind before looking), and the git
+  fold's delete branch already ignores unknown kinds, so no behaviour changes; noted so T18 does
+  not mistake the tombstone for something to render.
+- (T17) The `ListConfigEvents` entity filter for `connection:<account>` matches on the payload's
+  `account` field. An account and a connection may share a name (`google` is both a default
+  account and a plausible connection name), but only the two credential actions map to
+  `EntityConnection`, so a worker's `connections` grants never appear in that history.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1475,8 +1492,14 @@ then strips the query with `history.replaceState`.
   `AGENTKIT_TEST_POSTGRES_URL=<url> go test ./agentdb/... -run 'Connection|ConfigEvent|Mutation|Revert|Migration' -count=1`
   → PASS, not skipped.
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/agentdb/connection_credentials.go` + `_test.go`, migration `052_connection_credentials`
+  (052 was free on this branch and on main). Payload is `connectionCredentialEvent` (metadata only);
+  `KeyID` is `json:"-"` like the bytes. Added `ErrConnectionCredentialInvalid` (validation before
+  either write). Pulled forward T18's `configChangePhrase` lines so `cmd/agentd` stays green (see
+  Discovered Issues). Validation passed; live Postgres ran on a fresh database, all T17 cases
+  passed; the one failure in that run is the known pre-existing
+  `TestLivePG_QueryEventsMixedPreAndPostMigrationRows`, reproduced on the base commit.
 
 ### T18: The two new actions reach every reader of the log   [Status: pending | Model: sonnet]
 - **Scope:** every place that switches on the closed action vocabulary or entity kinds learns

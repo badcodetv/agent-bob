@@ -20,7 +20,7 @@ func newConfigLogTestStore(t *testing.T) *Store {
 	t.Helper()
 	s := newTestStore(t) // sqlite + AutoMigrate(&Artifact{})
 	if err := s.gdb.AutoMigrate(&ConfigEvent{}, &Skill{}, &CustomImage{},
-		&ProjectSettings{}, &Worker{}, &Subscription{}, &Schedule{}); err != nil {
+		&ProjectSettings{}, &Worker{}, &Subscription{}, &Schedule{}, &ConnectionCredential{}); err != nil {
 		t.Fatalf("automigrate config log + projections: %v", err)
 	}
 	return s
@@ -523,6 +523,22 @@ var configMutationProbes = map[string]func(ctx context.Context, s *Store) error{
 		}, ConfigWrite{Worker: "prober", Session: "s-probe"})
 		return err
 	},
+	// The two connection-credential writes take no ConfigWrite: they are only
+	// ever a human pressing a console button, whose identity travels in the
+	// payload (addendum A9), so the probes have no actor to pass.
+	"PutConnectionCredential": func(ctx context.Context, s *Store) error {
+		return s.PutConnectionCredential(ctx, &ConnectionCredential{
+			Project: probeProject, Account: "google", Provider: "google", AccountEmail: "probe@example.com",
+			Scopes: []string{"openid"}, KeyID: "probe-key", Nonce: []byte("probe-nonce!"),
+			Ciphertext: []byte("probe-ciphertext"), ConnectedBy: "p@probe.com", ConnectedAt: 1,
+		})
+	},
+	"DeleteConnectionCredential": func(ctx context.Context, s *Store) error {
+		if err := seedProbeConnectionCredential(ctx, s); err != nil {
+			return err
+		}
+		return s.DeleteConnectionCredential(ctx, probeProject, "google", "p@probe.com")
+	},
 }
 
 const probeSubscriptionID = "sub-probe"
@@ -557,6 +573,14 @@ func seedProbeSchedule(ctx context.Context, s *Store) error {
 		probeScheduleID, probeProject).Error
 }
 
+func seedProbeConnectionCredential(ctx context.Context, s *Store) error {
+	return s.gdb.WithContext(ctx).Exec(
+		`INSERT INTO connection_credentials (project, account, provider, account_email, scopes, key_id,
+		                                     nonce, ciphertext, connected_by, connected_at)
+		 VALUES (?, 'google', 'google', 'probe@example.com', '[]', 'probe-key', ?, ?, 'p@probe.com', 1)`,
+		probeProject, []byte("probe-nonce!"), []byte("probe-ciphertext")).Error
+}
+
 const probeProject = "probe-project"
 
 // configEntityNouns are the configuration entities of §15.3. A *Store method
@@ -564,6 +588,7 @@ const probeProject = "probe-project"
 // read (configReadVerbs) — deny by default.
 var configEntityNouns = []string{
 	"Worker", "Project", "Setting", "Prompt", "Subscription", "Schedule", "Image", "Skill", "Config", "Topology",
+	"Connection",
 }
 
 var configReadVerbs = []string{
@@ -824,7 +849,8 @@ func TestMutationsAreLogged(t *testing.T) {
 	//    mutation guards its table without a second list to maintain.
 	t.Run("guarded_tables_are_derived_from_the_registry", func(t *testing.T) {
 		got := ConfigGuardedTables()
-		want := []string{"agent_custom_images", "agent_skills", "project_settings", "schedules", "subscriptions", "workers"}
+		want := []string{"agent_custom_images", "agent_skills", "connection_credentials", "project_settings",
+			"schedules", "subscriptions", "workers"}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("guarded tables: want %v, got %v", want, got)
 		}

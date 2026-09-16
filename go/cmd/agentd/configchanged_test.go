@@ -360,6 +360,10 @@ func TestConfigChangedEventTextCoversEveryAction(t *testing.T) {
 		agentdb.ActionImageCreate:        {"name": "toolbox", "version": float64(2)},
 		agentdb.ActionSkillCreate:        {"name": "graph-gen"},
 		agentdb.ActionTopologyApply:      {"topology": "solo@v1", "answers": map[string]any{"cadence": "daily"}},
+		agentdb.ActionConnectionConnect: {"account": "google", "account_email": "office@example.com",
+			"provider": "google", "connected_by": "op@example.com"},
+		agentdb.ActionConnectionDisconnect: {"account": "google", "account_email": "office@example.com",
+			"provider": "google", "connected_by": "op@example.com", "disconnected_by": "op@example.com"},
 	}
 	for _, action := range agentdb.ConfigActions {
 		payload, ok := payloads[action]
