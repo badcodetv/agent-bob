@@ -27,6 +27,14 @@ func validGoogle() Spec {
 	}
 }
 
+func validGoogleAccount() Spec {
+	return Spec{
+		Description: "ENC's Gmail",
+		URL:         "https://gmailmcp.googleapis.com/mcp/v1",
+		Auth:        Auth{Type: AuthGoogleAccount},
+	}
+}
+
 func TestValidateName(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -80,6 +88,20 @@ func TestSpecValidate(t *testing.T) {
 		{"bad env var leading digit", func() Spec { s := validBearer(); s.Auth.TokenEnv = "1TOKEN"; return s }(), true},
 		{"unknown auth type", func() Spec { s := validBearer(); s.Auth.Type = "basic"; return s }(), true},
 		{"empty auth type", func() Spec { s := validBearer(); s.Auth.Type = ""; return s }(), true},
+
+		// google_account (Connect Google, decision A): no env vars at all,
+		// an optional account name that follows the connection-name rule.
+		{"google_account, default account", validGoogleAccount(), false},
+		{"google_account, named account", func() Spec { s := validGoogleAccount(); s.Auth.Account = "enc-google"; return s }(), false},
+		{"google_account, bad account shape", func() Spec { s := validGoogleAccount(); s.Auth.Account = "Bad Account"; return s }(), true},
+		{"google_account, account leading dash", func() Spec { s := validGoogleAccount(); s.Auth.Account = "-google"; return s }(), true},
+		{"google_account with token_env", func() Spec { s := validGoogleAccount(); s.Auth.TokenEnv = "X"; return s }(), true},
+		{"google_account with client_id_env", func() Spec { s := validGoogleAccount(); s.Auth.ClientIDEnv = "X"; return s }(), true},
+		{"google_account with client_secret_env", func() Spec { s := validGoogleAccount(); s.Auth.ClientSecretEnv = "X"; return s }(), true},
+		{"google_account with refresh_token_env", func() Spec { s := validGoogleAccount(); s.Auth.RefreshTokenEnv = "X"; return s }(), true},
+		{"google_account, http non-local still refused", func() Spec { s := validGoogleAccount(); s.URL = "http://example.com/mcp"; return s }(), true},
+		{"account on bearer refused", func() Spec { s := validBearer(); s.Auth.Account = "google"; return s }(), true},
+		{"account on google_oauth refused", func() Spec { s := validGoogle(); s.Auth.Account = "google"; return s }(), true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,6 +228,39 @@ func TestNewRegistry_GoogleOAuthAvailableWhenEnvSet(t *testing.T) {
 	}
 	if conn.Token == nil {
 		t.Fatalf("want a non-nil Token source")
+	}
+}
+
+// A google_account connection resolves nothing at boot: no env var is read,
+// nothing is logged, no Token is built, and its account is defaulted so every
+// later reader sees the account name it will be looked up under.
+func TestNewRegistry_GoogleAccountBuildsNoToken(t *testing.T) {
+	named := validGoogleAccount()
+	named.Auth.Account = "enc-google"
+	var logCalls int
+	var envReads int
+	reg, err := NewRegistry(map[string]map[string]Spec{
+		"enc": {"gmail": validGoogleAccount(), "drive": named},
+	}, func(string) string { envReads++; return "" }, func(string, ...any) { logCalls++ })
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	if logCalls != 0 || envReads != 0 {
+		t.Fatalf("google_account at boot: logf calls %d, env reads %d; want 0 and 0", logCalls, envReads)
+	}
+	gmail, ok := reg.Get("enc", "gmail")
+	if !ok {
+		t.Fatal("gmail not found")
+	}
+	if gmail.Token != nil || gmail.Unavailable != "" {
+		t.Fatalf("gmail: Token=%v Unavailable=%q; want nil and \"\" (availability is decided at use)", gmail.Token, gmail.Unavailable)
+	}
+	if gmail.Spec.Auth.Account != DefaultGoogleAccount {
+		t.Fatalf("gmail account = %q, want the default %q", gmail.Spec.Auth.Account, DefaultGoogleAccount)
+	}
+	drive, _ := reg.Get("enc", "drive")
+	if drive.Spec.Auth.Account != "enc-google" {
+		t.Fatalf("drive account = %q, want enc-google", drive.Spec.Auth.Account)
 	}
 }
 

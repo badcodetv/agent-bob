@@ -480,3 +480,89 @@ func TestConnectionServersFor(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildConnectionRegistryGoogleAccount: a google_account connection has
+// no env var to report at boot, so the line names its account and says
+// nothing about availability — that is decided at use (Connect Google).
+func TestBuildConnectionRegistryGoogleAccount(t *testing.T) {
+	logs := &logRecorder{}
+	_, err := buildConnectionRegistry(map[string]map[string]connections.Spec{
+		"enc": {
+			"gmail":  {URL: "https://gmailmcp.googleapis.com/mcp/v1", Auth: connections.Auth{Type: connections.AuthGoogleAccount}},
+			"sheets": {URL: "https://sheetsmcp.googleapis.com/mcp/v1", Auth: connections.Auth{Type: connections.AuthGoogleAccount, Account: "archive"}},
+			"github": {URL: "https://api.githubcopilot.com/mcp/", Auth: connections.Auth{Type: connections.AuthBearer, TokenEnv: "ENC_GITHUB_PAT"}},
+		},
+	}, func(string) string { return "" }, logs.logf)
+	if err != nil {
+		t.Fatalf("buildConnectionRegistry: %v", err)
+	}
+	want := `project "enc": github=UNAVAILABLE (env var ENC_GITHUB_PAT is not set), gmail=google_account(google), sheets=google_account(archive)`
+	if out := logs.joined(); !strings.Contains(out, want) {
+		t.Fatalf("boot log missing %q:\n%s", want, out)
+	}
+}
+
+// TestConnectionServersForGoogleAccount: the resolver's skipped-grant reason
+// comes from Registry.Availability, so a google_account grant with Connect
+// Google off says why rather than a bare "unavailable".
+func TestConnectionServersForGoogleAccount(t *testing.T) {
+	reg, err := connections.NewRegistry(map[string]map[string]connections.Spec{
+		"enc": {"gmail": {URL: "https://gmailmcp.googleapis.com/mcp/v1", Auth: connections.Auth{Type: connections.AuthGoogleAccount}}},
+	}, func(string) string { return "" }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetAccounts(nil, "Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set")
+	logs := &logRecorder{}
+	got := connectionServersFor(reg, "http://self", logs.logf)("enc", []string{"gmail"})
+	if len(got) != 0 {
+		t.Fatalf("servers = %v, want none", got)
+	}
+	if out := logs.joined(); !strings.Contains(out, "gmail (Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set)") {
+		t.Fatalf("log = %q, want the disabled reason", out)
+	}
+}
+
+// TestParseProjectMapGoogleAccountConnections: the T5 parse path (which calls
+// Spec.Validate) accepts the addendum's ENC-shaped google_account block and
+// refuses the shapes Validate refuses.
+func TestParseProjectMapGoogleAccountConnections(t *testing.T) {
+	raw := `{
+	  "users": {"operator@example.com": ["enc"]},
+	  "projects": {
+	    "enc": {
+	      "connections": {
+	        "gmail":  {"description": "Gmail", "url": "https://gmailmcp.googleapis.com/mcp/v1",
+	                   "auth": {"type": "google_account", "account": "google"}},
+	        "drive":  {"description": "Drive", "url": "https://drivemcp.googleapis.com/mcp/v1",
+	                   "auth": {"type": "google_account"}}
+	      }
+	    }
+	  }
+	}`
+	s, err := parseProjectSettings([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	gmail := s.projects["enc"].Connections["gmail"]
+	if gmail.Auth.Type != connections.AuthGoogleAccount || gmail.Auth.Account != "google" {
+		t.Fatalf("gmail spec = %+v", gmail)
+	}
+	reg, err := connections.NewRegistry(connectionSpecsOf(s), func(string) string { return "" }, nil)
+	if err != nil {
+		t.Fatalf("registry: %v", err)
+	}
+	if accts := reg.Accounts("enc"); len(accts) != 1 || accts[0].Account != "google" || strings.Join(accts[0].Connections, ",") != "drive,gmail" {
+		t.Fatalf("Accounts = %+v", accts)
+	}
+
+	for name, bad := range map[string]string{
+		"env field on google_account": `{"projects": {"enc": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_account", "client_id_env": "GOOGLE_CLIENT_ID"}}}}}}`,
+		"bad account name":            `{"projects": {"enc": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_account", "account": "Not Valid"}}}}}}`,
+		"account on bearer":           `{"projects": {"enc": {"connections": {"github": {"url": "https://x", "auth": {"type": "bearer", "token_env": "X", "account": "google"}}}}}}`,
+	} {
+		if _, err := parseProjectSettings([]byte(bad)); err == nil {
+			t.Errorf("%s: want a parse error, got nil", name)
+		}
+	}
+}

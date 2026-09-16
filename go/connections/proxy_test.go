@@ -147,8 +147,14 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 	}
 	docs, _ := reg.Get("wolf", "docs")
 	docs.Token = revokedToken{}
-	h.reg = reg
+	h.wire(reg)
+	return h
+}
 
+// wire installs reg and builds the proxy over the harness's fake
+// authenticator and grant store.
+func (h *proxyHarness) wire(reg *Registry) {
+	h.reg = reg
 	h.proxy = NewProxy(ProxyConfig{
 		Registry: reg,
 		Authenticate: func(r *http.Request) (Caller, error) {
@@ -184,7 +190,6 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 			h.logs = append(h.logs, fmt.Sprintf(format, args...))
 		},
 	})
-	return h
 }
 
 func (h *proxyHarness) setCaller(tok string, c Caller) {
@@ -697,5 +702,190 @@ func TestProxy_LogsOneLinePerRequest(t *testing.T) {
 				t.Fatalf("log line %q carries header value %q", line, secret)
 			}
 		}
+	}
+}
+
+// newAccountProxyHarness is project "wolf" with google_account connections
+// mail and drive (both on the default account) and calendar (account
+// "archive"), all pointing at the recording upstream, a fake AccountSource
+// installed, and worker "researcher" holding "*".
+func newAccountProxyHarness(t *testing.T) (*proxyHarness, *fakeAccounts) {
+	t.Helper()
+	h := &proxyHarness{
+		up: newRecordingUpstream(t),
+		callers: map[string]Caller{
+			testSessionJWT: {Project: "wolf", SessionID: "sess-1", Worker: "researcher"},
+		},
+		grants: map[string][]string{"researcher": {"*"}},
+		gone:   map[string]bool{},
+	}
+	reg, err := NewRegistry(map[string]map[string]Spec{
+		"wolf": {
+			"mail":     {Description: "inbox", URL: h.up.srv.URL + "/gmail", Auth: Auth{Type: AuthGoogleAccount}},
+			"drive":    {Description: "files", URL: h.up.srv.URL + "/drive", Auth: Auth{Type: AuthGoogleAccount, Account: "google"}},
+			"calendar": {Description: "cal", URL: h.up.srv.URL + "/cal", Auth: Auth{Type: AuthGoogleAccount, Account: "archive"}},
+		},
+	}, func(string) string { return "" }, nil)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	src := newFakeAccounts()
+	reg.SetAccounts(src, "")
+	h.wire(reg)
+	return h, src
+}
+
+const testGoogleAccess = "ya29.fake-access"
+
+// TestProxy_GoogleAccountRows produces the addendum's google_account rows of
+// the status table, none of which contacts the upstream.
+func TestProxy_GoogleAccountRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(src *fakeAccounts)
+		wantCode  int
+		wantError string
+	}{
+		{
+			name:      "account not connected",
+			wantCode:  503,
+			wantError: "mail uses the Google account google, which is not connected — a project operator presses Connect Google in Settings",
+		},
+		{
+			name: "status connected but the row is gone by Token time",
+			setup: func(src *fakeAccounts) {
+				src.setStatus("wolf", "google", AccountStatus{Connected: true})
+				src.setTokenErr("wolf", "google", ErrNotConnected)
+			},
+			wantCode:  503,
+			wantError: "mail uses the Google account google, which is not connected — a project operator presses Connect Google in Settings",
+		},
+		{
+			name: "stored credential sealed with a different key (status)",
+			setup: func(src *fakeAccounts) {
+				src.setStatus("wolf", "google", AccountStatus{Connected: true, Unavailable: KeyChangedReason("google")})
+			},
+			wantCode:  503,
+			wantError: "the stored Google connection for google can no longer be read (the encryption key changed) — connect Google again",
+		},
+		{
+			name: "stored credential sealed with a different key (token)",
+			setup: func(src *fakeAccounts) {
+				src.connect("wolf", "google", "", testGoogleAccess)
+				src.setTokenErr("wolf", "google", fmt.Errorf("open: %w", ErrKeyChanged))
+			},
+			wantCode:  503,
+			wantError: "the stored Google connection for google can no longer be read (the encryption key changed) — connect Google again",
+		},
+		{
+			name: "Google refuses the refresh token",
+			setup: func(src *fakeAccounts) {
+				src.connect("wolf", "google", "", testGoogleAccess)
+				src.setTokenErr("wolf", "google", ErrCredentialRevoked)
+			},
+			wantCode:  502,
+			wantError: "Google refused the stored token for google — connect Google again in Settings",
+		},
+		{
+			name: "any other token failure",
+			setup: func(src *fakeAccounts) {
+				src.connect("wolf", "google", "", testGoogleAccess)
+				src.setTokenErr("wolf", "google", errors.New("dial tcp: refused"))
+			},
+			wantCode:  502,
+			wantError: "could not obtain a credential for mail; retry",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, src := newAccountProxyHarness(t)
+			if tc.setup != nil {
+				tc.setup(src)
+			}
+			rec := h.do(http.MethodPost, "/connect/mail/", testSessionJWT, nil)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if got := errorBody(t, rec); got != tc.wantError {
+				t.Fatalf("error = %q, want %q", got, tc.wantError)
+			}
+			if n := len(h.up.requests()); n != 0 {
+				t.Fatalf("upstream contacted %d time(s), want 0", n)
+			}
+		})
+	}
+}
+
+// TestProxy_GoogleAccountNoSource: a Registry with no AccountSource answers
+// 503 with agentd's disabled reason.
+func TestProxy_GoogleAccountNoSource(t *testing.T) {
+	h, _ := newAccountProxyHarness(t)
+	h.reg.SetAccounts(nil, "Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set")
+	rec := h.do(http.MethodPost, "/connect/mail/", testSessionJWT, nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := errorBody(t, rec); got != "Connect Google is off: AGENTKIT_CONNECTIONS_KEY is not set" {
+		t.Fatalf("error = %q", got)
+	}
+}
+
+// TestProxy_GoogleAccountConnectAndDisconnect: connected → the upstream gets
+// the source's access token; disconnecting between two requests turns 200
+// into 503 with no Registry rebuild.
+func TestProxy_GoogleAccountConnectAndDisconnect(t *testing.T) {
+	h, src := newAccountProxyHarness(t)
+	src.connect("wolf", "google", "enc@example.com", testGoogleAccess)
+
+	rec := h.do(http.MethodPost, "/connect/mail/", testSessionJWT, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("connected: status = %d, want 200 (body %q)", rec.Code, rec.Body.String())
+	}
+	reqs := h.up.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("upstream saw %d requests, want 1", len(reqs))
+	}
+	if a := reqs[0].Header.Values("Authorization"); len(a) != 1 || a[0] != "Bearer "+testGoogleAccess {
+		t.Fatalf("upstream Authorization = %q, want exactly the source's access token", a)
+	}
+	if reqs[0].Path != "/gmail" {
+		t.Fatalf("upstream path = %q, want /gmail", reqs[0].Path)
+	}
+
+	src.disconnect("wolf", "google")
+	rec = h.do(http.MethodPost, "/connect/mail/", testSessionJWT, nil)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("after disconnect: status = %d, want 503", rec.Code)
+	}
+	if n := len(h.up.requests()); n != 1 {
+		t.Fatalf("upstream saw %d requests, want 1 (the disconnected one must not cross)", n)
+	}
+	for _, line := range h.logLines() {
+		if strings.Contains(line, testGoogleAccess) {
+			t.Fatalf("a log line carries the access token: %q", line)
+		}
+	}
+}
+
+// TestProxy_GoogleAccountSharesOneTokenPath: two connections naming the same
+// account look their token up under that one account; a third on another
+// account under its own.
+func TestProxy_GoogleAccountSharesOneTokenPath(t *testing.T) {
+	h, src := newAccountProxyHarness(t)
+	src.connect("wolf", "google", "enc@example.com", testGoogleAccess)
+	src.connect("wolf", "archive", "old@example.com", "ya29.archive")
+
+	for _, target := range []string{"/connect/mail/", "/connect/drive/", "/connect/mail/x", "/connect/calendar/"} {
+		if rec := h.do(http.MethodPost, target, testSessionJWT, nil); rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d (body %q)", target, rec.Code, rec.Body.String())
+		}
+	}
+	calls := src.callCounts()
+	if calls["wolf/google"] != 3 || calls["wolf/archive"] != 1 || len(calls) != 2 {
+		t.Fatalf("Token calls = %v, want wolf/google:3 wolf/archive:1", calls)
+	}
+	reqs := h.up.requests()
+	if got := reqs[3].Header.Get("Authorization"); got != "Bearer ya29.archive" {
+		t.Fatalf("calendar Authorization = %q, want the archive account's token", got)
 	}
 }

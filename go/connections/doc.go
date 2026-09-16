@@ -11,9 +11,15 @@
 // route rather than at the upstream directly (Servers). When the session
 // calls that tool, agentd's proxy (NewProxy) re-reads the grant, swaps the
 // session's bearer token for the real credential, and streams the request to
-// the upstream — the container never sees the upstream credential, and the
-// database and git never see it either (it lives only in agentd's
-// environment, named by the project map).
+// the upstream. A connection credential never enters a container, never
+// enters git, never appears in a config event payload, and is never logged.
+// Env-var credentials (bearer, google_oauth) live only in agentd's
+// environment, named by the project map, and never enter the database. A
+// credential obtained through the console (a google_account refresh token,
+// Connect Google) IS stored in Postgres, but only sealed with AES-256-GCM
+// under a key that exists only in agentd's environment
+// (AGENTKIT_CONNECTIONS_KEY, Sealer), so a database backup on its own is
+// useless; it is reached at use time through an AccountSource.
 //
 // The trust rule this package enforces (Holds, CanGrant, Covers) is: a worker
 // may grant only a connection it holds itself, because reach into the outside

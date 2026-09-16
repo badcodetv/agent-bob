@@ -63,6 +63,13 @@ func buildConnectionRegistry(specs map[string]map[string]connections.Spec, geten
 	for _, project := range projects {
 		parts := []string{}
 		for _, info := range reg.List(project) {
+			// A google_account connection's availability is decided at use
+			// (Connect Google stores its credential while agentd runs), so
+			// the boot line names its account instead.
+			if conn, ok := reg.Get(project, info.Name); ok && conn.Spec.Auth.Type == connections.AuthGoogleAccount {
+				parts = append(parts, fmt.Sprintf("%s=google_account(%s)", info.Name, conn.Spec.Auth.Account))
+				continue
+			}
 			if info.Available {
 				parts = append(parts, info.Name+"=available")
 			} else {
@@ -177,7 +184,8 @@ func mountConnectRoute(root *http.ServeMux, reg *connections.Registry, auth *ses
 // connections.Servers skips grants it cannot honour silently (it has no
 // logger); this logs them, one line per resolution, so "the worker never got
 // its github tools" is answerable from agentd's log. Two kinds are skipped: a
-// connection that exists but is unavailable (its reason names the env var),
+// connection that exists but is unavailable (Registry.Availability's reason:
+// the env var, or for google_account why the account cannot be used),
 // and a grant naming no connection this project has — a stale name left on a
 // worker after the map dropped it.
 func connectionServersFor(reg *connections.Registry, selfURL string, logf func(string, ...any)) func(project string, grants []string) agentdb.MCPServers {
@@ -200,8 +208,8 @@ func connectionServersFor(reg *connections.Registry, selfURL string, logf func(s
 				continue
 			}
 			reason := "unavailable"
-			if conn, ok := reg.Get(project, name); ok && conn.Unavailable != "" {
-				reason = conn.Unavailable
+			if ok, why := reg.Availability(project, name); !ok && why != "" {
+				reason = why
 			}
 			skipped = append(skipped, fmt.Sprintf("%s (%s)", name, reason))
 		}

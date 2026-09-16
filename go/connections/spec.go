@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"sync"
 
 	"github.com/badcodetv/agent-bob/agentdb"
 )
@@ -31,7 +32,19 @@ const (
 	// AuthGoogleOAuth exchanges a long-lived refresh token for a short-lived
 	// access token, cached until shortly before expiry.
 	AuthGoogleOAuth AuthType = "google_oauth"
+	// AuthGoogleAccount uses a Google refresh token an operator obtained by
+	// pressing Connect Google in the console, stored sealed in Postgres and
+	// looked up at use time through the Registry's AccountSource
+	// (account.go). Every connection naming the same Account shares that one
+	// credential. It names no env vars: the OAuth client is always agentd's
+	// login client (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET), the only client
+	// the redirect URI is registered on.
+	AuthGoogleAccount AuthType = "google_account"
 )
+
+// DefaultGoogleAccount is the account a google_account connection uses when
+// its auth recipe names none.
+const DefaultGoogleAccount = "google"
 
 // Auth is an auth recipe: it names environment variables, never a secret
 // value itself. The project map is data an operator hand-edits and git may
@@ -43,6 +56,9 @@ type Auth struct {
 	ClientIDEnv     string   `json:"client_id_env,omitempty"`     // google_oauth
 	ClientSecretEnv string   `json:"client_secret_env,omitempty"` // google_oauth
 	RefreshTokenEnv string   `json:"refresh_token_env,omitempty"` // google_oauth
+	// Account names the stored Google credential a google_account connection
+	// uses; "" means DefaultGoogleAccount. It is a name, not a secret.
+	Account string `json:"account,omitempty"` // google_account
 	// tokenURL overrides Google's token endpoint. Deliberately unexported and
 	// therefore never unmarshalled from the project map: an edit there must
 	// not be able to redirect the client secret and refresh token to an
@@ -103,6 +119,10 @@ func (s Spec) Validate() error {
 		return fmt.Errorf("url %q: scheme must be https (or http for localhost/127.0.0.1)", s.URL)
 	}
 
+	if s.Auth.Account != "" && s.Auth.Type != AuthGoogleAccount {
+		return fmt.Errorf(`auth.account is only for auth.type %q, not %q`, AuthGoogleAccount, s.Auth.Type)
+	}
+
 	switch s.Auth.Type {
 	case AuthBearer:
 		if s.Auth.ClientIDEnv != "" || s.Auth.ClientSecretEnv != "" || s.Auth.RefreshTokenEnv != "" {
@@ -130,12 +150,27 @@ func (s Spec) Validate() error {
 				return err
 			}
 		}
+	case AuthGoogleAccount:
+		if s.Auth.TokenEnv != "" || s.Auth.ClientIDEnv != "" || s.Auth.ClientSecretEnv != "" || s.Auth.RefreshTokenEnv != "" {
+			return errors.New(`auth.type "google_account" must not set token_env, client_id_env, client_secret_env or refresh_token_env (it always uses GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, and the token comes from Connect Google)`)
+		}
+		if err := agentdb.ValidateConnectionName(s.Auth.accountName()); err != nil {
+			return fmt.Errorf("auth.account: %w", err)
+		}
 	case "":
 		return errors.New("auth.type is required")
 	default:
-		return fmt.Errorf("auth.type %q is not a known auth type (want %q or %q)", s.Auth.Type, AuthBearer, AuthGoogleOAuth)
+		return fmt.Errorf("auth.type %q is not a known auth type (want %q, %q or %q)", s.Auth.Type, AuthBearer, AuthGoogleOAuth, AuthGoogleAccount)
 	}
 	return nil
+}
+
+// accountName is Account with the default applied.
+func (a Auth) accountName() string {
+	if a.Account == "" {
+		return DefaultGoogleAccount
+	}
+	return a.Account
 }
 
 func validateEnvName(field, value string) error {
@@ -158,7 +193,9 @@ type Info struct {
 
 // Connection is one project's resolved connection: its spec, its parsed
 // upstream URL, and — when available — a TokenSource able to produce the
-// real credential. Token is nil exactly when Unavailable is non-empty.
+// real credential. Token is nil exactly when Unavailable is non-empty, and
+// always nil for google_account, whose credential is reached through the
+// Registry's AccountSource (Registry.Availability is the one check).
 type Connection struct {
 	Project, Name string
 	Spec          Spec
@@ -168,9 +205,15 @@ type Connection struct {
 }
 
 // Registry is every project's resolved connections, built once at boot from
-// the project map and the environment.
+// the project map and the environment. A google_account connection's
+// availability and token are not resolved at boot but looked up at use
+// through the AccountSource installed by SetAccounts (account.go).
 type Registry struct {
 	byProject map[string]map[string]*Connection
+
+	accountsMu     sync.RWMutex
+	accounts       AccountSource
+	disabledReason string
 }
 
 // NewRegistry validates every spec (a validation failure is a boot error) and
@@ -198,6 +241,9 @@ func NewRegistry(specs map[string]map[string]Spec, getenv func(string) string, l
 			u, err := url.Parse(spec.URL)
 			if err != nil {
 				return nil, fmt.Errorf("project %q: connection %q: url: %w", project, name, err)
+			}
+			if spec.Auth.Type == AuthGoogleAccount {
+				spec.Auth.Account = spec.Auth.accountName()
 			}
 			conn := &Connection{Project: project, Name: name, Spec: spec, URL: u}
 			resolveToken(conn, getenv)
@@ -237,6 +283,9 @@ func resolveToken(conn *Connection, getenv func(string) string) {
 			return
 		}
 		conn.Token = ts
+	case AuthGoogleAccount:
+		// Nothing to resolve at boot: Registry.Availability and the proxy ask
+		// the AccountSource at use time.
 	}
 }
 
@@ -266,11 +315,12 @@ func (r *Registry) List(project string) []Info {
 	}
 	infos := make([]Info, 0, len(byName))
 	for name, c := range byName {
+		ok, reason := r.Availability(project, name)
 		infos = append(infos, Info{
 			Name:        name,
 			Description: c.Spec.Description,
-			Available:   c.Unavailable == "",
-			Unavailable: c.Unavailable,
+			Available:   ok,
+			Unavailable: reason,
 		})
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].Name < infos[j].Name })

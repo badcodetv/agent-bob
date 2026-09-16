@@ -173,23 +173,35 @@ func (p *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeError(sw, http.StatusNotFound, fmt.Sprintf("no connection %s in this project", name))
 		return
 	}
-	if conn.Unavailable != "" || conn.Token == nil {
-		reason := conn.Unavailable
-		if reason == "" {
-			reason = fmt.Sprintf("connection %s has no credential", name)
-		}
+	if ok, reason := p.cfg.Registry.Availability(caller.Project, name); !ok {
 		writeError(sw, http.StatusServiceUnavailable, reason)
 		return
 	}
-	token, err := conn.Token.Token(r.Context())
-	if err != nil {
-		if errors.Is(err, ErrCredentialRevoked) {
-			writeError(sw, http.StatusBadGateway, fmt.Sprintf("Google refused the refresh token for %s — get a new one: docs/22-connections.md §Google", name))
-		} else {
-			note = err.Error()
-			writeError(sw, http.StatusBadGateway, fmt.Sprintf("could not obtain a credential for %s; retry", name))
+	var token string
+	if conn.Spec.Auth.Type == AuthGoogleAccount {
+		// Looked up at use, not at boot: a Connect or Disconnect in the
+		// console takes effect on this very request (A11).
+		tok, status, msg, err := p.cfg.Registry.accountToken(r.Context(), conn)
+		if status != 0 {
+			if err != nil {
+				note = err.Error()
+			}
+			writeError(sw, status, msg)
+			return
 		}
-		return
+		token = tok
+	} else {
+		tok, err := conn.Token.Token(r.Context())
+		if err != nil {
+			if errors.Is(err, ErrCredentialRevoked) {
+				writeError(sw, http.StatusBadGateway, fmt.Sprintf("Google refused the refresh token for %s — get a new one: docs/22-connections.md §Google", name))
+			} else {
+				note = err.Error()
+				writeError(sw, http.StatusBadGateway, fmt.Sprintf("could not obtain a credential for %s; retry", name))
+			}
+			return
+		}
+		token = tok
 	}
 
 	// An empty {rest} is the spec URL exactly — "/connect/gmail/" must reach

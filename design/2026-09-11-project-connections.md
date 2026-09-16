@@ -1104,6 +1104,25 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   `connections` field T6 made required (the fixture arrived with the main merge `85b78f7`). Reproduced
   with T18's changes stashed. Not fixed here (outside T18's files); one missing field in a test
   fixture. `npm test` (vitest) is green.
+- (T19) **Interface addition for the wrong-key row.** The addendum's `AccountSource` only names
+  `ErrNotConnected` and `ErrCredentialRevoked`, so the proxy had no way to recognise "sealed with
+  a different key" from `Token`. Added `connections.ErrKeyChanged` (T22's `Token` must return it,
+  wrapped or bare, when `key_id` differs) and exported `connections.KeyChangedReason(account)`
+  (T22's `Status.Unavailable` should use it, so the list, the console and the proxy say the same
+  sentence).
+- (T19) `Availability`'s order for `google_account`: no source → agentd's disabled reason (or
+  "Connect Google is not configured on this agentd" when agentd gave none, which is what every
+  `google_account` connection says until T24 calls `SetAccounts`); `!Connected` → the registry's
+  own "NAME uses the Google account ACCOUNT…" text, **ignoring** any `Unavailable` the source set
+  (the source does not know the connection name); `Connected` with `Unavailable` → that reason.
+  T22 therefore only needs `Unavailable` for the connected-but-unusable case.
+- (T19) The account default is applied in `NewRegistry`, not by `Spec.Validate` (value receiver,
+  called on copies by the T5 parse). The parsed `projectConfig.Connections` still hold `account: ""`
+  for an omitted account, so T23 must read accounts through `Registry.Get`/`Accounts`, never from
+  the raw project map.
+- (T19) A proxy request whose `Status` says connected but whose `Token` then returns
+  `ErrNotConnected` (a disconnect landing between the two) gets the same 503 not-connected body,
+  not a 502.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1587,8 +1606,15 @@ then strips the query with `history.replaceState`.
 - **Validation:** `cd go && go test ./connections/... ./cmd/agentd/ -run 'Connect|Registry|Proxy|Spec|Servers|ProjectMap' -count=1 -race`
   → PASS; `go build ./... && go vet ./...` clean.
 - **Depends on:** T1–T4 (done), T12 (done)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `google_account` + `Auth.Account` in `spec.go` (account defaulted in `NewRegistry`, since
+  `Validate` has a value receiver); `account.go` with the interface block plus `ErrKeyChanged` and
+  `KeyChangedReason` (see Discovered Issues). `List`, `Servers`, the proxy and
+  `connectionServersFor` all go through `Availability`; boot log prints `gmail=google_account(google)`.
+  Tests: `account_test.go`, new rows in `spec_test.go`, `TestProxy_GoogleAccount*` in
+  `proxy_test.go` (Servers cases live in `account_test.go`, so `resolve_test.go` is unchanged),
+  three agentd tests incl. the T5 map parse. Existing T1–T4 tests unchanged; the only edit to them
+  is `newProxyHarness`'s `NewProxy` wiring moved into a `wire` helper. Validation passes.
 
 ### T20: Per-project `operators` in the project map   [Status: pending | Model: sonnet]
 - **Scope:** `projectConfig.Operators []string` (`json:"operators"`), lowercased; parse error when
