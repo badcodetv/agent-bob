@@ -12,9 +12,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import OnboardingPage from './OnboardingPage.js'
 
-// AgentChat drags a whole session client behind it; this screen's contract is
-// only that the rail is bound to the RIGHT session, so the stub records the
-// session id it was given and nothing else.
+// AgentChat drags a whole session client behind it, so here the stub records
+// the session id it was given and nothing else. That is NOT proof the rail
+// works — this stub passed throughout the time the real rail showed nothing and
+// sent nothing. OnboardingPage.chat.test.tsx mounts the real chat for that.
 let chatSessionIds: (string | undefined)[] = []
 vi.mock('./AgentChat.js', () => ({
   default: (props: { sessionId?: string }) => {
@@ -52,7 +53,7 @@ const validCharterBody = {
 beforeEach(() => {
   chatSessionIds = []
   requests = []
-  charterResponse = { status: 404, body: 'no charter has been proposed yet' }
+  charterResponse = { status: 204, body: null }
   originalFetch = globalThis.fetch
   globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url)
@@ -62,6 +63,7 @@ beforeEach(() => {
       new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } })
 
     if (u.includes('/agent/charter/current')) {
+      if (charterResponse.status === 204) return new Response(null, { status: 204 })
       if (charterResponse.status !== 200) {
         return new Response(String(charterResponse.body), { status: charterResponse.status })
       }
@@ -108,6 +110,14 @@ describe('OnboardingPage', () => {
     render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
     await screen.findByTestId('onboarding-no-charter')
     expect(screen.queryByTestId('onboarding-charter-error')).toBeNull()
+    expect(screen.queryByTestId('charter-panel')).toBeNull()
+  })
+
+  it('reads an older server\'s 404 as "no charter yet" too', async () => {
+    charterResponse = { status: 404, body: 'no charter has been proposed yet' }
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    await screen.findByTestId('onboarding-no-charter')
+    expect(screen.queryByTestId('onboarding-charter-error')).toBeNull()
   })
 
   it('shows the charter when the poll finds one, with no reload', async () => {
@@ -121,27 +131,80 @@ describe('OnboardingPage', () => {
     expect(screen.getByText(/Send one newsletter a week/)).toBeTruthy()
   })
 
-  it('offers to run the architect only after approval, and does it with an event', async () => {
+  // Approval now starts the architect SERVER-side (go/httpapi/charter.go), so
+  // the screen's job after Approve is to watch the team form — and not to post
+  // a second architect.run of its own, which would queue a duplicate run.
+  it('shows the team forming after approval, and starts nothing itself', async () => {
     charterResponse = { status: 200, body: validCharterBody }
-    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} onOpenDesk={() => {}} />)
     await screen.findByTestId('charter-panel')
+    expect(screen.queryByTestId('team-forming')).toBeNull()
 
-    expect(screen.queryByTestId('run-architect')).toBeNull()
-
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
     await userEvent.click(screen.getByTestId('charter-approve'))
     await screen.findByTestId('onboarding-next')
+    await screen.findByTestId('team-forming')
+    // The panel mounts under a charter taller than the screen: it is brought
+    // into view, or the architect's live steps are off-screen for the wait.
+    expect(scrolled.mock.contexts).toContain(screen.getByTestId('onboarding-next'))
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+
+    expect(screen.queryByTestId('run-architect')).toBeNull()
+    expect(requests.some((r) => r.method === 'POST' && r.url.includes('/agent/events'))).toBe(false)
+    expect(requests.some((r) => r.url.includes('/agent/session'))).toBe(false)
+  })
+
+  // The fallback: the charter applied but the server could not write the
+  // event. Then — and only then — the manual control appears, and it still
+  // uses an EVENT, never a chat (a chat receives no briefing).
+  it('offers to run the architect when the apply says it was not started, and does it with an event', async () => {
+    charterResponse = { status: 200, body: validCharterBody }
+    const baseFetch = globalThis.fetch
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).includes('/agent/charter/apply')) {
+        requests.push({ url: String(url), method: 'POST', body: undefined })
+        return new Response(
+          JSON.stringify({ workers: [{ name: 'architect' }], architect_run_error: 'events are not configured on this host' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return baseFetch(url, init)
+    }) as typeof globalThis.fetch
+
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+    await screen.findByTestId('charter-panel')
+    await userEvent.click(screen.getByTestId('charter-approve'))
+    await screen.findByTestId('team-forming-not-started')
+    expect(screen.getByText('events are not configured on this host')).toBeTruthy()
 
     await userEvent.click(screen.getByTestId('run-architect'))
     await userEvent.click(screen.getByRole('button', { name: /run it/i }))
     await screen.findByTestId('run-architect-emitted')
 
-    // An EVENT on /agent/events — not a message to a chat session. A chat
-    // receives no briefing, so an architect talked to has never seen the
-    // label registry.
     const posted = requests.filter((r) => r.method === 'POST' && r.url.includes('/agent/events'))
     expect(posted).toHaveLength(1)
     expect((posted[0].body as { type: string }).type).toBe('architect.run')
     expect(requests.some((r) => r.url.includes('/agent/session'))).toBe(false)
+  })
+
+  // The same screen, reloaded after someone else approved — or after this
+  // person closed the tab between approving and reading. `applied` on
+  // GET /agent/charter/current is a server fact now (DI10); before it existed
+  // this hook only knew about an apply IT had performed, so a reload forgot the
+  // approval had happened and offered "Approve" on an already-approved charter.
+  // Nothing is clicked here: the state has to come off the wire.
+  it('treats the server saying applied as approved, with no apply of its own', async () => {
+    charterResponse = {
+      status: 200,
+      body: { ...validCharterBody, applied: true, applied_at: 1789000999000 },
+    }
+    render(<OnboardingPage sessionId="onboard-1" refreshMs={0} />)
+
+    await screen.findByTestId('onboarding-next')
+    expect(screen.getByTestId('team-forming')).toBeTruthy()
+    // And it did not apply anything to learn that.
+    expect(requests.some((r) => r.url.includes('/agent/charter/apply'))).toBe(false)
   })
 
   it('reports a failure to run the architect in the server words', async () => {
@@ -155,12 +218,12 @@ describe('OnboardingPage', () => {
         })
       }
       if (u.includes('/agent/charter/apply')) {
-        return new Response(JSON.stringify({ workers: [], event: {} }), {
+        return new Response(JSON.stringify({ workers: [], event: {}, architect_run_error: 'not started' }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (u.includes('/agent/events')) {
+      if (u.includes('/agent/events') && init?.method === 'POST') {
         return new Response('host port pool is exhausted', { status: 500 })
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })

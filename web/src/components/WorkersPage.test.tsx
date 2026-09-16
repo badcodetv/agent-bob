@@ -245,6 +245,22 @@ describe('topology onboarding entry (T3)', () => {
     expect(screen.getByText(/no workers yet/i)).toBeInTheDocument()
     expect(screen.queryByText(/could not be loaded/i)).toBeNull()
   })
+
+  // A2 / design §3 G1: topology seed buttons are hidden while a project is in
+  // its interview, in both places this page offers them.
+  it('withholds "Start from a topology" when hideTopologySeed is set (empty project)', async () => {
+    workers = []
+    renderPage({ hideTopologySeed: true })
+    expect(await screen.findByText(/this project has no workers yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start from a topology/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /create a worker/i })).toBeInTheDocument()
+  })
+
+  it('withholds "Start from a topology" when hideTopologySeed is set (populated project)', async () => {
+    renderPage({ hideTopologySeed: true })
+    expect(await screen.findByText(/select a worker/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start from a topology/i })).toBeNull()
+  })
 })
 
 // K2: every human edit carries a reason, so the save button stays disabled

@@ -43,12 +43,39 @@ type createSessionBody struct {
 	// so nothing downstream — the archivist above all — can ever be woken by a
 	// conversation.
 	Worker string `json:"worker"`
+	// Title is an OPTIONAL display title, for a caller that knows what the
+	// session is better than its first message does. The onboarding interview
+	// is the case in point: its first message is instructions for the
+	// interviewer, so without a title the session list read "Untitled", and a
+	// title bot would summarise the instructions. Titlebot only writes an empty
+	// title, so a title set here is kept.
+	Title string `json:"title"`
 }
+
+// maxSessionTitleLen is agent_sessions.title's varchar(255).
+const maxSessionTitleLen = 255
 
 type createSessionResp struct {
 	ID         string `json:"id"`
 	Status     string `json:"status"`
 	WorkflowID string `json:"workflowId"`
+}
+
+// sessionTitle trims a caller's title and cuts it to the column's width on a
+// rune boundary, so a long title is shortened rather than refused or mangled.
+func sessionTitle(raw string) string {
+	title := strings.TrimSpace(raw)
+	if len(title) <= maxSessionTitleLen {
+		return title
+	}
+	cut := 0
+	for i := range title {
+		if i > maxSessionTitleLen {
+			break
+		}
+		cut = i
+	}
+	return title[:cut]
 }
 
 // newID returns a random 32-hex-char id (no external dep).
@@ -194,6 +221,7 @@ func (h *Handlers) CreateSession(w http.ResponseWriter, r *http.Request) {
 		CustomImageID: body.CustomImageID,
 		Name:          name,
 		Worker:        worker,
+		Title:         sessionTitle(body.Title),
 	}
 	if name == "" {
 		// The unchanged path every existing caller takes: an upsert, which is

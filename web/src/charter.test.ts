@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  splitLabelRules,
   buildOnboardingSeed,
+  parseOnboardingSeed,
   coerceCharter,
   coerceCharterCurrent,
   coerceCharterEffects,
@@ -66,8 +68,31 @@ describe('coerceCharterCurrent', () => {
       memory_id: '',
       created_at: 0,
       valid: false,
+      applied: false,
+      applied_at: 0,
       errors: [],
       summary_of_effects: null,
+    })
+  })
+
+  // `applied` decides whether the console thinks a project is still being set
+  // up (DI10), so it is coerced as strictly as `valid` and errs the same way:
+  // anything that is not the boolean true reads as NOT applied. The worst case
+  // is then offering a finished project its onboarding screen again — visible
+  // and recoverable — rather than silently hiding an unfinished setup.
+  it('applied is true only for the boolean, and carries its timestamp', () => {
+    expect(coerceCharterCurrent({ applied: true, applied_at: 1789000999000 })).toMatchObject({
+      applied: true,
+      applied_at: 1789000999000,
+    })
+    for (const raw of ['true', 1, {}, [], null, undefined]) {
+      expect(coerceCharterCurrent({ applied: raw }).applied).toBe(false)
+    }
+    // A server that reports applied without a timestamp still reads as
+    // applied — the flag is the decision, the time is only for display.
+    expect(coerceCharterCurrent({ applied: true })).toMatchObject({
+      applied: true,
+      applied_at: 0,
     })
   })
 
@@ -140,6 +165,25 @@ describe('coerceCharterIssues', () => {
   })
 })
 
+describe('splitLabelRules', () => {
+  it.each([
+    ['one rule per line, bullets stripped', '- kind=decision — why\n- kind=lesson: next time', [
+      { label: 'kind=decision', meaning: 'why' },
+      { label: 'kind=lesson', meaning: 'next time' },
+    ]],
+    ['one paragraph, split only where a sentence ends before kind=', 'kind=summary - what happened; name=<slug> too. kind=draft - not sent yet, e.g. kind=draft notes.', [
+      { label: 'kind=summary', meaning: 'what happened; name=<slug> too.' },
+      { label: 'kind=draft', meaning: 'not sent yet, e.g. kind=draft notes.' },
+    ]],
+    ['prose with no rule shape stays whole', 'Keep decisions and lessons.', [
+      { label: '', meaning: 'Keep decisions and lessons.' },
+    ]],
+    ['blank is nothing', '   ', []],
+  ])('%s', (_name, text, want) => {
+    expect(splitLabelRules(text)).toEqual(want)
+  })
+})
+
 describe('describeCharterCadence', () => {
   it('reads the shapes onboarding produces', () => {
     expect(describeCharterCadence('0 9 * * *')).toBe('every day at 09:00')
@@ -177,5 +221,33 @@ describe('buildOnboardingSeed', () => {
   it('says so when there is no goal, rather than shipping a blank line', () => {
     const seed = buildOnboardingSeed('s1', '   ')
     expect(seed).toMatch(/did not write a goal/i)
+  })
+})
+
+describe('parseOnboardingSeed', () => {
+  it('round-trips what buildOnboardingSeed wrote', () => {
+    const goal = 'Send one email a week.\n\nTo the bookshop list.'
+    expect(parseOnboardingSeed(buildOnboardingSeed('7974ef7b49bb', goal))).toEqual({
+      sessionId: '7974ef7b49bb',
+      goal,
+    })
+  })
+
+  it('reads a seed with no goal as an empty goal, not as the placeholder text', () => {
+    expect(parseOnboardingSeed(buildOnboardingSeed('s1', ''))).toEqual({ sessionId: 's1', goal: '' })
+  })
+
+  it('tolerates CRLF line endings from a replayed transcript', () => {
+    const seed = buildOnboardingSeed('s1', 'a goal').replace(/\n/g, '\r\n')
+    expect(parseOnboardingSeed(seed)?.goal).toBe('a goal')
+  })
+
+  it.each([
+    ['an ordinary message', 'hello there'],
+    ['only the first line', "This interview's session id is s1."],
+    ['a preamble with one line changed', buildOnboardingSeed('s1', 'goal').replace('exactly that id', 'that id')],
+    ['text before the preamble', 'Note:\n' + buildOnboardingSeed('s1', 'goal')],
+  ])('leaves %s alone', (_, content) => {
+    expect(parseOnboardingSeed(content)).toBeNull()
   })
 })

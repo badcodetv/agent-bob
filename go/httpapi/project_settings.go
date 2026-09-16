@@ -21,30 +21,34 @@ type ProjectSettingsStore interface {
 // authenticated principal's customer claim — never a path, query, or body value
 // — which is what keeps one project's settings unreachable from another's token.
 // It also resolves the store, writing 501 when none is configured.
-func (h *Handlers) projectScope(w http.ResponseWriter, r *http.Request) (ProjectSettingsStore, string, bool) {
+//
+// It returns the whole Identity, not just the project string, because
+// PutProjectSettings also needs Identity.Operator (§1.2) to decide whether a
+// budget/cap change may proceed.
+func (h *Handlers) projectScope(w http.ResponseWriter, r *http.Request) (ProjectSettingsStore, Identity, bool) {
 	id, ok := h.identify(w, r)
 	if !ok {
-		return nil, "", false
+		return nil, Identity{}, false
 	}
 	if h.cfg.ProjectSettings == nil {
 		http.Error(w, "project settings not configured", http.StatusNotImplemented)
-		return nil, "", false
+		return nil, Identity{}, false
 	}
 	if id.Customer == "" {
 		http.Error(w, "project scope required", http.StatusBadRequest)
-		return nil, "", false
+		return nil, Identity{}, false
 	}
-	return h.cfg.ProjectSettings, id.Customer, true
+	return h.cfg.ProjectSettings, id, true
 }
 
 // GetProjectSettings returns the calling project's settings, or the spec
 // defaults when nothing has been written yet (the row is created lazily).
 func (h *Handlers) GetProjectSettings(w http.ResponseWriter, r *http.Request) {
-	store, project, ok := h.projectScope(w, r)
+	store, id, ok := h.projectScope(w, r)
 	if !ok {
 		return
 	}
-	ps, err := store.GetProjectSettings(r.Context(), project)
+	ps, err := store.GetProjectSettings(r.Context(), id.Customer)
 	if err != nil {
 		writeProjectSettingsError(w, err)
 		return
@@ -61,10 +65,22 @@ type projectSettingsBody struct {
 	Rationale string `json:"rationale"`
 }
 
+// operatorOnlyMessage is the exact 403 body a non-operator gets for touching a
+// budget/cap field (onboarding-work-plan §1.2). Pinned by test.
+const operatorOnlyMessage = "only the operator may change budgets and caps"
+
 // PutProjectSettings writes the whole settings object (§5: no patch semantics).
 // A `project` field in the body is ignored: the JWT decides the project.
+//
+// §1.2: a non-operator identity may PUT freely EXCEPT for the three
+// budget/cap fields — daily_tokens_soft, daily_tokens_hard,
+// max_concurrent_jobs. Because the route has no patch semantics, "may not
+// change" is checked against what is already stored (or, for a brand-new
+// project, the defaults GetProjectSettings would answer): a non-operator PUT
+// must echo those three fields back unchanged, the same way it must echo back
+// every other field it isn't editing.
 func (h *Handlers) PutProjectSettings(w http.ResponseWriter, r *http.Request) {
-	store, project, ok := h.projectScope(w, r)
+	store, id, ok := h.projectScope(w, r)
 	if !ok {
 		return
 	}
@@ -74,8 +90,22 @@ func (h *Handlers) PutProjectSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := wire.ProjectSettings
-	body.Project = project // identity wins for tenancy, as on every other write
-	body.UpdatedAt = 0     // stamped by the store, never by the caller
+	body.Project = id.Customer // identity wins for tenancy, as on every other write
+	body.UpdatedAt = 0         // stamped by the store, never by the caller
+
+	if !id.Operator {
+		current, err := store.GetProjectSettings(r.Context(), id.Customer)
+		if err != nil {
+			writeProjectSettingsError(w, err)
+			return
+		}
+		if body.DailyTokensSoft != current.DailyTokensSoft ||
+			body.DailyTokensHard != current.DailyTokensHard ||
+			body.MaxConcurrentJobs != current.MaxConcurrentJobs {
+			http.Error(w, operatorOnlyMessage, http.StatusForbidden)
+			return
+		}
+	}
 
 	ps, err := store.PutProjectSettings(r.Context(), &body, humanEditBecause(wire.Rationale))
 	if err != nil {

@@ -9,16 +9,54 @@ import type { AgentMessage } from '../types.js'
 test('AgentChat renders from provider context', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat onSendMessage={() => {}} />
+    </AgentChatProvider>
+  )
+  expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
+})
+
+// The provider's sendMessage returns silently with no current session, so an
+// enabled composer there typed into nothing (2026-09-13: the Chat view opened
+// from the Desk, and the onboarding rail before it resumed its session).
+test('AgentChat disables the composer and says why when the provider has no session', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
       <AgentChat />
     </AgentChatProvider>
   )
-  // Matches the real placeholder text in AgentChat.tsx line ~679
-  expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
+  const input = screen.getByTestId('chat-input')
+  expect(input).toBeDisabled()
+  expect(input).toHaveAttribute('placeholder', expect.stringMatching(/no session is open/i))
+  expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
 })
 
 // ---------------------------------------------------------------------------
 // messages render
 // ---------------------------------------------------------------------------
+
+// docs/19-embedding.md §3a: an application's instructions arrive as a user
+// message; marked, they are one collapsed line and the person's words stay theirs.
+test('AgentChat shows a marked context block as one collapsed line, then the words after it', () => {
+  const messages: AgentMessage[] = [
+    {
+      id: 'u1',
+      role: 'user',
+      content: '<agent-context summary="Opened from the hypothesis page">\nLabel every candidate memory name: x\n</agent-context>\nIs gold a hedge?',
+      timestamp: '2024-01-01T00:00:00Z',
+    },
+  ]
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={messages} />
+    </AgentChatProvider>
+  )
+  const line = screen.getByTestId('agent-context')
+  expect(line).toHaveTextContent('Context sent to the agent: Opened from the hypothesis page')
+  expect(screen.queryByText(/Label every candidate memory/)).toBeNull()
+  expect(screen.getByText('Is gold a hedge?')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+  expect(screen.getByTestId('agent-context-body')).toHaveTextContent('Label every candidate memory name: x')
+})
 
 test('AgentChat renders user and assistant messages', () => {
   const messages: AgentMessage[] = [
@@ -107,7 +145,7 @@ test('AgentChat shows error alongside messages', () => {
 test('AgentChat shows input placeholder when no messages', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
-      <AgentChat messages={[]} />
+      <AgentChat messages={[]} onSendMessage={() => {}} />
     </AgentChatProvider>
   )
   expect(screen.getByPlaceholderText(/type a message/i)).toBeInTheDocument()
@@ -133,6 +171,59 @@ test('AgentChat shows Send button in empty state', () => {
 })
 
 // ---------------------------------------------------------------------------
+// G3 — chat empty state (design 2026-09-11-onboarding-and-the-guide.md §3)
+// ---------------------------------------------------------------------------
+
+test('AgentChat empty state (base chat) names the base agent and shows three suggestions', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} />
+    </AgentChatProvider>
+  )
+  expect(screen.getByText('This is a chat with the base agent.')).toBeInTheDocument()
+  expect(screen.getByText(/gets none of the project.s briefing/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What is in this project’s memory?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Which workers exist and what wakes them?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Write a memory that records …' })).toBeInTheDocument()
+})
+
+test('AgentChat empty state (worker chat) names the worker and shows worker suggestions', () => {
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} workerName="email-answerer" />
+    </AgentChatProvider>
+  )
+  expect(screen.getByText('This is a chat with email-answerer.')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Show me your instructions.' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What did you do last time you ran?' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'What would you do if I sent you: …' })).toBeInTheDocument()
+})
+
+test('clicking an empty-state suggestion fills the composer without sending it', () => {
+  const onSendMessage = vi.fn()
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={[]} onSendMessage={onSendMessage} />
+    </AgentChatProvider>
+  )
+  fireEvent.click(screen.getByRole('button', { name: 'Which workers exist and what wakes them?' }))
+  expect(screen.getByPlaceholderText(/type a message/i)).toHaveValue('Which workers exist and what wakes them?')
+  expect(onSendMessage).not.toHaveBeenCalled()
+})
+
+test('the empty state disappears once a message has been sent', () => {
+  const messages: AgentMessage[] = [
+    { id: 'm1', role: 'user', content: 'hi', timestamp: '2024-01-01T00:00:00Z' },
+  ]
+  render(
+    <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+      <AgentChat messages={messages} />
+    </AgentChatProvider>
+  )
+  expect(screen.queryByTestId('chat-empty-state')).toBeNull()
+})
+
+// ---------------------------------------------------------------------------
 // stuck detection reaches a pixel (item B5)
 //
 // B1 left the stuck detector armed when a stream ends without query_complete
@@ -144,7 +235,7 @@ test('AgentChat shows Send button in empty state', () => {
 test('AgentChat warns when a turn ended unconfirmed (detector armed, not streaming)', () => {
   render(
     <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
-      <AgentChat isStreaming={false} stuckStatus="likely_stuck" />
+      <AgentChat isStreaming={false} stuckStatus="likely_stuck" onSendMessage={() => {}} />
     </AgentChatProvider>
   )
   expect(screen.getByTestId('unconfirmed-end-banner')).toBeInTheDocument()
@@ -228,4 +319,32 @@ test('AgentChat hides input when readOnly is true', () => {
   )
   expect(screen.queryByPlaceholderText(/type a message/i)).toBeNull()
   expect(screen.queryByRole('button', { name: /send/i })).toBeNull()
+})
+
+// ---------------------------------------------------------------------------
+// narrow host: the artifacts panel is an overlay, not a 320px column (2026-09-12)
+// ---------------------------------------------------------------------------
+
+test('AgentChat below 900px hides the artifacts column behind a button and opens it as an overlay', () => {
+  const original = window.matchMedia
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width:899.95px'),
+    media: query, onchange: null,
+    addListener: () => {}, removeListener: () => {},
+    addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia
+  try {
+    render(
+      <AgentChatProvider config={{ apiBaseUrl: '', models: [{ id: 'm', label: 'M' }] }}>
+        <AgentChat artifacts={[{ filePath: 'report.html', fileName: 'report.html', label: 'report', artifactType: 'report', source: 'registered', status: 'extracted', id: 'a1' }]} />
+      </AgentChatProvider>
+    )
+    expect(screen.queryByTestId('artifact-panel')).toBeNull()
+    fireEvent.click(screen.getByTestId('artifact-panel-open'))
+    expect(screen.getByTestId('artifact-panel')).toHaveAttribute('data-overlay', 'true')
+    fireEvent.click(screen.getByTestId('artifact-panel-close'))
+    expect(screen.queryByTestId('artifact-panel')).toBeNull()
+  } finally {
+    window.matchMedia = original
+  }
 })

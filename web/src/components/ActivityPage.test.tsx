@@ -363,3 +363,116 @@ describe('failures and empties', () => {
     expect(screen.queryByTestId('activity-rail')).toBeNull()
   })
 })
+
+// A1 (design/2026-09-11-onboarding-work-plan.md; PR0 in
+// design/2026-09-11-onboarding-and-the-guide.md §6): the shipped shell mounts
+// ActivityPage, not ChangelogView, so this is where "Revert to this version"
+// has to actually live. RevertControl's own behaviour (never says "undo", the
+// confirmation names what changes, the reason is required, error handling) is
+// already pinned in ChangelogRevert.test.tsx against the identical, re-exported
+// component — these tests are only about the WIRING: which rows get it, that
+// the block computed against the FULL log (not the visible lens/window) still
+// reaches the row, and that a successful revert is reflected on the rail.
+describe('revert control on the Activity rail (A1)', () => {
+  it('renders on the change row and nowhere else', async () => {
+    renderActivity()
+    const rail = await screen.findByTestId('activity-rail')
+    await within(rail).findByText('email-reviewer rewrote email-answerer')
+
+    expect(within(rail).getByTestId('revert-c1')).toBeEnabled()
+
+    // The one other row on this fixture's rail is the job e1/d1 produced —
+    // grep -n "Revert to this version" web/src/components/ActivityPage.tsx
+    // is the acceptance criterion; this is its unit-level twin, on a live row.
+    const jobRow = within(rail).getByTestId('activity-row-job')
+    expect(within(jobRow).queryByTestId(/^revert-/)).toBeNull()
+  })
+
+  it('blocks a superseded change to the same worker, with the readable reason, and leaves the newest enabled', async () => {
+    configEvents = [
+      {
+        id: 'c2',
+        project: 'acme',
+        actor_worker: 'email-reviewer',
+        actor_session: 'sess-8',
+        action: 'worker_prompt_write',
+        payload: { name: 'email-answerer', system_prompt: 'Answer.\nQuote the reference.\nBe warm.' },
+        rationale: 'a second pass',
+        created_at: NOW_MS - 500,
+      },
+      {
+        id: 'c1',
+        project: 'acme',
+        actor_worker: 'email-reviewer',
+        actor_session: 'sess-7',
+        action: 'worker_prompt_write',
+        payload: { name: 'email-answerer', system_prompt: 'Answer.\nQuote the reference.' },
+        rationale: 'answers kept omitting the ticket reference',
+        created_at: NOW_MS - 1000,
+      },
+    ]
+    renderActivity()
+    await screen.findByTestId('activity-rail')
+
+    expect(await screen.findByTestId('revert-c2')).toBeEnabled()
+    const blocked = await screen.findByTestId('revert-blocked-c1')
+    expect(within(blocked).getByText(/Something changed/)).toBeInTheDocument()
+  })
+
+  it('reverting writes a compensating entry and the rail shows it once reloaded', async () => {
+    let revertCalls = 0
+    globalThis.fetch = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url)
+      const json = (v: unknown) =>
+        new Response(JSON.stringify(v), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      if (u.includes('/revert')) {
+        revertCalls += 1
+        // The store's own write: a NEW, newest entry — nothing already in the
+        // log is edited or removed.
+        configEvents = [
+          {
+            id: 'c-new',
+            project: 'acme',
+            actor_worker: '',
+            actor_session: '',
+            action: 'worker_prompt_write',
+            payload: { name: 'email-answerer', system_prompt: 'Answer.' },
+            rationale: 'e2e: putting it back',
+            created_at: NOW_MS,
+          },
+          ...configEvents,
+        ]
+        return json({ id: 'c-new' })
+      }
+      if (u.includes('/agent/attention-requests')) {
+        if (attentionStatus !== 200) {
+          return new Response('attention requests are not configured on this host', {
+            status: attentionStatus,
+          })
+        }
+        return json({ attention_requests: attentionRequests })
+      }
+      if (u.includes('/agent/config-events')) return json({ config_events: configEvents })
+      if (u.includes('/agent/deliveries')) return json({ deliveries })
+      if (u.includes('/agent/subscriptions')) return json({ subscriptions })
+      if (u.includes('/agent/schedules')) return json({ schedules })
+      if (u.includes('/agent/events')) return json({ events })
+      return json({})
+    }) as typeof globalThis.fetch
+
+    renderActivity()
+    await userEvent.click(await screen.findByTestId('revert-c1'))
+    await screen.findByRole('dialog')
+    await userEvent.type(screen.getByLabelText('Why?'), 'the rewrite made replies worse')
+    await userEvent.click(screen.getByTestId('revert-confirm'))
+
+    expect(await screen.findByTestId('revert-done')).toBeInTheDocument()
+    expect(revertCalls).toBe(1)
+    // The claim is the SERVER's new record showing up after the reload the
+    // control triggers — not merely that the dialog closed.
+    expect(await screen.findByText('e2e: putting it back')).toBeInTheDocument()
+  })
+})

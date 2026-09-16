@@ -60,6 +60,21 @@ export interface CharterCurrent {
   memory_id: string
   created_at: number
   valid: boolean
+  /**
+   * The server's own answer to "has this interview's charter been approved?"
+   * — read from the append-only config log's `topology_apply` bracket, which
+   * names the interview session (`go/httpapi/charter.go`'s `charterApplied`).
+   *
+   * Before this field existed the console had to infer it, and the only
+   * observable it had was a NAME: does a worker called `architect` exist? A
+   * charter setting a custom `architect_name` defeated that guess and left the
+   * project reading as still-in-interview forever, with no way past "Finish
+   * setting up this project" (DI10, and DI29 was the same root cause wearing a
+   * different hat). Never infer this again — read it.
+   */
+  applied: boolean
+  /** When it was approved, unix ms. 0 while `applied` is false. */
+  applied_at: number
   errors: CharterIssue[]
   /** Present only when valid. */
   summary_of_effects: CharterEffects | null
@@ -132,6 +147,14 @@ export function coerceCharterCurrent(raw: unknown): CharterCurrent {
     // block Approve, never wave it through — this is the one field on the
     // screen that decides whether a human can change the project's shape.
     valid: r.valid === true,
+    // Strict `=== true`, same as `valid`, and for a mirror-image reason. The
+    // failure mode here is the opposite one: a garbled or absent field must
+    // read as NOT applied, so the worst case is a finished project being
+    // offered its onboarding screen again — recoverable, visible, and
+    // obviously wrong to the human looking at it. Coercing loosely could
+    // instead hide a genuinely unfinished setup, which is silent.
+    applied: r.applied === true,
+    applied_at: num(r.applied_at),
     errors: Array.isArray(r.errors) ? r.errors.map(coerceCharterIssue) : [],
     summary_of_effects: effects ? coerceCharterEffects(effects) : null,
   }
@@ -162,6 +185,46 @@ export function describeCharterCadence(cron: string): string {
   return cron.trim()
 }
 
+/** One labelling rule, split out of the charter's prose for a list. */
+export interface LabelRule {
+  /** `kind=decision`, or '' when the rule does not lead with one. */
+  label: string
+  /** What it is for and when it is written, in the interview's words. */
+  meaning: string
+}
+
+/**
+ * Split `label_rules` into one rule per label, for a bulleted list.
+ *
+ * Interviews write the rules two ways: one rule per line, or one paragraph
+ * where each rule starts `kind=<name> - …` straight after the previous
+ * sentence ends. Both split here, and nothing is dropped — every character of
+ * the prose lands in exactly one rule, because these rules are the thing a
+ * person is approving. `name=<slug>` inside a rule's meaning is NOT a split
+ * point: it is how that rule's notes are named. Returns one rule holding the
+ * whole text when it has no recognisable shape, and the panel then shows it as
+ * prose.
+ */
+export function splitLabelRules(text: string): LabelRule[] {
+  const trimmed = text.trim()
+  if (trimmed === '') return []
+  const lines = trimmed
+    .split(/\n+/)
+    .map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, '').trim())
+    .filter((l) => l !== '')
+  const chunks =
+    lines.length > 1
+      ? lines
+      : trimmed
+          .split(/(?<=[.;!?])\s+(?=kind=[\w.-]+\s*[-–—:]\s)/)
+          .map((c) => c.trim())
+          .filter((c) => c !== '')
+  return chunks.map((chunk) => {
+    const m = /^(kind=[\w.-]+)\s*(?:[-–—:]\s*)?([\s\S]*)$/.exec(chunk)
+    return m ? { label: m[1]!, meaning: m[2]!.trim() } : { label: '', meaning: chunk }
+  })
+}
+
 /**
  * The first message an onboarding interview is handed.
  *
@@ -181,6 +244,14 @@ export function describeCharterCadence(cron: string): string {
  */
 export function buildOnboardingSeed(sessionId: string, goal: string): string {
   const trimmed = goal.trim()
+  return [...seedPreamble(sessionId), trimmed === '' ? SEED_NO_GOAL : trimmed].join('\n')
+}
+
+const SEED_NO_GOAL = '(they did not write a goal — start by asking what this project is for)'
+
+/** Every line of the seed above the goal. Shared by the builder and the parser,
+ *  so the one cannot drift from the other. */
+function seedPreamble(sessionId: string): string[] {
   return [
     `This interview's session id is ${sessionId}.`,
     'Deposit the charter with the label name set to exactly that id.',
@@ -190,6 +261,32 @@ export function buildOnboardingSeed(sessionId: string, goal: string): string {
     '',
     '---',
     '',
-    trimmed === '' ? '(they did not write a goal — start by asking what this project is for)' : trimmed,
-  ].join('\n')
+  ]
+}
+
+/** What the transcript shows in place of the seed. `goal` is '' when the
+ *  person created the project without one. */
+export interface OnboardingSeed {
+  sessionId: string
+  goal: string
+}
+
+/**
+ * Recognises a message built by buildOnboardingSeed, so the chat can show the
+ * person "you set the goal: …" instead of the interviewer's instructions and a
+ * session id they never need to see.
+ *
+ * Display only: the stored message is untouched, so the interviewer's view of
+ * it — and a replay of that view — is exactly what it always was. The match is
+ * the WHOLE preamble, line for line, rather than a loose prefix: a human who
+ * pastes something resembling it into a chat still sees their own words.
+ */
+export function parseOnboardingSeed(content: string): OnboardingSeed | null {
+  const text = content.replace(/\r\n/g, '\n')
+  const id = /^This interview's session id is (\S+)\.\n/.exec(text)?.[1]
+  if (id === undefined) return null
+  const preamble = seedPreamble(id).join('\n')
+  if (!text.startsWith(preamble)) return null
+  const goal = text.slice(preamble.length).trim()
+  return { sessionId: id, goal: goal === SEED_NO_GOAL ? '' : goal }
 }

@@ -61,6 +61,20 @@ export type { SessionRoute } from './permalink.js'
 export { default as useSessionPermalink, projectIdFromLocation } from './useSessionPermalink.js'
 export type { UseSessionPermalinkOptions, SessionPermalinkApi } from './useSessionPermalink.js'
 
+// The guide (design 2026-09-11-onboarding-and-the-guide.md §3 G7, work plan
+// §1.5/§1.6): the closed surface-id set, the front-matter parser shared with
+// the build-time generator in examples/web, and the `#/guide/<slug>` hash
+// route's pure parse/build pair.
+export { GUIDE_SURFACES, isSurfaceId } from './guide/surfaces.js'
+export type { SurfaceId } from './guide/surfaces.js'
+export { parseGuidePage, GUIDE_PART_LABELS } from './guide/frontMatter.js'
+export type { GuideFrontMatter, ParsedGuidePage } from './guide/frontMatter.js'
+export { GUIDE_HASH_PREFIX, buildGuideHash, parseGuideHash } from './guide/guideRoute.js'
+export { GuideProvider, useGuideParagraph } from './guide/GuideProvider.js'
+export type { GuideProviderProps, GuideParagraph, GuideParagraphMap } from './guide/GuideProvider.js'
+export { default as AboutThisScreen } from './components/AboutThisScreen.js'
+export type { AboutThisScreenProps } from './components/AboutThisScreen.js'
+
 // Project settings (B3) — the /agent/project-settings surface: pure helpers,
 // the load/edit/save hook, and the page.
 export {
@@ -167,11 +181,47 @@ export {
   coerceCharterEffects,
   coerceCharterCurrent,
   describeCharterCadence,
+  splitLabelRules,
   buildOnboardingSeed,
+  parseOnboardingSeed,
 } from './charter.js'
-export type { Charter, CharterIssue, CharterEffects, CharterCurrent } from './charter.js'
+export type { Charter, CharterIssue, CharterEffects, CharterCurrent, LabelRule, OnboardingSeed } from './charter.js'
+// The context marker any embedding application can put on a first message so
+// the chat shows it as one collapsed line, not as the person's words.
+export { parseAgentContext, formatAgentContext } from './agentContext.js'
+export type { AgentContextMessage } from './agentContext.js'
 export { default as useCharter } from './useCharter.js'
 export type { UseCharterOptions, CharterApi } from './useCharter.js'
+export {
+  INTERVIEWER_WORKER_NAME,
+  firstLine,
+  memberStatusOf,
+  describeMemberStatus,
+  newestDeliveryByWorker,
+  summariseTeamForming,
+  recentActivity,
+  scheduleRunEndpoint,
+  coerceScheduleRunResult,
+  scheduleTarget,
+  planCycle,
+  describeRunOutcome,
+  splitCycleByRecentRuns,
+  CYCLE_RECENT_RUN_SECONDS,
+  summariseFormingSteps,
+  describeFormingTool,
+} from './teamForming.js'
+export type {
+  TeamFormingPhase,
+  MemberStatus,
+  TeamMember,
+  TeamFormingState,
+  ScheduleRunResult,
+  CycleLine,
+  CycleSkip,
+  FormingStep,
+} from './teamForming.js'
+export { default as useTeamForming } from './useTeamForming.js'
+export type { UseTeamFormingOptions, TeamFormingApi } from './useTeamForming.js'
 
 // The git projection (G16) — the pure client for GET /agent/git-projection,
 // and the prose that turns one health word into a sentence an operator can act
@@ -489,14 +539,18 @@ export {
   DESK_ASKS_CAVEAT,
   DESK_NO_DELIVERY_REASON,
   DESK_FREEZE_REFUSAL_NOTE,
+  DESK_FIRST_KINDS,
   SCHEDULE_MAX_PROVISION_FAILURES,
   buildDesk,
   countAsks,
   openRequestsBySession,
   coerceAttentionRequest,
   isAttentionRequestOpen,
+  isAttentionNotice,
   deskChangeVerb,
   deskChangeSubject,
+  deskFirstKindForChange,
+  looksLikeRevertRationale,
   frozenTargetFromText,
   DESK_EARLIER_CHANGES_LIMIT,
 } from './desk.js'
@@ -505,11 +559,28 @@ export type {
   BuildDeskInput,
   Desk,
   DeskAsk,
+  DeskNotice,
+  AttentionKind,
   DeskChange,
+  DeskFirstKind,
+  DeskFirstRecord,
   DeskGlyph,
   DeskTrouble,
   DeskTroubleKind,
 } from './desk.js'
+
+// "Firsts" — the Desk narrating the first of a kind (design §3 G4). Pure
+// reducer plus the localStorage-backed hook, same split as `navReveal.ts` /
+// `useNavReveal.ts`.
+export { FIRST_KINDS, FIRST_NARRATIONS, firstsToNarrate } from './firsts.js'
+export type { FirstNarration, FirstToNarrate } from './firsts.js'
+export {
+  default as useFirsts,
+  firstsSeenKey,
+  readFirstsSeen,
+  writeFirstsSeen,
+} from './useFirsts.js'
+export type { UseFirstsOptions, UseFirstsApi } from './useFirsts.js'
 
 // The Activity fold (A1) — the whole project on one rail, in time order
 // (design 28 §1). The unit is the occurrence, not the record, and `toMs` is the
@@ -569,6 +640,7 @@ export {
   NAV_LABELS,
   everythingRevealed,
   navRevealSentence,
+  navRevealSummary,
   revealedNav,
 } from './navReveal.js'
 export type { NavCounts, NavEntry, NavRevealResult } from './navReveal.js'
@@ -820,6 +892,8 @@ export { default as WorkerEditor } from './components/WorkerEditor.js'
 export type { WorkerEditorProps } from './components/WorkerEditor.js'
 export { default as WorkerJobHistory } from './components/WorkerJobHistory.js'
 export type { WorkerJobHistoryProps } from './components/WorkerJobHistory.js'
+export { default as CreateProjectForm } from './components/CreateProjectForm.js'
+export type { CreateProjectFormProps } from './components/CreateProjectForm.js'
 export { default as WorkerChatPanel } from './components/WorkerChatPanel.js'
 export type { WorkerChatPanelProps } from './components/WorkerChatPanel.js'
 export { default as TopologyOnboarding } from './components/TopologyOnboarding.js'
@@ -899,6 +973,29 @@ export { default as RunArchitectControl, ARCHITECT_RUN_EVENT } from './component
 export type { RunArchitectControlProps } from './components/RunArchitectControl.js'
 export { default as OnboardingPage } from './components/OnboardingPage.js'
 export type { OnboardingPageProps } from './components/OnboardingPage.js'
+// After Approve: the team forming, and "Run a cycle now" (hurry the clock).
+export { default as TeamFormingPanel } from './components/TeamFormingPanel.js'
+export type { TeamFormingPanelProps } from './components/TeamFormingPanel.js'
+export { default as RunCycleControl } from './components/RunCycleControl.js'
+export type { RunCycleControlProps } from './components/RunCycleControl.js'
+
+// The budget panel (A5) — today's spend against the operator's budget, and
+// the operator-gated form that changes it.
+export { default as BudgetPanel } from './components/BudgetPanel.js'
+export type { BudgetPanelProps } from './components/BudgetPanel.js'
+export {
+  default as useUsage,
+  USAGE_ENDPOINT,
+  coerceUsage,
+  defaultUsage,
+  formatCost,
+  credentialModeSentence,
+  budgetTier,
+  budgetFraction,
+} from './usage.js'
+export type { Usage, UsageWindow, UsageBudget, UseUsageOptions, UsageApi, BudgetTier } from './usage.js'
+export { default as useWhoami, WHOAMI_ENDPOINT, coerceWhoami, defaultWhoami } from './whoami.js'
+export type { Whoami, UseWhoamiOptions, WhoamiApi } from './whoami.js'
 
 // The git projection panel — presentational, so it lives in the components
 // tier: it takes a status and renders it, and ProjectSettingsPage owns the read.

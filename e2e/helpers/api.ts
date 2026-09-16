@@ -78,6 +78,8 @@ export interface WorkerBody {
   enabled?: boolean
   /** nil → false. Freeze/unfreeze ride the ordinary worker PUT (the human path). */
   frozen?: boolean
+  /** Optional. Threaded into the config event's `rationale` (httpapi/workers.go). */
+  rationale?: string
 }
 
 export interface EventEnvelope {

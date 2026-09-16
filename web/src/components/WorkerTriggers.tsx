@@ -22,6 +22,7 @@ import { describeCron, type ScheduleDraft } from '../schedules.js'
 import SubscriptionEditor from './SubscriptionEditor.js'
 import ScheduleEditor from './ScheduleEditor.js'
 import RunArchitectControl, { ARCHITECT_RUN_EVENT } from './RunArchitectControl.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 /** Sentinel for "the create form is open" — not a legal id. */
 const NEW_ROW = '#new'
@@ -33,12 +34,15 @@ export interface WorkerTriggersProps extends ConfigApiOptions {
   workerOptions?: string[]
   /** Preselect a row — the chart's clock deep link lands here. */
   selectedId?: string | null
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 export default function WorkerTriggers({
   workerName,
   workerOptions,
   selectedId = null,
+  projectId = '',
   ...apiOptions
 }: WorkerTriggersProps) {
   const subs = useSubscriptions(apiOptions)
@@ -110,6 +114,7 @@ export default function WorkerTriggers({
         sx={{ width: 280, flexShrink: 0, borderRight: 1, borderColor: 'divider', overflowY: 'auto' }}
       >
         <Box sx={{ p: 2 }}>
+          <AboutThisScreen surface="worker-triggers" projectId={projectId} sx={{ mb: 1.5 }} />
           <Typography variant="overline" color="text.secondary">
             On an event
           </Typography>

@@ -60,3 +60,26 @@ describe('InlineArtifactPreview', () => {
     expect(screen.queryByText(/Failed to load/)).toBeNull()
   })
 })
+
+describe('InlineArtifactPreview credentials (the embed 401, 2026-09-12)', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('sends the header getAuthHeader resolves, so an embed-token host is not refused', async () => {
+    const seen: Array<Record<string, string> | undefined> = []
+    globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      seen.push(init?.headers as Record<string, string> | undefined)
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('report body') } as Response)
+    }) as unknown as typeof fetch
+
+    render(
+      <InlineArtifactPreview
+        artifact={codeArtifact({ id: 'art-9', status: 'extracted', artifactType: 'report', fileName: 'r.html', filePath: 'r.html' })}
+        sessionId="s1"
+        onOpenPreview={() => {}}
+        getAuthHeader={async () => 'Bearer embed-token'}
+      />
+    )
+    await waitFor(() => expect(seen.length).toBeGreaterThan(0))
+    expect(seen[0]?.Authorization).toBe('Bearer embed-token')
+  })
+})

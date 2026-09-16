@@ -652,10 +652,11 @@ worker identity gets an explanatory refusal rather than an empty list.
 GET  /agent/charter/current?session=<id>
      200 {charter, summary, memory_id, created_at, valid,
           errors:[{path,message}], summary_of_effects:{...}}
-     404 {"error":"no charter has been proposed yet — the interview has to
-                   deposit an org-charter memory first"}
+     204 (no body) — no charter deposited yet. Was a 404 until 2026-09-13; the
+         onboarding screen polls this, and every 404 was logged by the browser.
 
 POST /agent/charter/apply   {session, memory_id, rationale?}
+     404 "no charter has been proposed yet — …" (unchanged)
      200 <agentdb.TopologyApplyResult>
      409 the store's verbatim refusal string
      422 {errors:[{path,message}]}

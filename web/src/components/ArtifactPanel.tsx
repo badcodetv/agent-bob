@@ -15,6 +15,7 @@ import PinIcon from '@mui/icons-material/PushPin'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import UncheckedIcon from '@mui/icons-material/RadioButtonUnchecked'
 import DotIcon from '@mui/icons-material/FiberManualRecord'
+import CloseIcon from '@mui/icons-material/Close'
 import type { ArtifactInfo, TodoItem } from '../types.js'
 
 interface ArtifactPanelProps {
@@ -32,6 +33,14 @@ interface ArtifactPanelProps {
   apiBaseUrl?: string
   /** Auth header for downloads. */
   authHeader?: string
+  /**
+   * Overlay mode, for a narrow host (the embed iframe in a side rail): the panel
+   * floats over the chat instead of taking a fixed 320px column beside it, and
+   * shows a close control. Default false = the column, unchanged.
+   */
+  overlay?: boolean
+  /** Close control in overlay mode. */
+  onClose?: () => void
 }
 
 const STATUS_DOT_COLORS: Record<string, string> = {
@@ -106,6 +115,8 @@ export default function ArtifactPanel({
   onPinToDashboard,
   onViewAll,
   onArtifactClick,
+  overlay = false,
+  onClose,
 }: ArtifactPanelProps) {
   const handleArtifactClick = useCallback((artifact: ArtifactInfo) => {
     if (onArtifactClick) onArtifactClick(artifact)
@@ -121,8 +132,20 @@ export default function ArtifactPanel({
 
   return (
     <Box
-      sx={{
+      data-testid="artifact-panel"
+      data-overlay={overlay ? 'true' : 'false'}
+      sx={overlay ? {
+        position: 'absolute', top: 0, right: 0, bottom: 0, zIndex: 2,
+        width: 'min(320px, 85%)',
+        borderLeft: '1px solid', borderColor: 'divider',
+        backgroundColor: 'background.paper',
+        boxShadow: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      } : {
         width: 320,
+        flexShrink: 0,
         borderLeft: '1px solid', borderColor: 'divider',
         backgroundColor: 'action.hover',
         display: 'flex',
@@ -130,6 +153,13 @@ export default function ArtifactPanel({
         overflow: 'hidden',
       }}
     >
+      {overlay && onClose && (
+        <Box sx={{ display: 'flex', justifyContent: 'flex-end', p: 0.5, borderBottom: '1px solid', borderColor: 'divider' }}>
+          <IconButton size="small" aria-label="Close artifacts" data-testid="artifact-panel-close" onClick={onClose}>
+            <CloseIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Box>
+      )}
       {hasTodos && (
         <Box sx={{ p: '8px 12px', borderBottom: '1px solid', borderColor: 'divider' }}>
           <Typography sx={{ fontWeight: 600, fontSize: 14, mb: 0.75 }}>

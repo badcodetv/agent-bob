@@ -7,14 +7,20 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
 
 	"github.com/badcodetv/agent-bob/connections"
 	"github.com/badcodetv/agent-bob/extension"
@@ -320,6 +326,199 @@ func (pm projectMap) resolve(email string) (projects []string, wildcard, ok bool
 	return projects, false, true
 }
 
+// userDirectory is what the login handlers need from the user→projects half of
+// the map: resolve one email, or list every project a wildcard grants. A plain
+// projectMap value satisfies it directly (used by tests and by any caller that
+// really does hold a frozen snapshot); *projectSettingsHolder satisfies it by
+// reading through to whatever the map currently holds, which is what lets a
+// reload reach a running login handler without re-registering it (A6).
+type userDirectory interface {
+	resolve(email string) (projects []string, wildcard, ok bool)
+	allProjects() []string
+}
+
+// storedProjectsDirectory widens a WILDCARD grant with the projects that exist
+// in the database. The project map only names projects someone wrote into it;
+// a wildcard login creates projects by minting a token for a new id, and those
+// never reach the map — so after signing in again, the picker listed none of
+// them. A wildcard holder can already mint a token for any project id, so
+// listing the names grants nothing new. A non-wildcard account is untouched.
+//
+// Best-effort: a failed or slow read returns the map's projects alone, because
+// a login that fails over a convenience list is worse than a shorter list.
+type storedProjectsDirectory struct {
+	userDirectory
+	list func(ctx context.Context, limit int) ([]string, error)
+}
+
+// storedProjectsLimit caps how many database projects a login lists (and so
+// mints tokens for). Most recently active first.
+const storedProjectsLimit = 50
+
+func (d storedProjectsDirectory) stored() []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	names, err := d.list(ctx, storedProjectsLimit)
+	if err != nil {
+		log.Printf("[agentd] login: could not list stored projects, using the project map alone: %v", err)
+		return nil
+	}
+	out := names[:0:0]
+	for _, n := range names {
+		if validProjectID.MatchString(n) && len(n) <= 64 {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func mergeProjectNames(first, second []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{first, second} {
+		for _, p := range list {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func (d storedProjectsDirectory) resolve(email string) ([]string, bool, bool) {
+	projects, wildcard, ok := d.userDirectory.resolve(email)
+	if ok && wildcard {
+		projects = mergeProjectNames(projects, d.stored())
+	}
+	return projects, wildcard, ok
+}
+
+func (d storedProjectsDirectory) allProjects() []string {
+	return mergeProjectNames(d.userDirectory.allProjects(), d.stored())
+}
+
+// projectSettingsHolder is the live, reloadable project map. Every reader that
+// must see a reload without a process restart — the login handlers'
+// resolve/allProjects, the API-key index construction, and the git-token-env
+// fallback — reads through Get() (or, for the user half, through the holder
+// itself as a userDirectory) rather than closing over a *projectSettings
+// captured once at boot (A6).
+//
+// Only a file has anything to re-read: an inline AGENTKIT_PROJECT_MAP has no
+// backing file to watch, so path is left empty for it and reload/watch become
+// no-ops — inline behaviour is unchanged.
+type projectSettingsHolder struct {
+	ptr  atomic.Pointer[projectSettings]
+	path string
+}
+
+// newProjectSettingsHolder loads the map exactly as loadProjectSettingsOptional
+// does (nil, nil when neither env var is set) and records the file path to
+// watch, if any. Inline JSON wins over a file per loadProjectSettings'
+// existing precedence, so path is set only when AGENTKIT_PROJECT_MAP is empty.
+func newProjectSettingsHolder(getenv func(string) string) (*projectSettingsHolder, error) {
+	s, err := loadProjectSettingsOptional(getenv)
+	if err != nil {
+		return nil, err
+	}
+	h := &projectSettingsHolder{}
+	if s != nil {
+		h.ptr.Store(s)
+	}
+	if getenv("AGENTKIT_PROJECT_MAP") == "" {
+		h.path = strings.TrimSpace(getenv("AGENTKIT_PROJECT_MAP_FILE"))
+	}
+	return h, nil
+}
+
+// Get returns the current settings, or nil when no map is configured at all.
+func (h *projectSettingsHolder) Get() *projectSettings {
+	if h == nil {
+		return nil
+	}
+	return h.ptr.Load()
+}
+
+// users is the current user→projects half, used by the userDirectory methods
+// below. A nil map is a legal, safe receiver for both projectMap methods.
+func (h *projectSettingsHolder) users() projectMap {
+	if s := h.Get(); s != nil {
+		return s.users
+	}
+	return nil
+}
+
+func (h *projectSettingsHolder) resolve(email string) (projects []string, wildcard, ok bool) {
+	return h.users().resolve(email)
+}
+
+func (h *projectSettingsHolder) allProjects() []string {
+	return h.users().allProjects()
+}
+
+// reload re-reads and re-parses the file, replacing the held settings on
+// success and reporting whether it did. A read failure or a parse failure
+// leaves the previous map in place and only logs it — a reload must never take
+// a working deployment offline, unlike the fatal boot-time error the same
+// parse failure would produce in loadProjectSettings. ok=false whenever there
+// was nothing to reload (no file configured) or the reload failed.
+func (h *projectSettingsHolder) reload(logf func(string, ...any)) (ok bool) {
+	if h == nil || h.path == "" {
+		return false
+	}
+	raw, err := os.ReadFile(h.path)
+	if err != nil {
+		logf("[agentd] project map reload: %s: %v — keeping the previous map", h.path, err)
+		return false
+	}
+	parsed, err := parseProjectSettings(raw)
+	if err != nil {
+		logf("[agentd] project map reload: %s: %v — keeping the previous map", h.path, err)
+		return false
+	}
+	h.ptr.Store(parsed)
+	logf("[agentd] project map reloaded from %s: %d mapped account(s), %d configured project(s)",
+		h.path, len(parsed.users), len(parsed.projects))
+	return true
+}
+
+// watch reloads the map on SIGHUP and every interval (interval<=0 disables the
+// timer; SIGHUP still reloads). onReload, if non-nil, runs after every
+// reload that actually replaced the map — main.go uses it to recompute the
+// API-key index from the same file, since api_key_env lives in the same
+// "projects" section (A6). Returns immediately, doing nothing, when there is
+// no file to watch (no map, or an inline map). Runs until ctx is done.
+func (h *projectSettingsHolder) watch(ctx context.Context, interval time.Duration, onReload func(), logf func(string, ...any)) {
+	if h == nil || h.path == "" {
+		return
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGHUP)
+	defer signal.Stop(sig)
+	var tick <-chan time.Time
+	if interval > 0 {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		tick = ticker.C
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sig:
+			logf("[agentd] project map: SIGHUP received, reloading %s", h.path)
+			if h.reload(logf) && onReload != nil {
+				onReload()
+			}
+		case <-tick:
+			if h.reload(logf) && onReload != nil {
+				onReload()
+			}
+		}
+	}
+}
+
 // googleVerifier validates Google ID tokens via the tokeninfo endpoint —
 // zero-dependency server-side verification (Google's TLS cert authenticates
 // the response; no local JWKS handling needed at login-only volumes).
@@ -386,15 +585,19 @@ type loginResponse struct {
 	LoginToken string         `json:"login_token,omitempty"`
 }
 
-// mintProjectTokens issues one project-scoped JWT per project ID.
-func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string) ([]projectToken, error) {
+// mintProjectTokens issues one project-scoped JWT per project ID. operator
+// stamps the onboarding-plan §1.1 `operator:true` claim on every token minted:
+// true only for a wildcard login's tokens (writeLoginResponse) and the
+// wildcard project-token exchange (authProjectTokenHandler) — never for a
+// non-wildcard Google account.
+func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string, operator bool) ([]projectToken, error) {
 	out := make([]projectToken, 0, len(projects))
 	for _, p := range projects {
-		tok, err := issuer.Issue(r.Context(), extension.ContextScope{
+		tok, err := issuer.IssueOperator(r.Context(), extension.ContextScope{
 			UserEmail: email,
 			Customer:  p,
 			Job:       "web",
-		}, "")
+		}, "", operator)
 		if err != nil {
 			return nil, err
 		}
@@ -404,7 +607,10 @@ func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, 
 }
 
 func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaims.Issuer, email string, projects []string, wildcard bool) {
-	tokens, err := mintProjectTokens(r, issuer, email, projects)
+	// The operator claim tracks wildcard-ness exactly (§1.1): a wildcard grant
+	// (including the test login, which is always a wildcard) is the operator;
+	// a plain per-project Google account is not.
+	tokens, err := mintProjectTokens(r, issuer, email, projects, wildcard)
 	if err != nil {
 		http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -431,7 +637,7 @@ func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaim
 
 // authGoogleHandler serves POST /auth/google {credential} → 401 bad credential,
 // 403 email not in the project map, else {email, projects:[{id, token}]}.
-func authGoogleHandler(v *googleVerifier, pm projectMap, issuer *devclaims.Issuer) http.HandlerFunc {
+func authGoogleHandler(v *googleVerifier, pm userDirectory, issuer *devclaims.Issuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Credential string `json:"credential"`
@@ -537,7 +743,7 @@ func registerVerifyGoogle(mux *http.ServeMux, googleClientID string) {
 // fixed AGENTKIT_TEST_LOGIN pair ("email:password"). TEST/DEV ONLY — it exists
 // so browser e2e can exercise the full login → project → session flow without
 // Google. The account is granted every project in the map.
-func authPasswordHandler(testEmail, testPassword string, pm projectMap, issuer *devclaims.Issuer) http.HandlerFunc {
+func authPasswordHandler(testEmail, testPassword string, pm userDirectory, issuer *devclaims.Issuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Email    string `json:"email"`
@@ -591,7 +797,9 @@ func authProjectTokenHandler(secret []byte, issuer *devclaims.Issuer) http.Handl
 			http.Error(w, "not a wildcard login token", http.StatusForbidden)
 			return
 		}
-		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project})
+		// Reaching here already proved customer == projectWildcard (checked
+		// above), so this mint is always on behalf of an operator (§1.1).
+		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project}, true)
 		if err != nil {
 			http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 			return

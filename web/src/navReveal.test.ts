@@ -7,6 +7,7 @@ import {
   NAV_ENTRIES,
   NAV_LABELS,
   navRevealSentence,
+  navRevealSummary,
   revealedNav,
   type NavCounts,
   type NavEntry,
@@ -124,6 +125,30 @@ describe('appeared — what the confirmation gets to name', () => {
       expect(sentence.endsWith('.')).toBe(true)
     }
     expect(navRevealSentence('chart')).toContain('which worker wakes which')
+  })
+
+  // The entries sit in the menu at the top of the sidebar, and the notice sits
+  // below that menu. "Now in the sidebar" sent people looking for a new row
+  // in the session list.
+  it('points at the menu, not at "the sidebar"', () => {
+    for (const entry of NAV_ENTRIES) {
+      expect(navRevealSentence(entry)).toContain('in the menu above')
+      expect(navRevealSentence(entry)).not.toMatch(/sidebar/)
+    }
+  })
+})
+
+describe('navRevealSummary', () => {
+  it.each([
+    [[], ''],
+    [['memory'], 'Memory is now in the menu above — it holds what your workers have written down.'],
+    [
+      ['memory', 'activity', 'chart'],
+      'New in the menu above: Memory (what your workers have written down), Activity (everything this project does) and Chart (which worker wakes which).',
+    ],
+    [['workers', 'chart'], 'New in the menu above: Workers and Chart (which worker wakes which).'],
+  ] as [NavEntry[], string][])('%j', (entries, want) => {
+    expect(navRevealSummary(entries)).toBe(want)
   })
 })
 

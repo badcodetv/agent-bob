@@ -199,6 +199,9 @@ type attentionRequestInput struct {
 	// ExpiresIn is the optional deadline, in seconds. 0 = no deadline: the
 	// request simply waits (§9).
 	ExpiresIn int64
+	// Notice marks act-then-notify: nothing is being asked, so the job does not
+	// park and there is no deadline (agentdb.AttentionKindNotice).
+	Notice bool
 }
 
 // attentionResult is what the tool echoes back. `session_url` is the exact key
@@ -215,6 +218,8 @@ type attentionResult struct {
 	DeliveryError string `json:"delivery_error,omitempty"`
 	ExpiresAt     int64  `json:"expires_at,omitempty"`
 	RequestID     string `json:"request_id"`
+	// Kind echoes whether this was recorded as an ask or a notice.
+	Kind string `json:"kind"`
 }
 
 // attentionService implements the §9 mechanics once, for every surface.
@@ -317,8 +322,12 @@ func (a *attentionService) Request(ctx context.Context, in attentionRequestInput
 		delivered = true
 	}
 
+	kind := agentdb.AttentionKindAsk
+	if in.Notice {
+		kind = agentdb.AttentionKindNotice
+	}
 	var expiresAt int64
-	if in.ExpiresIn > 0 {
+	if in.ExpiresIn > 0 && !in.Notice {
 		expiresAt = a.now().Unix() + in.ExpiresIn
 	}
 	// Recorded last so `delivered` is the truth, and in one transaction with the
@@ -328,6 +337,7 @@ func (a *attentionService) Request(ctx context.Context, in attentionRequestInput
 		SessionID:  in.SessionID,
 		Worker:     sess.Worker,
 		Message:    message,
+		Kind:       kind,
 		SessionURL: sessionURL,
 		Channel:    channel,
 		Delivered:  delivered,
@@ -345,6 +355,7 @@ func (a *attentionService) Request(ctx context.Context, in attentionRequestInput
 		DeliveryError: deliveryErr,
 		ExpiresAt:     expiresAt,
 		RequestID:     req.ID,
+		Kind:          req.Kind,
 	}, nil
 }
 
@@ -384,6 +395,7 @@ type attentionBody struct {
 	SessionID string `json:"session_id"`
 	Message   string `json:"message"`
 	ExpiresIn int64  `json:"expires_in"`
+	Notice    bool   `json:"notice"`
 }
 
 // attentionHandler serves POST /agent/attention. The project comes from the
@@ -413,6 +425,7 @@ func attentionHandler(svc *attentionService) http.HandlerFunc {
 			SessionID: strings.TrimSpace(body.SessionID),
 			Message:   body.Message,
 			ExpiresIn: body.ExpiresIn,
+			Notice:    body.Notice,
 		})
 		if err != nil {
 			status := http.StatusBadRequest

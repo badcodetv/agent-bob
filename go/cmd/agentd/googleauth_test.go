@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -283,6 +286,144 @@ func TestLoadProjectMapReadsTheObjectForm(t *testing.T) {
 	}
 }
 
+// TestProjectSettingsHolderReloadPicksUpNewUser is A6's core acceptance test:
+// a user added to the file resolves after a reload, with no process restart
+// and no re-registration of the handler — the holder is what the login
+// handler was given, and its Get()/resolve read whatever is current.
+func TestProjectSettingsHolderReloadPicksUpNewUser(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "projects.json")
+	if err := os.WriteFile(path, []byte(`{"a@b.c":["wolf"]}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env := map[string]string{"AGENTKIT_PROJECT_MAP_FILE": path}
+	h, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+	if _, _, ok := h.resolve("new@b.c"); ok {
+		t.Fatal("new@b.c resolves before it was ever added to the file")
+	}
+
+	// Rewrite the file with a new user, then reload directly — the ticket's
+	// own prescription ("triggers the reload path directly") rather than
+	// waiting on a timer or signal in the test.
+	if err := os.WriteFile(path, []byte(`{"a@b.c":["wolf"],"new@b.c":["wolf"]}`), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	if ok := h.reload(logf); !ok {
+		t.Fatalf("reload reported failure; logs: %v", logged)
+	}
+
+	projects, wildcard, ok := h.resolve("new@b.c")
+	if !ok || wildcard || len(projects) != 1 || projects[0] != "wolf" {
+		t.Fatalf("resolve(new@b.c) after reload = %v, %v, %v", projects, wildcard, ok)
+	}
+	// The pre-existing user must still resolve — a reload is a replace, not a
+	// merge, but the file itself carried both.
+	if _, _, ok := h.resolve("a@b.c"); !ok {
+		t.Fatal("a@b.c stopped resolving after reload")
+	}
+}
+
+// TestProjectSettingsHolderReloadKeepsOldMapOnBadRewrite is A6's other
+// acceptance criterion: a malformed rewrite changes nothing and is logged,
+// rather than taking a working deployment offline.
+func TestProjectSettingsHolderReloadKeepsOldMapOnBadRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "projects.json")
+	if err := os.WriteFile(path, []byte(`{"a@b.c":["wolf"]}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env := map[string]string{"AGENTKIT_PROJECT_MAP_FILE": path}
+	h, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{ not valid json`), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	if ok := h.reload(logf); ok {
+		t.Fatal("reload reported success on malformed JSON")
+	}
+	if len(logged) == 0 {
+		t.Fatal("a failed reload logged nothing")
+	}
+
+	// The old map must still be exactly what it was.
+	if _, _, ok := h.resolve("a@b.c"); !ok {
+		t.Fatal("a@b.c no longer resolves after a failed reload — the old map was not kept")
+	}
+	if s := h.Get(); s == nil || len(s.users) != 1 {
+		t.Fatalf("Get() after failed reload = %v, want the original one-user map", s)
+	}
+}
+
+// TestProjectSettingsHolderInlineMapDoesNotWatchAFile: an inline
+// AGENTKIT_PROJECT_MAP has no file to reread, so reload/watch must be no-ops
+// rather than erroring on an empty path.
+func TestProjectSettingsHolderInlineMapDoesNotWatchAFile(t *testing.T) {
+	env := map[string]string{"AGENTKIT_PROJECT_MAP": `{"a@b.c":["wolf"]}`}
+	h, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+	if h.path != "" {
+		t.Fatalf("path = %q, want empty for an inline map", h.path)
+	}
+	if ok := h.reload(func(string, ...any) {}); ok {
+		t.Fatal("reload() on an inline-map holder reported success")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	h.watch(ctx, 10*time.Millisecond, func() { t.Fatal("onReload called for an inline map") }, func(string, ...any) {})
+}
+
+// TestProjectSettingsHolderWatchReloadsOnTimer exercises the timer half of
+// watch (SIGHUP is covered by triggering reload directly above, per the
+// ticket's own test prescription — signal delivery in a test process is
+// otherwise process-global and flaky under -race with parallel tests).
+func TestProjectSettingsHolderWatchReloadsOnTimer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "projects.json")
+	if err := os.WriteFile(path, []byte(`{"a@b.c":["wolf"]}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	env := map[string]string{"AGENTKIT_PROJECT_MAP_FILE": path}
+	h, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte(`{"a@b.c":["wolf"],"new@b.c":["wolf"]}`), 0o600); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+
+	reloaded := make(chan struct{}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go h.watch(ctx, 10*time.Millisecond, func() {
+		select {
+		case reloaded <- struct{}{}:
+		default:
+		}
+	}, func(string, ...any) {})
+
+	select {
+	case <-reloaded:
+	case <-time.After(1 * time.Second):
+		t.Fatal("watch did not reload within its timer interval")
+	}
+	if _, _, ok := h.resolve("new@b.c"); !ok {
+		t.Fatal("new@b.c does not resolve after watch's timer-driven reload")
+	}
+}
+
 // fakeTokeninfo serves a scripted Google tokeninfo response.
 func fakeTokeninfo(t *testing.T, status int, body map[string]string) *httptest.Server {
 	t.Helper()
@@ -437,6 +578,51 @@ func verifyRequest(body string) *http.Request {
 	req := httptest.NewRequest(http.MethodPost, "/auth/verify-google", strings.NewReader(body))
 	req.Header.Set(apiKeyHeader, goodKey)
 	return req
+}
+
+// decodeOperatorClaim reads the operator claim off one project token (ok=false
+// when it is absent, matching how the bearer path treats a missing claim).
+func decodeOperatorClaim(t *testing.T, tokenStr string, secret []byte) (value, present bool) {
+	t.Helper()
+	claims := jwt.MapClaims{}
+	tok, err := jwt.ParseWithClaims(tokenStr, claims, func(*jwt.Token) (any, error) { return secret, nil },
+		jwt.WithValidMethods([]string{"HS256"}))
+	if err != nil || !tok.Valid {
+		t.Fatalf("parse token: %v", err)
+	}
+	v, present := claims[devclaims.OperatorClaim]
+	b, _ := v.(bool)
+	return b, present
+}
+
+// TestAuthGoogleHandler_OperatorClaim pins onboarding-work-plan §1.1: a
+// non-wildcard Google account's project tokens never carry `operator:true`.
+func TestAuthGoogleHandler_OperatorClaim(t *testing.T) {
+	secret := []byte("test-secret")
+	issuer := devclaims.NewWithTTL(secret, time.Hour)
+	pm := projectMap{"kai@example.com": {"apples-oranges"}}
+
+	srv := fakeTokeninfo(t, 200, map[string]string{
+		"aud": "client-1", "email": "kai@example.com", "email_verified": "true",
+	})
+	defer srv.Close()
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, issuer)
+
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var resp loginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Projects) != 1 {
+		t.Fatalf("projects = %v, want 1", resp.Projects)
+	}
+	if value, present := decodeOperatorClaim(t, resp.Projects[0].Token, secret); present && value {
+		t.Fatalf("a non-wildcard Google account's token must not carry operator:true (present=%v value=%v)", present, value)
+	}
 }
 
 func TestAuthVerifyGoogleHandler(t *testing.T) {
@@ -664,6 +850,24 @@ func TestAuthPasswordHandler(t *testing.T) {
 			t.Fatalf("wildcard=%v login_token=%q, want wildcard grant", resp.Wildcard, resp.LoginToken)
 		}
 	})
+
+	// §1.1: the test login is an implicit wildcard, so its project tokens must
+	// carry operator:true.
+	t.Run("test login's project tokens carry the operator claim", func(t *testing.T) {
+		rec := post(`{"email":"test@example.com","password":"bob-e2e"}`)
+		var resp loginResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(resp.Projects) == 0 {
+			t.Fatalf("no projects minted")
+		}
+		for _, p := range resp.Projects {
+			if value, present := decodeOperatorClaim(t, p.Token, secret); !present || !value {
+				t.Fatalf("project %s: operator claim present=%v value=%v, want true", p.ID, present, value)
+			}
+		}
+	})
 }
 
 func TestAuthProjectTokenHandler(t *testing.T) {
@@ -701,6 +905,10 @@ func TestAuthProjectTokenHandler(t *testing.T) {
 			jwt.WithValidMethods([]string{"HS256"}))
 		if err != nil || !tok.Valid || claims["customer"] != "grapes-kiwis" || claims["email"] != "dev@example.com" {
 			t.Fatalf("minted claims = %v err=%v", claims, err)
+		}
+		// §1.1: the wildcard exchange always mints operator:true.
+		if v, _ := claims[devclaims.OperatorClaim].(bool); !v {
+			t.Fatalf("minted claims = %v, want operator:true", claims)
 		}
 	})
 
@@ -836,5 +1044,66 @@ func TestParseTestLogin(t *testing.T) {
 		if _, _, err := parseTestLogin(bad); err == nil {
 			t.Fatalf("parseTestLogin(%q) should fail", bad)
 		}
+	}
+}
+
+func TestStoredProjectsDirectory(t *testing.T) {
+	pm := projectMap{
+		"kai@example.com":  {"*"},
+		"jack@example.com": {"apples-oranges"},
+		"ops@example.com":  {"pears-plums"},
+	}
+	cases := []struct {
+		name    string
+		list    func(context.Context, int) ([]string, error)
+		email   string
+		want    []string
+		wantAll []string
+	}{
+		{
+			name: "a wildcard grant also lists stored projects, deduplicated, invalid ids dropped",
+			list: func(context.Context, int) ([]string, error) {
+				return []string{"bakery-newsletter", "pears-plums", "Not Valid"}, nil
+			},
+			email:   "kai@example.com",
+			want:    []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+			wantAll: []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+		},
+		{
+			name:    "a plain account is untouched",
+			list:    func(context.Context, int) ([]string, error) { return []string{"bakery-newsletter"}, nil },
+			email:   "jack@example.com",
+			want:    []string{"apples-oranges"},
+			wantAll: []string{"apples-oranges", "pears-plums", "bakery-newsletter"},
+		},
+		{
+			name:    "a failed read falls back to the map",
+			list:    func(context.Context, int) ([]string, error) { return nil, fmt.Errorf("database is down") },
+			email:   "kai@example.com",
+			want:    []string{"apples-oranges", "pears-plums"},
+			wantAll: []string{"apples-oranges", "pears-plums"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := storedProjectsDirectory{userDirectory: pm, list: tc.list}
+			got, _, ok := d.resolve(tc.email)
+			if !ok {
+				t.Fatalf("resolve(%s) not ok", tc.email)
+			}
+			sort.Strings(got)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("resolve = %v, want %v", got, want)
+			}
+			all := d.allProjects()
+			sort.Strings(all)
+			wantAll := append([]string(nil), tc.wantAll...)
+			sort.Strings(wantAll)
+			if !reflect.DeepEqual(all, wantAll) {
+				t.Fatalf("allProjects = %v, want %v", all, wantAll)
+			}
+		})
 	}
 }

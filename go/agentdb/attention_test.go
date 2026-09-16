@@ -19,7 +19,7 @@ func newAttentionStore(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&AttentionRequest{}, &Session{}, &Message{}, &ProjectEvent{}); err != nil {
+	if err := db.AutoMigrate(&AttentionRequest{}, &Session{}, &Message{}, &ProjectEvent{}, &EventDelivery{}); err != nil {
 		t.Fatalf("automigrate attention tables: %v", err)
 	}
 	return &Store{gdb: db}
@@ -381,5 +381,159 @@ func TestListAttentionRequests(t *testing.T) {
 
 	if _, err := s.ListAttentionRequests(ctx, AttentionRequestQuery{}); err == nil {
 		t.Fatalf("an unscoped list must be refused")
+	}
+}
+
+// seedParkedDelivery writes a delivery parked at awaiting_human on a session.
+func seedParkedDelivery(t *testing.T, s *Store, id, project, sessionID string) {
+	t.Helper()
+	d := &EventDelivery{ID: id, Project: project, EventID: "ev-" + id, SubscriptionID: "sub-" + id,
+		SessionID: sessionID, Worker: "architect", Status: DeliveryAwaitingHuman, StartedAt: 100}
+	if err := s.gdb.Create(d).Error; err != nil {
+		t.Fatalf("seed delivery: %v", err)
+	}
+}
+
+func deliveryRow(t *testing.T, s *Store, id string) EventDelivery {
+	t.Helper()
+	var d EventDelivery
+	if err := s.gdb.Where("id = ?", id).First(&d).Error; err != nil {
+		t.Fatalf("read delivery: %v", err)
+	}
+	return d
+}
+
+func TestAttentionKinds(t *testing.T) {
+	cases := []struct {
+		name        string
+		kind        string
+		expiresAt   int64
+		wantKind    string
+		wantExpires int64
+		wantAwaits  bool
+		wantErr     bool
+	}{
+		{name: "blank is an ask", kind: "", expiresAt: 500, wantKind: AttentionKindAsk, wantExpires: 500, wantAwaits: true},
+		{name: "ask parks the job", kind: AttentionKindAsk, wantKind: AttentionKindAsk, wantAwaits: true},
+		{name: "notice parks nothing and drops its deadline", kind: AttentionKindNotice, expiresAt: 500, wantKind: AttentionKindNotice, wantExpires: 0},
+		{name: "unknown kind is refused", kind: "fyi", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAttentionStore(t)
+			ctx := context.Background()
+			seedAttentionSession(t, s, "s-1", "acme")
+			req, err := s.CreateAttentionRequest(ctx, &AttentionRequest{
+				Project: "acme", SessionID: "s-1", Message: "hello", Kind: tc.kind, ExpiresAt: tc.expiresAt,
+			})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want an error for kind %q", tc.kind)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if req.Kind != tc.wantKind || req.ExpiresAt != tc.wantExpires {
+				t.Fatalf("kind=%q expires=%d, want %q %d", req.Kind, req.ExpiresAt, tc.wantKind, tc.wantExpires)
+			}
+			awaits, err := s.SessionAwaitsHuman(ctx, "acme", "s-1")
+			if err != nil || awaits != tc.wantAwaits {
+				t.Fatalf("awaits=%v err=%v, want %v", awaits, err, tc.wantAwaits)
+			}
+			// A notice is never swept into a timeout, deadline or not.
+			expired, err := s.ListExpiredAttentionRequests(ctx, 10_000, 0)
+			if err != nil {
+				t.Fatalf("expired: %v", err)
+			}
+			if tc.kind == AttentionKindNotice && len(expired) != 0 {
+				t.Fatalf("a notice must never lapse: %+v", expired)
+			}
+		})
+	}
+}
+
+func TestAnswerSessionAttentionSettlesParkedDeliveries(t *testing.T) {
+	s := newAttentionStore(t)
+	ctx := context.Background()
+	seedAttentionSession(t, s, "s-1", "acme")
+	seedAttentionSession(t, s, "s-2", "acme")
+	for _, sid := range []string{"s-1", "s-2"} {
+		if _, err := s.CreateAttentionRequest(ctx, &AttentionRequest{Project: "acme", SessionID: sid, Message: "which subject line?"}); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+	seedParkedDelivery(t, s, "d-1", "acme", "s-1")
+	seedParkedDelivery(t, s, "d-2", "acme", "s-2")
+
+	// Another project's reply closes nothing.
+	if n, err := s.AnswerSessionAttention(ctx, "other-co", "s-1", 900); err != nil || n != 0 {
+		t.Fatalf("cross-project answer closed %d err=%v", n, err)
+	}
+
+	n, err := s.AnswerSessionAttention(ctx, "acme", "s-1", 900)
+	if err != nil || n != 1 {
+		t.Fatalf("answer closed %d err=%v, want 1", n, err)
+	}
+	if d := deliveryRow(t, s, "d-1"); d.Status != DeliveryOK || d.EndedAt != 900 {
+		t.Fatalf("the answered session's delivery must settle: %+v", d)
+	}
+	if d := deliveryRow(t, s, "d-2"); d.Status != DeliveryAwaitingHuman || d.EndedAt != 0 {
+		t.Fatalf("a sibling session's delivery must stay parked: %+v", d)
+	}
+	if awaits, _ := s.SessionAwaitsHuman(ctx, "acme", "s-1"); awaits {
+		t.Fatalf("an answered session awaits nobody")
+	}
+	// A second reply is a no-op.
+	if n, err := s.AnswerSessionAttention(ctx, "acme", "s-1", 950); err != nil || n != 0 {
+		t.Fatalf("second answer closed %d err=%v", n, err)
+	}
+}
+
+func TestAcknowledgeAttentionRequest(t *testing.T) {
+	s := newAttentionStore(t)
+	ctx := context.Background()
+	seedAttentionSession(t, s, "s-1", "acme")
+	first, _ := s.CreateAttentionRequest(ctx, &AttentionRequest{Project: "acme", SessionID: "s-1", Message: "one"})
+	second, _ := s.CreateAttentionRequest(ctx, &AttentionRequest{Project: "acme", SessionID: "s-1", Message: "two"})
+	seedParkedDelivery(t, s, "d-1", "acme", "s-1")
+
+	if _, err := s.AcknowledgeAttentionRequest(ctx, "other-co", first.ID, 700); !errors.Is(err, ErrAttentionRequestNotFound) {
+		t.Fatalf("another project's request must be not found, got %v", err)
+	}
+
+	got, err := s.AcknowledgeAttentionRequest(ctx, "acme", first.ID, 700)
+	if err != nil || got.AnsweredAt != 700 {
+		t.Fatalf("acknowledge: %+v err=%v", got, err)
+	}
+	// One ask is still open on the session, so the job stays parked.
+	if d := deliveryRow(t, s, "d-1"); d.Status != DeliveryAwaitingHuman {
+		t.Fatalf("a session with an open ask must stay parked: %+v", d)
+	}
+	if _, err := s.AcknowledgeAttentionRequest(ctx, "acme", second.ID, 800); err != nil {
+		t.Fatalf("acknowledge second: %v", err)
+	}
+	if d := deliveryRow(t, s, "d-1"); d.Status != DeliveryOK || d.EndedAt != 800 {
+		t.Fatalf("closing the last ask must settle the delivery: %+v", d)
+	}
+	// Idempotent: the stamp does not move.
+	again, err := s.AcknowledgeAttentionRequest(ctx, "acme", first.ID, 999)
+	if err != nil || again.AnsweredAt != 700 {
+		t.Fatalf("re-acknowledge must be a no-op: %+v err=%v", again, err)
+	}
+}
+
+func TestAttentionTimeoutDoesNotSettleTheDelivery(t *testing.T) {
+	s := newAttentionStore(t)
+	ctx := context.Background()
+	seedAttentionSession(t, s, "s-1", "acme")
+	req, _ := s.CreateAttentionRequest(ctx, &AttentionRequest{Project: "acme", SessionID: "s-1", Message: "one", ExpiresAt: 10})
+	seedParkedDelivery(t, s, "d-1", "acme", "s-1")
+	if err := s.MarkAttentionTimedOut(ctx, req.ID, 20); err != nil {
+		t.Fatalf("timeout: %v", err)
+	}
+	if d := deliveryRow(t, s, "d-1"); d.Status != DeliveryAwaitingHuman {
+		t.Fatalf("a lapse wakes the worker; it does not settle the row: %+v", d)
 	}
 }

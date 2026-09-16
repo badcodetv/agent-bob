@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -170,3 +171,66 @@ func TestAPIKeyIndexToleratesNoProjectMap(t *testing.T) {
 
 // The interface the rest of agentd depends on is satisfied by the concrete type.
 var _ projectKeys = (*projectKeyIndex)(nil)
+
+// The interface is satisfied by the reloadable holder too (A6): whatever
+// wires up apiAuthMiddleware can hand it the holder directly and see a
+// reload without re-wiring anything.
+var _ projectKeys = (*projectKeysHolder)(nil)
+
+// TestProjectKeysHolderReloadPicksUpNewKey is A6's acceptance test for the
+// API-key half: a key added to the project map (as it would be after a file
+// reload) is recognised once reload() is called, with no new middleware wired
+// up — the holder is what apiAuthMiddleware was given, and it always reads
+// whatever index is currently stored.
+func TestProjectKeysHolderReloadPicksUpNewKey(t *testing.T) {
+	h, err := newProjectKeysHolder(
+		map[string]projectConfig{"wolf": {APIKeyEnv: "WOLF_API_KEY"}},
+		envFrom(map[string]string{"WOLF_API_KEY": goodKey}), nil)
+	if err != nil {
+		t.Fatalf("newProjectKeysHolder: %v", err)
+	}
+	if _, ok := h.ProjectForKey("fedcba9876543210fedcba9876543210"); ok {
+		t.Fatal("a key not yet configured was already granted a project")
+	}
+
+	// Simulate what a project-map reload feeds in: a new project's config,
+	// present from this point on.
+	h.reload(map[string]projectConfig{
+		"wolf": {APIKeyEnv: "WOLF_API_KEY"},
+		"demo": {APIKeyEnv: "DEMO_API_KEY"},
+	}, envFrom(map[string]string{
+		"WOLF_API_KEY": goodKey,
+		"DEMO_API_KEY": "fedcba9876543210fedcba9876543210",
+	}), nil)
+
+	if p, ok := h.ProjectForKey("fedcba9876543210fedcba9876543210"); !ok || p != "demo" {
+		t.Fatalf("ProjectForKey(demo key) after reload = %q, %v", p, ok)
+	}
+	if p, ok := h.ProjectForKey(goodKey); !ok || p != "wolf" {
+		t.Fatalf("ProjectForKey(wolf key) after reload = %q, %v", p, ok)
+	}
+}
+
+// A reload that would fail newProjectKeys' own boot-time validation (a key
+// too short, say) must not take a working deployment offline: it keeps
+// serving the previous index rather than replacing it with a broken one.
+func TestProjectKeysHolderReloadKeepsOldIndexOnBadConfig(t *testing.T) {
+	h, err := newProjectKeysHolder(
+		map[string]projectConfig{"wolf": {APIKeyEnv: "WOLF_API_KEY"}},
+		envFrom(map[string]string{"WOLF_API_KEY": goodKey}), nil)
+	if err != nil {
+		t.Fatalf("newProjectKeysHolder: %v", err)
+	}
+
+	var logged []string
+	logf := func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) }
+	h.reload(map[string]projectConfig{"wolf": {APIKeyEnv: "WOLF_API_KEY"}},
+		envFrom(map[string]string{"WOLF_API_KEY": "too-short"}), logf)
+
+	if len(logged) == 0 {
+		t.Fatal("a reload that fails validation logged nothing")
+	}
+	if p, ok := h.ProjectForKey(goodKey); !ok || p != "wolf" {
+		t.Fatalf("ProjectForKey(wolf key) after a failed reload = %q, %v, want the old key still granted", p, ok)
+	}
+}

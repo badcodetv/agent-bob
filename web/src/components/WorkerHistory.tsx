@@ -44,6 +44,7 @@ import {
 } from '../lineageWaterline.js'
 import { DiffBlock } from './ChangelogView.js'
 import { FeedWaterline } from './FeedLiveness.js'
+import AboutThisScreen from './AboutThisScreen.js'
 
 /** The surface this page's "since you last looked" mark is stored under. */
 export const WORKER_HISTORY_SURFACE = 'worker-history'
@@ -169,6 +170,8 @@ export default function WorkerHistory({
         What this worker has done and how it has changed, newest first, on one line of time — so a
         rewrite sits between the run before it and the run after it.
       </Typography>
+
+      <AboutThisScreen surface="worker-history" projectId={projectId} />
 
       {!log.available && (
         <Alert severity="info" sx={{ mb: 2 }}>

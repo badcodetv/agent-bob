@@ -143,7 +143,7 @@ test.describe('operator console', () => {
     await expect(page.getByTestId('nav-activity')).toBeVisible({ timeout: 30_000 })
     // Announced in words rather than by a badge (design 28 §3.2).
     await expect(page.getByTestId('nav-reveal-notice')).toContainText(
-      'lists everything this project does',
+      'everything this project does',
     )
 
     // One worker is not a SHAPE, though — there is nothing to wire it to.
@@ -156,7 +156,7 @@ test.describe('operator console', () => {
     await page.reload()
     await expect(page.getByTestId('nav-chart')).toBeVisible({ timeout: 30_000 })
     await expect(page.getByTestId('nav-reveal-notice')).toContainText(
-      'draws which worker wakes which',
+      'which worker wakes which',
     )
 
     // And an ordinary posted event reveals nothing new — Activity is sticky,
@@ -213,11 +213,12 @@ test.describe('operator console', () => {
     await page.getByTestId('new-schedule').click()
 
     // The editor's own labels (ScheduleEditor.tsx): "Cron", "Instruction",
-    // "Rationale". This block previously asked for /what should .* do|input/i
-    // and /^Why\??$/, and neither has ever matched anything on that form —
-    // "Instruction" does not contain "input", and the reason field is called
-    // Rationale. Another consequence of the UNRUN note at the top of this
-    // file; see the plan's DI8.
+    // "Why?" (renamed from "Rationale" by C3 — the repo's reason field is one
+    // word everywhere now). This block previously asked for
+    // /what should .* do|input/i and /^Why\??$/, and neither ever matched
+    // anything on that form — "Instruction" does not contain "input", and the
+    // reason field was then called Rationale. Another consequence of the
+    // UNRUN note at the top of this file; see the plan's DI8.
     // FIXED (plan DI9). This line used to type the worker's name in by hand,
     // with a note explaining why it had to: the editor did not prefill the
     // worker even when opened from that worker's own Triggers tab.
@@ -229,7 +230,7 @@ test.describe('operator console', () => {
     await expect(page.getByLabel(/^Worker$/).first()).toHaveValue(WRITER)
     await page.getByLabel(/cron/i).first().fill('0 9 * * 1-5')
     await page.getByLabel(/^Instruction$/).first().fill('Write the morning blurb.')
-    await page.getByLabel(/^Rationale$/).first().fill('the catalogue goes out at nine')
+    await page.getByLabel(/^Why\?$/).first().fill('the catalogue goes out at nine')
     // "Create schedule" for a new one, "Save schedule" for an existing one —
     // /save/i matched neither on this form. The third assertion in this file
     // that could never have passed (DI8).
@@ -393,7 +394,7 @@ test.describe('operator console', () => {
     await expect(wireIt, 'a wire with no reason must not be committable (K2)').toBeDisabled()
 
     const why = 'the herald should announce whatever the scribe finishes'
-    await dialog.getByLabel('Why are you wiring this?').fill(why)
+    await dialog.getByLabel('Why?').fill(why)
     await expect(wireIt).toBeEnabled()
     await wireIt.click()
     await expect(dialog).toBeHidden({ timeout: 30_000 })
@@ -463,5 +464,98 @@ test.describe('operator console', () => {
     await expect(
       page.getByLabel('frozen — only a human may change it').first(),
     ).toBeVisible({ timeout: 30_000 })
+  })
+
+  // ── C2: "About this screen" on the Desk ────────────────────────────────────
+  //
+  // Only the Desk is exercised live here (the ticket's own scope): the eleven
+  // mount points share one component and one provider, so the thing worth
+  // proving against a real browser is the wiring — the build's generated
+  // paragraphs actually reaching `AboutThisScreen` through `GuideProvider`,
+  // the guide link actually resolving, and dismissal actually surviving a
+  // reload — not eleven near-identical repeats of the same three facts.
+  // `AboutThisScreen.test.tsx` (`web/src/components/`) covers the component's
+  // own logic (no-paragraph ⇒ nothing rendered, per-surface/per-project
+  // dismissal) at the unit level, against a mocked provider.
+  test('the Desk\'s About line opens, links to a guide page that renders, and stays dismissed after reload', async ({ page }) => {
+    await openFreshProject(page, 'e2e-cx-about')
+
+    // Collapsed: the toggle line, nothing more.
+    const toggle = page.getByTestId('about-toggle-desk')
+    await expect(toggle).toBeVisible({ timeout: 30_000 })
+    await expect(toggle).toContainText('About this screen')
+    await expect(page.getByText('The Desk is where you start every visit.')).toHaveCount(0)
+
+    // Opens on click, showing the guide's own first paragraph (docs/guide/the-desk.md)
+    // — proof the generated paragraph actually reached the component through
+    // build-guide.mjs → pages.generated.ts → App.tsx's GuideProvider, not a
+    // placeholder string.
+    await toggle.click()
+    await expect(page.getByText('The Desk is where you start every visit.')).toBeVisible()
+
+    // "Read more in the guide →" is a real link to a page that renders.
+    const guideLink = page.getByRole('link', { name: 'Read more in the guide →' })
+    await expect(guideLink).toHaveAttribute('href', '#/guide/the-desk')
+    await guideLink.click()
+    await expect(page.getByRole('heading', { name: 'The Desk' })).toBeVisible({ timeout: 15_000 })
+
+    // Back to the Desk, dismiss the line, and reload: dismissal is sticky
+    // per (surface, project) in localStorage (aboutDismissal.ts), so the
+    // control that remains after a reload must be the small "bring it back"
+    // one, never the full disclosure.
+    await gotoView(page, 'desk')
+    await page.getByTestId('about-toggle-desk').click()
+    await page.getByTestId('about-dismiss-desk').click()
+    await expect(page.getByTestId('about-restore-desk')).toBeVisible()
+
+    await page.reload()
+    await expect(page.getByTestId('nav-desk')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('about-restore-desk')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByTestId('about-toggle-desk')).toHaveCount(0)
+
+    // And restoring it brings the full disclosure back, collapsed.
+    await page.getByTestId('about-restore-desk').click()
+    await expect(page.getByTestId('about-toggle-desk')).toBeVisible()
+  })
+
+  // ── C5: the Desk narrates firsts (design §3 G4) ────────────────────────────
+  test('the Desk narrates the project\'s first worker once, and not again after a reload', async ({
+    page,
+    request,
+  }) => {
+    const project = await openFreshProject(page, 'e2e-cx-firsts')
+    const api = await projectClient(request, project)
+
+    await gotoView(page, 'desk')
+    await expect(page.getByText('This project has no workers yet')).toBeVisible({ timeout: 30_000 })
+
+    await api.putWorker(WRITER, { system_prompt: SEED, description: 'writes blurbs' })
+    await page.reload()
+    await gotoView(page, 'desk')
+
+    // The row's own sentence (firsts.ts), plus a real link into the guide —
+    // not a checklist, not a count.
+    const first = page.getByTestId('first-first-worker')
+    await expect(first).toBeVisible({ timeout: 30_000 })
+    await expect(first).toContainText("This is the project's first worker.")
+    await expect(page.getByText(/\d\s*of\s*7/i)).toHaveCount(0)
+    const guideLink = first.getByRole('link', { name: /Read more in the guide/ })
+    await expect(guideLink).toHaveAttribute('href', '#/guide/a-workers-instructions')
+
+    // Reload: the same kind must not narrate a second time, even though the
+    // worker (and its `worker_create` changelog row) is still right there.
+    await page.reload()
+    await gotoView(page, 'desk')
+    await expect(page.getByTestId('nav-workers')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('you hired cx-scribe', { exact: false })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('first-first-worker')).toHaveCount(0)
+
+    // Deleting the worker does not bring "first worker" back either — the
+    // milestone is the project's, not the worker's.
+    await api.deleteWorker(WRITER)
+    await page.reload()
+    await gotoView(page, 'desk')
+    await expect(page.getByTestId('nav-desk')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTestId('first-first-worker')).toHaveCount(0)
   })
 })

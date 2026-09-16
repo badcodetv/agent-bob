@@ -109,6 +109,16 @@ const (
 	// read-only decomposition of it ("output_tokens remains the inclusive,
 	// authoritative total used for billing"), so adding it would double-count.
 	usageOutputSQL = `COALESCE((e->'data'->'usage'->>'outputTokens')::bigint, (e->'data'->'usage'->>'output_tokens')::bigint, 0)`
+
+	// usageCostSQL reads the envelope's own recorded cost, `totalCostUsd`
+	// (captured shape, see the file header) — a value the provider already
+	// computed, so summing it is exact rather than a re-derivation from list
+	// prices. The `total_cost_usd` snake_case fallback exists for the same
+	// pluggable-harness reason as the two token expressions above: nothing in
+	// the captured corpus used it, but a harness that forwards its provider's
+	// naming verbatim should not silently zero the cost column the way the
+	// flat-envelope bug zeroed tokens (A4, design/2026-09-11-onboarding-work-plan.md).
+	usageCostSQL = `COALESCE((e->'data'->>'totalCostUsd')::float8, (e->'data'->>'total_cost_usd')::float8, 0)`
 )
 
 // usageEnvelopes is the FROM-clause fragment expanding one agent_query_events

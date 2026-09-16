@@ -11,7 +11,7 @@
 // See ../../docs/09-frontend-components.md and ../../docs/90-provenance-map.md.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Box, Button, Typography, Alert, Switch, Chip, Divider } from '@mui/material'
+import { Box, Button, Typography, Alert, Switch, Chip, Divider, useMediaQuery } from '@mui/material'
 import { alpha } from '@mui/material/styles'
 import type { ActivityStatus, AgentMessage, ArtifactInfo, AskUserQuestionInfo, CreatedDashboardInfo, RenderedTableInfo, RenderedChartInfo, TodoItem } from '../types.js'
 import { getToolCategory, getToolIcon } from '../tool-formatters.js'
@@ -22,11 +22,15 @@ import AskUserCard from './AskUserCard.js'
 import ArtifactPanel from './ArtifactPanel.js'
 import ThinkingBlock from './ThinkingBlock.js'
 import ChatInputToolbar from './ChatInputToolbar.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import useFileAttachments from '../hooks/useFileAttachments.js'
 import useVoiceDictation from '../hooks/useVoiceDictation.js'
 import type { RenderPlugin, AgentSSEEvent } from '../plugins.js'
 import type { AgentSSEEvent as CoreSSEEvent } from '../types.js'
 import { useAgentChatContextOptional } from '../AgentChatProvider.js'
+import { parseOnboardingSeed } from '../charter.js'
+import { parseAgentContext } from '../agentContext.js'
+import AgentContextLine from './AgentContextLine.js'
 
 /**
  * Fold plugin events into per-plugin, per-toolCallId state maps.
@@ -126,6 +130,16 @@ interface AgentChatProps {
   /** Optional callback to open the full artifact viewer. */
   onOpenArtifactViewer?: (artifact: ArtifactInfo | null) => void
   forkedMessageCount?: number
+  /**
+   * Name of the worker this session is chatting with, if any (spec §6.4).
+   * Absent/empty for a plain base-agent chat. Drives the empty-state copy and
+   * suggestions (design 2026-09-11-onboarding-and-the-guide.md §3 G3): a
+   * worker chat gets sentences and suggestions about that worker; a base
+   * chat gets ones about the project.
+   */
+  workerName?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
 }
 
 export default function AgentChat(props: AgentChatProps) {
@@ -155,17 +169,42 @@ export default function AgentChat(props: AgentChatProps) {
   const stuckStatus     = props.stuckStatus     ?? ctx?.stuckStatus
   const onNudge         = props.onNudge         ?? ctx?.nudgeAgent
   const readOnly        = props.readOnly
+  // Driven by the provider, and the provider has no session: there is nothing
+  // to send TO. `sendMessage` returns silently in that state, so an enabled
+  // composer here typed into a void — the Chat view opened from the Desk with
+  // no session selected did exactly that. Disabled, and it says why.
+  const noSession       = !props.onSendMessage && ctx !== null && !ctx.session
   const plugins         = props.plugins         ?? ctx?.config.plugins ?? []
   const pluginEvents    = props.pluginEvents    ?? ctx?.pluginEvents   ?? []
   const apiBaseUrl      = props.apiBaseUrl      ?? ctx?.config.apiBaseUrl ?? ''
   const authHeader      = props.authHeader
+  // The embed page (and the console) hand AgentChatProvider a TOKEN getter, not
+  // a header — and this component used to read `props.authHeader` only, so
+  // every artifact preview inside the embed went out with no credential and
+  // failed with HTTP 401 (found on the box, 2026-09-12). Resolved at fetch time
+  // because a host's getter may refresh.
+  const getAuthToken    = ctx?.config.getAuthToken
+  const getAuthHeader   = useCallback(async (): Promise<string | undefined> => {
+    if (authHeader) return authHeader
+    if (!getAuthToken) return undefined
+    const token = await getAuthToken()
+    return token ? `Bearer ${token}` : undefined
+  }, [authHeader, getAuthToken])
   const transcribeEndpoint = props.transcribeEndpoint
   const uploadEndpoint  = props.uploadEndpoint
   const onPinToDashboard = props.onPinToDashboard
   const onOpenArtifactViewer = props.onOpenArtifactViewer
   const forkedMessageCount = props.forkedMessageCount
+  const workerName = props.workerName
+  const projectId = props.projectId ?? ''
 
   const [input, setInput] = useState('')
+  // Below 900px — which inside an iframe is the IFRAME's width — the artifacts
+  // panel stops being a fixed 320px column and becomes an overlay behind a
+  // button. In a ~550px embed rail the column left the conversation ~230px
+  // (reported from Agent Wolf on the box, 2026-09-12).
+  const narrow = useMediaQuery('(max-width:899.95px)')
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
   const [, setViewerArtifact] = useState<ArtifactInfo | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -212,7 +251,7 @@ export default function AgentChat(props: AgentChatProps) {
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!input.trim() || isStreaming) return
+    if (!input.trim() || isStreaming || noSession) return
     let attachmentIds: string[] | undefined
     if (fileAttachments.attachments.length > 0) {
       attachmentIds = await fileAttachments.uploadAll(sessionId)
@@ -220,7 +259,7 @@ export default function AgentChat(props: AgentChatProps) {
     }
     onSendMessage(input.trim(), selectedModel, attachmentIds)
     setInput('')
-  }, [input, isStreaming, onSendMessage, selectedModel, fileAttachments.attachments.length, fileAttachments.uploadAll, fileAttachments.clear, sessionId])
+  }, [input, isStreaming, noSession, onSendMessage, selectedModel, fileAttachments.attachments.length, fileAttachments.uploadAll, fileAttachments.clear, sessionId])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -323,6 +362,24 @@ export default function AgentChat(props: AgentChatProps) {
 
   const displayMessages = messages
 
+  // G3 (design 2026-09-11-onboarding-and-the-guide.md §3): an empty
+  // transcript is the most-used surface in the product and used to teach
+  // nothing — zero rows and a bare composer. `isWorkerChat` distinguishes
+  // the two fixed suggestion sets; both are plain text, chosen per context,
+  // never sent automatically — clicking one only fills the composer.
+  const isWorkerChat = !!workerName
+  const emptyStateSuggestions = isWorkerChat
+    ? [
+        'Show me your instructions.',
+        'What did you do last time you ran?',
+        'What would you do if I sent you: …',
+      ]
+    : [
+        'What is in this project’s memory?',
+        'Which workers exist and what wakes them?',
+        'Write a memory that records …',
+      ]
+
   if (messages.length !== prevMsgLenRef.current) {
     prevMsgLenRef.current = messages.length
   }
@@ -384,11 +441,41 @@ export default function AgentChat(props: AgentChatProps) {
     // two halves of the same flexbox rule, and only the height half was ever
     // written down. This component is embedded in a narrow rail by design
     // (docs/19-embedding.md), so it must survive any width.
-    <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0 }}>
+    <Box sx={{ display: 'flex', flex: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
       {/* Chat area */}
       <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+        <AboutThisScreen surface="chat" projectId={projectId} sx={{ mx: 2, mt: 2, mb: 0 }} />
         {/* Messages */}
         <Box ref={scrollContainerRef} sx={{ flex: 1, overflow: 'auto', p: 2, position: 'relative' }}>
+          {displayMessages.length === 0 && (
+            <Box data-testid="chat-empty-state" sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {isWorkerChat
+                  ? `This is a chat with ${workerName}.`
+                  : 'This is a chat with the base agent.'}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                A chat is not a job: it gets none of the project&rsquo;s briefing, and nothing it
+                says is remembered unless a worker writes a memory.
+              </Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start', mt: 1 }}>
+                {emptyStateSuggestions.map((suggestion) => (
+                  <Button
+                    key={suggestion}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => {
+                      setInput(suggestion)
+                      textareaRef.current?.focus()
+                    }}
+                    sx={{ textTransform: 'none', justifyContent: 'flex-start' }}
+                  >
+                    {suggestion}
+                  </Button>
+                ))}
+              </Box>
+            </Box>
+          )}
           {displayMessages.map((message, index) => {
             const hasContent = message.role === 'user' || message.content.trim()
             const hasThinking = !!message.thinking
@@ -396,6 +483,75 @@ export default function AgentChat(props: AgentChatProps) {
             const hasArtifacts = autoArtifacts.has(message.id) || toolArtifacts.has(message.id)
             if (!hasContent && !hasThinking && !hasTools && !hasArtifacts) return null
             const showForkDivider = forkedMessageCount != null && forkedMessageCount > 0 && index === forkedMessageCount - 1
+            // An onboarding interview's first message is instructions for the
+            // interviewer plus the goal the person typed. Show them their goal,
+            // not the instructions (charter.ts, parseOnboardingSeed).
+            // Any application can mark a first message's instructions the same
+            // way (agentContext.ts): a compact line, then the person's own words.
+            const agentContext = message.role === 'user' ? parseAgentContext(message.content) : null
+            if (agentContext !== null) {
+              return (
+                <React.Fragment key={message.id}>
+                  <AgentContextLine context={agentContext} />
+                  {agentContext.rest !== '' && (
+                    <Box data-role="user" sx={{ mb: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                      <Box
+                        sx={{
+                          maxWidth: '80%',
+                          p: '12px 16px',
+                          borderRadius: 0,
+                          backgroundColor: 'primary.main',
+                          color: 'white',
+                          wordBreak: 'break-word',
+                          fontSize: '0.8125rem',
+                          lineHeight: 1.6,
+                          whiteSpace: 'pre-wrap',
+                        }}
+                      >
+                        {agentContext.rest}
+                      </Box>
+                    </Box>
+                  )}
+                </React.Fragment>
+              )
+            }
+            const seed = message.role === 'user' ? parseOnboardingSeed(message.content) : null
+            if (seed !== null) {
+              return (
+                <Box
+                  key={message.id}
+                  data-role="user"
+                  data-testid="onboarding-seed"
+                  sx={{
+                    mb: 2,
+                    alignSelf: 'center',
+                    mx: 'auto',
+                    maxWidth: '90%',
+                    px: 1.5,
+                    py: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    backgroundColor: 'action.hover',
+                    fontSize: '0.8125rem',
+                    lineHeight: 1.6,
+                    color: 'text.secondary',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {seed.goal === '' ? (
+                    'You started this project without a goal, so the interview begins by asking what it is for.'
+                  ) : (
+                    <>
+                      <Box component="span" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                        You set the goal:
+                      </Box>{' '}
+                      {seed.goal}
+                    </>
+                  )}
+                </Box>
+              )
+            }
             return (
               <React.Fragment key={message.id}>
                 <Box
@@ -450,6 +606,7 @@ export default function AgentChat(props: AgentChatProps) {
                         onOpenPreview={handleOpenPreview}
                         apiBaseUrl={apiBaseUrl}
                         authHeader={authHeader}
+                        getAuthHeader={getAuthHeader}
                       />
                     </Box>
                   ))}
@@ -520,6 +677,7 @@ export default function AgentChat(props: AgentChatProps) {
                           onOpenPreview={handleOpenPreview}
                           apiBaseUrl={apiBaseUrl}
                           authHeader={authHeader}
+                          getAuthHeader={getAuthHeader}
                         />
                       </Box>
                     )
@@ -533,6 +691,7 @@ export default function AgentChat(props: AgentChatProps) {
                         onOpenPreview={handleOpenPreview}
                         apiBaseUrl={apiBaseUrl}
                         authHeader={authHeader}
+                        getAuthHeader={getAuthHeader}
                       />
                     </Box>
                   ))}
@@ -739,9 +898,10 @@ export default function AgentChat(props: AgentChatProps) {
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 onPaste={(e: React.ClipboardEvent) => fileAttachments.handlePaste(e.nativeEvent)}
-                placeholder="Type a message..."
+                placeholder={noSession ? 'No session is open — start a new session or pick one to chat.' : 'Type a message...'}
                 rows={1}
-                disabled={isStreaming}
+                disabled={isStreaming || noSession}
+                data-testid="chat-input"
                 sx={{
                   flex: 1,
                   // 🔴 `minWidth: 0` OR THE COMPOSER CANNOT NARROW AT ALL.
@@ -774,7 +934,7 @@ export default function AgentChat(props: AgentChatProps) {
                   Stop
                 </Button>
               ) : (
-                <Button type="submit" aria-label="Send" disabled={!input.trim()} variant="contained" color="info" sx={{ borderRadius: '8px', textTransform: 'none' }}>
+                <Button type="submit" aria-label="Send" disabled={!input.trim() || noSession} variant="contained" color="info" sx={{ borderRadius: '8px', textTransform: 'none' }}>
                   Send
                 </Button>
               )}
@@ -783,9 +943,20 @@ export default function AgentChat(props: AgentChatProps) {
         )}
       </Box>
 
-      {/* Artifact Panel */}
-      {!readOnly && (
+      {/* Artifact Panel — a column when there is room, an overlay when narrow */}
+      {!readOnly && narrow && !artifactsOpen && (artifacts.length > 0 || (todos?.length ?? 0) > 0) && (
+        <Chip
+          data-testid="artifact-panel-open"
+          label={artifacts.length > 0 ? `Artifacts (${artifacts.length})` : `Tasks (${todos?.length ?? 0})`}
+          onClick={() => setArtifactsOpen(true)}
+          size="small"
+          sx={{ position: 'absolute', top: 8, right: 16, zIndex: 1, boxShadow: 2, bgcolor: 'background.paper' }}
+        />
+      )}
+      {!readOnly && (!narrow || artifactsOpen) && (
         <ArtifactPanel
+          overlay={narrow}
+          onClose={() => setArtifactsOpen(false)}
           artifacts={artifacts}
           todos={todos}
           sessionId={sessionId}

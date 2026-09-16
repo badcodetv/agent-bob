@@ -645,6 +645,15 @@ d=json.loads(raw) if raw else {}
 users=d.get("users", {} if "projects" in d else d)
 print(",".join(sorted(k for k in users if "@" in k)))')"
   fi
+  # --test-login signs in as WOLF_TEST_LOGIN's email, and dev-login still
+  # applies the allowlist — so an allowlist without that email made the flag a
+  # 403 out of the box. Only ever adds the one test address, and only when the
+  # test login is on (wolf-api refuses it under NODE_ENV=production).
+  local test_email="${WOLF_TEST_LOGIN:-}"
+  test_email="${test_email%%:*}"
+  if [[ -n "$test_email" && -n "$allowed" && ",${allowed}," != *",${test_email},"* ]]; then
+    allowed="${allowed},${test_email}"
+  fi
   if [[ -z "$allowed" ]]; then
     echo "No sign-in allowlist. Set one of:" >&2
     echo "  WOLF_ALLOWED_EMAILS=you@example.com ./stack wolf up" >&2
@@ -812,7 +821,7 @@ wolf_up() {
       --cron)        export WOLF_SCHEDULE_CRON="${1:?--cron needs a 5-field cron expression}"; shift ;;
       --gcs)         export AGENTKIT_BLOB_BACKEND=gcs
                      export GCS_PREFIX="${GCS_PREFIX:-dev-${USER:-local}}" ;;
-      --test-login)  export WOLF_TEST_LOGIN="${WOLF_TEST_LOGIN:-dev@localhost:devpassword}" ;;
+      --test-login)  export WOLF_TEST_LOGIN="${WOLF_TEST_LOGIN:-dev@example.com:devpassword}" ;;
       --no-tmux)     export NO_TMUX=1 ;;
       *) echo "usage: ./stack wolf up [real|mock] [--cron EXPR] [--gcs] [--test-login] [--skip-image] [--no-tmux]" >&2; exit 1 ;;
     esac
@@ -903,7 +912,7 @@ wolf_up() {
   fi
   if [[ -n "${WOLF_TEST_LOGIN:-}" ]]; then
     login_line="  --test-login is ON: POST /api/auth/dev-login is mounted for the Playwright
-  rig. The sign-in PAGE is Google-only and shows no form — nothing to click here."
+  rig, signing in as ${WOLF_TEST_LOGIN%%:*} (added to the allowlist). The sign-in PAGE is Google-only and shows no form — nothing to click here."
   else
     login_line=""
   fi

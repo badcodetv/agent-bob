@@ -155,6 +155,10 @@ else about the route is unchanged.
 
 Response is the usual `{id, status, workflowId}`.
 
+An optional `title` sets what the session list shows (trimmed, cut to 255 bytes). Leave it out and
+the first message is summarised into one when a title model is configured; set it when the first
+message is instructions rather than conversation, as the onboarding interview does.
+
 **Look it up again by the name you chose:**
 
 ```http
@@ -179,6 +183,46 @@ is meant to reach, and a composed prompt is the project's system prompt plus its
 (`go/httpapi/sessions_byname.go:48-69`). `403` when the credential carries no project; `404` for
 absent, malformed **and** other-project alike, so the route is not a membership oracle
 (`sessions_byname.go:107-129`).
+
+### 3a. Mark the instructions in a first message
+
+The first message an application sends a session is usually mostly instructions — which tools to
+call, how to label what it writes, the record the conversation is about — and it can only travel
+as a **user** message. Unmarked, the embedded chat shows all of it as a big bubble in the
+person's name. Wrap the instructions in an `agent-context` block and the chat shows one collapsed
+line instead:
+
+```text
+<agent-context summary="Opened from the hypothesis page">
+Label every candidate memory kind=hypothesis-spec-candidate, name: <the hypothesis id>.
+…any length…
+</agent-context>
+Is gold still a hedge against inflation?
+```
+
+renders as
+
+> **Context sent to the agent**: Opened from the hypothesis page  ·  *Show*
+>
+> *(then, as the person's own bubble)* Is gold still a hedge against inflation?
+
+- **The opening tag must be the first characters of the message**, and the block must be closed.
+  Anything else renders as an ordinary message — a person typing something tag-like mid-sentence
+  still sees their own words.
+- `summary` is optional and one line; write a double quote inside it as `&quot;`. Say where the conversation was opened
+  from, not what the instructions say.
+- Text after the closing tag is shown as the user's words; leave it out when there are none.
+- **Display only.** The stored message and what the model reads are exactly what was sent.
+  Nothing here hides the instructions from anyone who can read the session — **Show** expands
+  them, and the transcript routes return them verbatim. Do not put anything in the block that the
+  person in the iframe must not see.
+- Set `title` on `POST /agent/session` too (§3), or the session list's summariser titles the
+  session after the instructions.
+- In TypeScript, `formatAgentContext(context, summary, rest)` and `parseAgentContext(message)`
+  from `@agentkit/chat-ui/pure` build and read the shape (`web/src/agentContext.ts`).
+
+Bob's own onboarding interview predates this marker and is recognised by its exact preamble
+instead (`web/src/charter.ts`, `parseOnboardingSeed`).
 
 ---
 
@@ -656,7 +700,7 @@ Everything an embedding backend touches, in one table.
 
 | Method + path | Auth | Notes |
 | --- | --- | --- |
-| `POST /agent/session` | key or JWT | optional `name`; 409/400/403/501 |
+| `POST /agent/session` | key or JWT | optional `name` and `title`; 409/400/403/501 |
 | `GET /agent/sessions/by-name/{name}` | key, JWT, **or a matching embed token** | omits `composed_prompt` |
 | `GET /agent/sessions/by-name/{name}/artifacts` | key, JWT, **or a matching embed token** | metadata list |
 | `GET /agent/sessions/by-name/{name}/artifacts/file?path=…` | key, JWT, **or a matching embed token** | raw bytes |

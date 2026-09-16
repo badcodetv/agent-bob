@@ -96,7 +96,9 @@ func TestSandboxSessionEnv_PointsAtAgentProxyAndDummyKey(t *testing.T) {
 }
 
 // TestSubscriptionSessionEnv locks direct (subscription) mode: sessions get the
-// OAuth token and NO proxy plumbing — no base URL, no API key of any kind.
+// OAuth token and NO proxy plumbing — base URL and API key present but EMPTY.
+// Absent is not enough: a snapshot taken in proxy mode carries both in its
+// image config, and only an explicit `KEY=` overrides them on restore.
 func TestSubscriptionSessionEnv_DirectWithOAuthTokenOnly(t *testing.T) {
 	env := subscriptionSessionEnv("http://172.17.0.1:8099", "sk-ant-oat01-test")
 	if env["CLAUDE_CODE_OAUTH_TOKEN"] != "sk-ant-oat01-test" {
@@ -105,12 +107,50 @@ func TestSubscriptionSessionEnv_DirectWithOAuthTokenOnly(t *testing.T) {
 	if env["HOST_API_URL"] != "http://172.17.0.1:8099" {
 		t.Fatalf("HOST_API_URL = %q", env["HOST_API_URL"])
 	}
-	if v, ok := env["ANTHROPIC_BASE_URL"]; ok {
-		t.Fatalf("ANTHROPIC_BASE_URL must be absent in subscription mode, got %q", v)
+	for _, k := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"} {
+		if v, ok := env[k]; !ok || v != "" {
+			t.Fatalf("%s must be set to empty in subscription mode, got %q (present=%v)", k, v, ok)
+		}
 	}
-	if v, ok := env["ANTHROPIC_API_KEY"]; ok {
-		t.Fatalf("ANTHROPIC_API_KEY must be absent in subscription mode, got %q", v)
+}
+
+// TestSessionEnv_ModeSwitchLeavesNoStaleWiring is the production failure: a
+// session snapshotted under one model mode and restored under the other. The
+// snapshot image's env is the old mode's; the container env is the image env
+// with the new session env laid over it (what Docker does). Nothing from the
+// old mode may survive.
+func TestSessionEnv_ModeSwitchLeavesNoStaleWiring(t *testing.T) {
+	const self = "http://172.17.0.1:8099"
+	overlay := func(image, session map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range image {
+			out[k] = v
+		}
+		for k, v := range session {
+			out[k] = v
+		}
+		return out
 	}
+
+	t.Run("proxy snapshot restored in subscription mode", func(t *testing.T) {
+		got := overlay(sandboxSessionEnv(self), subscriptionSessionEnv(self, "sk-ant-oat01-new"))
+		if got["ANTHROPIC_BASE_URL"] != "" {
+			t.Errorf("ANTHROPIC_BASE_URL = %q: the session would talk to the proxy, which serves the mock", got["ANTHROPIC_BASE_URL"])
+		}
+		if got["ANTHROPIC_API_KEY"] != "" {
+			t.Errorf("ANTHROPIC_API_KEY = %q, want empty", got["ANTHROPIC_API_KEY"])
+		}
+	})
+
+	t.Run("subscription snapshot restored in proxy mode", func(t *testing.T) {
+		got := overlay(subscriptionSessionEnv(self, "sk-ant-oat01-old"), sandboxSessionEnv(self))
+		if got["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+			t.Errorf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty", got["CLAUDE_CODE_OAUTH_TOKEN"])
+		}
+		if got["ANTHROPIC_BASE_URL"] != self+"/agent-proxy" {
+			t.Errorf("ANTHROPIC_BASE_URL = %q", got["ANTHROPIC_BASE_URL"])
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

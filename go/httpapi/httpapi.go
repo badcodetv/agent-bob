@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/badcodetv/agent-bob"
 	"github.com/badcodetv/agent-bob/agentdb"
@@ -44,6 +45,12 @@ type Identity struct {
 	// reach. The host sets it in its IdentityFunc; the zero value (false) is
 	// the safe default for a host that has not been taught about it.
 	APIKey bool
+	// Operator marks the identity allowed to change a project's token budgets
+	// and job-concurrency cap (onboarding-work-plan §1.1, PutProjectSettings).
+	// True for a wildcard login's project tokens, the wildcard project-token
+	// exchange, an API key, and the dev-open principal; false for a
+	// non-wildcard Google account, an embed token and a dataset token.
+	Operator bool
 }
 
 // IdentityFunc resolves the principal from a request. The host reads its own
@@ -104,7 +111,9 @@ type Config struct {
 
 	// Attention backs GET /agent/attention-requests, the Desk's Asks stack
 	// (design B1). Same defaulting rule as Workers: auto-filled from AgentDB,
-	// 501 without one. Read-only by design — see attention.go.
+	// 501 without one. Its one write (resolve) and the reply hook on
+	// SendMessage need the store to implement AttentionAnswerer too — see
+	// attention.go.
 	Attention AttentionStore
 
 	// Memories backs the §7.6 memory paths — the snippet search at
@@ -206,6 +215,30 @@ type Config struct {
 	// has — so the host wires it in cmd/agentd. Nil is a supported deployment
 	// and the route answers 501, the same way every other unwired seam does.
 	GitBootstrap GitBootstrapper
+
+	// Usage backs GET /agent/usage (ticket A4,
+	// design/2026-09-11-onboarding-work-plan.md §1.4) — the token/cost/query
+	// totals behind the console's budget panel. Same defaulting rule as
+	// Workers: auto-filled from AgentDB, 501 without one (Postgres-only, like
+	// the budget it reports against).
+	Usage UsageStore
+	// UsageLocation is the stack-local zone GET /agent/usage's "today" window
+	// resets at midnight in. It MUST be the same *time.Location the router's
+	// tokenBudget uses (router.go, tokenBudget.Location()) — cmd/agentd wires
+	// both from the one value it constructs at boot, so the console's usage
+	// panel and the budget gate can never silently disagree about when "today"
+	// starts. nil defaults to time.Local, the same default tokenBudget itself
+	// applies when unconfigured.
+	UsageLocation *time.Location
+	// UsageNow, when set, replaces time.Now for GET /agent/usage's window
+	// arithmetic. Test-only seam; production leaves it nil.
+	UsageNow func() time.Time
+	// CredentialMode names the model credential agentd booted with —
+	// "api-key" | "subscription" | "mock" (cmd/agentd/modelproxy.go,
+	// credentialMode()) — echoed on GET /agent/usage so the console can render
+	// the right billing sentence. An unset host leaves this "", which the
+	// route still reports verbatim rather than guessing.
+	CredentialMode string
 }
 
 // Tenancy contract
@@ -307,6 +340,11 @@ func New(cfg Config) (*Handlers, error) {
 	if cfg.Events == nil && cfg.AgentDB != nil {
 		cfg.Events = cfg.AgentDB
 	}
+	// GET /agent/usage (A4) defaults like every other metadata store: 501 on
+	// the sqlite fallback, where there is no jsonb ledger to sum.
+	if cfg.Usage == nil && cfg.AgentDB != nil {
+		cfg.Usage = cfg.AgentDB
+	}
 	return &Handlers{cfg: cfg}, nil
 }
 
@@ -405,6 +443,12 @@ type Endpoints struct {
 	RevertConfigEvent string // "POST /agent/config-events/{id}/revert"
 	// Attention requests (design B1) — read-only; the project comes from the JWT.
 	AttentionRequests string // "GET /agent/attention-requests"
+	// The one write beside it: a person acknowledging a request on the Desk.
+	ResolveAttentionRequest string // "POST /agent/attention-requests/{id}/resolve"
+	// Usage (ticket A4) — read-only; the project comes from the JWT. Reports
+	// the same token ledger the router's budget gate reads, plus a truthful
+	// cost, a query count, the project's budget, and the boot credential mode.
+	Usage string // "GET /agent/usage"
 	// Memory (§7.6) — the project comes from the JWT, never from the request.
 	// ListMemories answers 500-byte snippets; the next two answer one memory in
 	// full (T18), which is what an embedding application renders its state from.
@@ -481,6 +525,11 @@ type Endpoints struct {
 	// one place; Mux() does NOT register it — NewGitWebhookHandler
 	// (gitwebhook.go) builds the http.Handler the host mounts by hand.
 	GitWebhook string // "POST /agent/git/webhook"
+
+	// Whoami answers who the caller's credential is and whether it is the
+	// operator (onboarding-work-plan §1.1) — the console's one read for
+	// deciding whether to render the budget-editing form.
+	Whoami string // "GET /agent/whoami"
 }
 
 // DefaultEndpoints is the canonical route layout.
@@ -514,22 +563,24 @@ var DefaultEndpoints = Endpoints{
 	PutWorker:        "PUT /agent/workers/{name}",
 	DeleteWorker:     "DELETE /agent/workers/{name}",
 
-	GetProjectSettings: "GET /agent/project-settings",
-	PutProjectSettings: "PUT /agent/project-settings",
-	IngestEvent:        "POST /agent/events",
-	ListEvents:         "GET /agent/events",
-	Subscriptions:      "/agent/subscriptions",
-	Subscription:       "/agent/subscriptions/{id}",
-	Deliveries:         "GET /agent/deliveries",
-	ProjectToken:       "POST /agent/project-token",
-	Schedules:          "/agent/schedules",
-	Schedule:           "/agent/schedules/{id}",
-	ConfigEvents:       "GET /agent/config-events",
-	ConfigEvent:        "GET /agent/config-events/{id}",
-	RevertConfigEvent:  "POST /agent/config-events/{id}/revert",
-	AttentionRequests:  "GET /agent/attention-requests",
-	ListMemories:       "GET /agent/memories",
-	CreateMemory:       "POST /agent/memories",
+	GetProjectSettings:      "GET /agent/project-settings",
+	PutProjectSettings:      "PUT /agent/project-settings",
+	IngestEvent:             "POST /agent/events",
+	ListEvents:              "GET /agent/events",
+	Subscriptions:           "/agent/subscriptions",
+	Subscription:            "/agent/subscriptions/{id}",
+	Deliveries:              "GET /agent/deliveries",
+	ProjectToken:            "POST /agent/project-token",
+	Schedules:               "/agent/schedules",
+	Schedule:                "/agent/schedules/{id}",
+	ConfigEvents:            "GET /agent/config-events",
+	ConfigEvent:             "GET /agent/config-events/{id}",
+	RevertConfigEvent:       "POST /agent/config-events/{id}/revert",
+	AttentionRequests:       "GET /agent/attention-requests",
+	ResolveAttentionRequest: "POST /agent/attention-requests/{id}/resolve",
+	Usage:                   "GET /agent/usage",
+	ListMemories:            "GET /agent/memories",
+	CreateMemory:            "POST /agent/memories",
 	// The literal segment beats the {id} wildcard in ServeMux precedence, so
 	// these two coexist without an ordering rule to remember.
 	GetMemory:     "GET /agent/memories/{id}",
@@ -552,6 +603,8 @@ var DefaultEndpoints = Endpoints{
 	GitBootstrap:        GitBootstrapEndpoint,
 	// Not registered by Mux() — see the field comment on Endpoints.GitWebhook.
 	GitWebhook: "POST /agent/git/webhook",
+
+	Whoami: "GET /agent/whoami",
 }
 
 // Mux registers every handler on a fresh *http.ServeMux. Mount it under your
@@ -610,33 +663,35 @@ func (h *Handlers) Mux() *http.ServeMux {
 	}
 	// Events & routing — each guarded so a host can unmount one by blanking it.
 	for pattern, handler := range map[string]http.HandlerFunc{
-		e.IngestEvent:       h.IngestEvent,
-		e.ListEvents:        h.ListEvents,
-		e.Subscriptions:     h.Subscriptions,
-		e.Subscription:      h.Subscription,
-		e.Deliveries:        h.ListDeliveries,
-		e.ProjectToken:      h.ProjectToken,
-		e.Schedules:         h.Schedules,
-		e.Schedule:          h.Schedule,
-		e.ConfigEvents:      h.ListConfigEvents,
-		e.ConfigEvent:       h.GetConfigEvent,
-		e.RevertConfigEvent: h.RevertConfigEvent,
-		e.AttentionRequests: h.ListAttentionRequests,
-		e.ListMemories:      h.ListMemories,
-		e.ListDatasets:      h.ListDatasets,
-		e.GetDataset:        h.GetDataset,
-		e.DatasetVersions:   h.ListDatasetVersions,
-		e.DownloadDataset:   h.DownloadDataset,
-		e.CreateMemory:      h.CreateMemory,
-		e.GetMemory:         h.GetMemory,
-		e.CurrentMemory:     h.CurrentMemory,
-		e.ListTopologies:    h.ListTopologies,
-		e.PreviewTopology:   h.PreviewTopology,
-		e.ApplyTopology:     h.ApplyTopologyHandler,
-		e.CurrentCharter:    h.GetCurrentCharter,
-		e.ApplyCharter:      h.ApplyCharter,
-		e.ListImages:        h.ListImages,
-		e.ListSkills:        h.ListSkills,
+		e.IngestEvent:             h.IngestEvent,
+		e.ListEvents:              h.ListEvents,
+		e.Subscriptions:           h.Subscriptions,
+		e.Subscription:            h.Subscription,
+		e.Deliveries:              h.ListDeliveries,
+		e.ProjectToken:            h.ProjectToken,
+		e.Schedules:               h.Schedules,
+		e.Schedule:                h.Schedule,
+		e.ConfigEvents:            h.ListConfigEvents,
+		e.ConfigEvent:             h.GetConfigEvent,
+		e.RevertConfigEvent:       h.RevertConfigEvent,
+		e.AttentionRequests:       h.ListAttentionRequests,
+		e.ResolveAttentionRequest: h.ResolveAttentionRequest,
+		e.Usage:                   h.GetUsage,
+		e.ListMemories:            h.ListMemories,
+		e.ListDatasets:            h.ListDatasets,
+		e.GetDataset:              h.GetDataset,
+		e.DatasetVersions:         h.ListDatasetVersions,
+		e.DownloadDataset:         h.DownloadDataset,
+		e.CreateMemory:            h.CreateMemory,
+		e.GetMemory:               h.GetMemory,
+		e.CurrentMemory:           h.CurrentMemory,
+		e.ListTopologies:          h.ListTopologies,
+		e.PreviewTopology:         h.PreviewTopology,
+		e.ApplyTopology:           h.ApplyTopologyHandler,
+		e.CurrentCharter:          h.GetCurrentCharter,
+		e.ApplyCharter:            h.ApplyCharter,
+		e.ListImages:              h.ListImages,
+		e.ListSkills:              h.ListSkills,
 
 		e.GitProjectionStatus: h.GetGitProjectionStatus,
 		e.GitBootstrap:        h.GitBootstrap,
@@ -645,6 +700,8 @@ func (h *Handlers) Mux() *http.ServeMux {
 		e.DownloadArtifact:          h.DownloadArtifact,
 		e.SessionArtifactsByName:    h.SessionArtifactsByName,
 		e.SessionArtifactFileByName: h.SessionArtifactFileByName,
+
+		e.Whoami: h.Whoami,
 	} {
 		if pattern != "" {
 			m.HandleFunc(pattern, handler)

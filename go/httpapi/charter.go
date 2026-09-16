@@ -3,7 +3,7 @@ package httpapi
 // charter.go — the two routes onboarding needs (T11 of
 // design/2026-09-08-memory-coordinated-organisation.md):
 //
-//	GET  /agent/charter/current?session=<id>  — read the deposited charter
+//	GET  /agent/charter/current?session=<id>  — read the deposited charter (204: none yet)
 //	POST /agent/charter/apply                 — approve it, once, atomically
 //
 // The rule that shapes both: the charter is read from the STORE, never from
@@ -32,20 +32,47 @@ import (
 	"github.com/badcodetv/agent-bob/topology"
 )
 
-// charterMissing is the 404 body. It is a sentence rather than a code because
-// the console renders it directly, and because "not found" on this route means
-// something specific and recoverable: the interview has not finished yet.
+// charterMissing is apply's 404 body. It is a sentence rather than a code
+// because the console renders it directly, and because "not found" there means
+// something specific and recoverable: the interview has not finished yet. The
+// read route answers the same condition with a bodiless 204 (see
+// GetCurrentCharter).
 const charterMissing = "no charter has been proposed yet — the interview has to deposit an org-charter memory first"
 
 // charterResp is what GET /agent/charter/current answers. It carries the
 // parsed charter, the verdict, and — only when valid — a summary of what
 // approving would do. Never the resolved bundle: see charter.Summarise.
 type charterResp struct {
-	Charter          *charter.Charter `json:"charter"`
-	Summary          string           `json:"summary"`
-	MemoryID         string           `json:"memory_id"`
-	CreatedAt        int64            `json:"created_at"`
-	Valid            bool             `json:"valid"`
+	Charter   *charter.Charter `json:"charter"`
+	Summary   string           `json:"summary"`
+	MemoryID  string           `json:"memory_id"`
+	CreatedAt int64            `json:"created_at"`
+	Valid     bool             `json:"valid"`
+	// Applied is the server's own answer to "has this interview's charter been
+	// approved?", and it is why this field exists at all.
+	//
+	// Nothing reported that fact before. The console had to INFER it, and the
+	// only observable it had was a name: it asked `GET /agent/workers` whether a
+	// worker called `architect` existed, because approving a charter's one
+	// immediate roster effect is to create the architect. A charter that sets a
+	// custom `architect_name` — which the schema allows and an interviewer may
+	// well produce — defeated that guess completely: the project read as
+	// still-in-interview forever, and the console showed "Finish setting up this
+	// project" with no way past it. Recorded as DI10 in
+	// design/2026-09-11-onboarding-work-plan.md, alongside DI29, which was the
+	// same root cause in a different disguise — the shell deciding a server fact
+	// for itself.
+	//
+	// It is derived from the config log rather than from a new column, and that
+	// is deliberate: the apply already writes a `topology_apply` bracket event
+	// naming the interview session in its answers (agentdb/topology_apply.go),
+	// the log is append-only with a total order, and nothing can forge it. So
+	// there is a durable, authoritative record already — it simply was not
+	// being read. No migration, and no second source of truth to drift.
+	Applied bool `json:"applied"`
+	// AppliedAt is when, in unix ms — the approving event's own timestamp.
+	// Omitted while Applied is false.
+	AppliedAt        int64            `json:"applied_at,omitempty"`
 	Errors           []charter.Issue  `json:"errors,omitempty"`
 	SummaryOfEffects *charter.Effects `json:"summary_of_effects,omitempty"`
 }
@@ -106,8 +133,14 @@ func (h *Handlers) GetCurrentCharter(w http.ResponseWriter, r *http.Request) {
 	// applied afterwards. So a wrong project is "no charter", never "there is
 	// one but you may not see it" — no existence oracle. Anything else is a
 	// 500: a database refusing connections is not a charter that is missing.
+	//
+	// No charter yet is 204, not 404. It is the normal state for most of an
+	// interview, and the onboarding screen polls this route every few seconds:
+	// as a 404 every poll was logged by the browser as a failed request, a
+	// console full of red on a screen where nothing was wrong. Apply keeps its
+	// 404 — approving a charter that does not exist IS a failure.
 	if errors.Is(err, agentdb.ErrMemoryNotFound) {
-		http.Error(w, charterMissing, http.StatusNotFound)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if err != nil {
@@ -116,6 +149,12 @@ func (h *Handlers) GetCurrentCharter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := charterResp{MemoryID: mem.ID, CreatedAt: mem.CreatedAt}
+	// Before the parse, so that EVERY 200 carries it — including the
+	// valid:false ones. An approved project whose interview later deposited
+	// something malformed must still report applied:true, or the console would
+	// send a finished project back into onboarding on the strength of a stray
+	// re-deposit.
+	resp.Applied, resp.AppliedAt = h.charterApplied(r, id.Customer, session)
 	parsed, summary, err := charter.Parse(mem.Content)
 	if err != nil {
 		// A deposit that does not parse is a 200 with valid:false, not a 500.
@@ -221,7 +260,126 @@ func (h *Handlers) ApplyCharter(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.disableInterviewer(r, id.Customer, session)
-	writeJSON(w, result)
+	resp := charterApplyResp{TopologyApplyResult: result}
+	resp.ArchitectRunEventID, resp.ArchitectRunError = h.startArchitect(r, id.Customer, session)
+	writeJSON(w, resp)
+}
+
+// charterApplyResp is the apply's read-back plus one fact about what happened
+// next: whether the architect's first run was started.
+//
+// The result is embedded, so every field the console already reads stays at
+// the top level and the change is additive on the wire.
+type charterApplyResp struct {
+	*agentdb.TopologyApplyResult
+	// ArchitectRunEventID is the `architect.run` event this approval emitted.
+	// Empty when none was — ArchitectRunError then says why.
+	ArchitectRunEventID string `json:"architect_run_event_id,omitempty"`
+	// ArchitectRunError is the server's own sentence for why the first run was
+	// not started although the charter applied. The approval itself succeeded;
+	// the console falls back to offering "Run the architect now".
+	ArchitectRunError string `json:"architect_run_error,omitempty"`
+}
+
+// architectFirstRunText is the event text of the run an approval starts. It
+// reaches the architect fenced as data, never as an instruction (§6.2.4); its
+// prompt's step 0 already knows what a first run is for.
+const architectFirstRunText = "The onboarding charter was just approved in the console. This first run was started automatically by that approval."
+
+// startArchitect emits `architect.run` the moment a charter is approved, so the
+// human who pressed Approve watches the team form instead of waiting for the
+// daily schedule or hunting for a button.
+//
+// It is the SAME write POST /agent/events performs — a project event with the
+// external envelope, picked up by the router through the subscription the
+// charter just created — so the run is logged, routed, capacity-gated and
+// budgeted exactly like the button's. There is no second dispatch path.
+//
+// It cannot double-fire: it runs only after ApplyTopology committed, and a
+// second apply of the same charter is refused by the store before reaching
+// here (the architect's name is taken — 409, TestApplyCharter_SecondApplyIs409).
+//
+// Failure is reported, not raised. The charter has committed; a 500 would tell
+// the human the approval failed when it did not.
+func (h *Handlers) startArchitect(r *http.Request, project, session string) (eventID, problem string) {
+	if h.cfg.Events == nil {
+		return "", "events are not configured on this host, so the architect was not started"
+	}
+	ev, err := h.cfg.Events.CreateProjectEvent(r.Context(), externalEvent(project, charter.EventArchitectRun,
+		architectFirstRunText+" Interview session: "+session+"."))
+	if err != nil {
+		return "", "the charter was approved, but the architect could not be started: " + err.Error()
+	}
+	return ev.ID, ""
+}
+
+// charterAppliedScanCap bounds how far back the apply search reads. A project
+// applies a topology a handful of times in its life — onboarding is once — so
+// this is orders of magnitude more history than the answer can hide behind,
+// and it keeps a pathological project from turning a poll into a table scan.
+const charterAppliedScanCap = 200
+
+// charterApplied asks the config log whether this interview's charter was
+// approved, and when.
+//
+// The match is on the interview SESSION, not on the memory id, and the
+// difference matters. An interview may revise its deposit several times; the
+// human approves one of them, and `GET /agent/charter/current` then reports the
+// NEWEST deposit, which may not be the approved one. The question the console
+// actually asks is "is this project still in setup?", and the honest answer to
+// that is "has any charter from this interview been approved" — so matching the
+// session is right and matching the id would report a finished project as
+// unfinished.
+//
+// Two failure modes, both deliberately quiet. With no config log wired (the
+// sqlite fallback, where the product layer is not wired at all) the answer is
+// false: there is no charter to have applied. And a log read that errors also
+// answers false rather than failing the route — this field is an extra on a
+// response whose primary job is to render the charter, and a database hiccup
+// should not blank the screen a human is reading. The cost of that choice is
+// that a project can read as unfinished for one poll; the cost of the opposite
+// choice is a 500 on the onboarding screen.
+func (h *Handlers) charterApplied(r *http.Request, project, session string) (bool, int64) {
+	if h.cfg.ConfigLog == nil {
+		return false, 0
+	}
+	events, err := h.cfg.ConfigLog.ListConfigEvents(r.Context(), agentdb.ConfigEventQuery{
+		Project: project,
+		Action:  agentdb.ActionTopologyApply,
+		Limit:   charterAppliedScanCap,
+	})
+	if err != nil {
+		return false, 0
+	}
+	// Newest first, so the first match is the most recent approval.
+	for _, ev := range events {
+		if ev == nil {
+			continue
+		}
+		if answered(ev.Payload["answers"], "session") == session {
+			return true, ev.CreatedAt
+		}
+	}
+	return false, 0
+}
+
+// answered reads one string out of a `topology_apply` payload's answers.
+//
+// The type switch is not defensiveness for its own sake: `Payload` is written
+// as an agentdb.JSONMap and read back through a json.Unmarshal, and which of
+// the two shapes the nested object arrives as depends on the backend and on
+// whether the row came from the write path or from the database. Asserting one
+// of them would work in the tests and fail in production, or the reverse.
+func answered(raw any, key string) string {
+	switch m := raw.(type) {
+	case agentdb.JSONMap:
+		s, _ := m[key].(string)
+		return s
+	case map[string]any:
+		s, _ := m[key].(string)
+		return s
+	}
+	return ""
 }
 
 // charterMemory resolves which deposit is being approved: the one the console

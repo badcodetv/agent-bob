@@ -7,24 +7,31 @@ import {
   ActivityPage,
   CredentialModeBadge,
   DeskPage,
+  GuideProvider,
   MemoryBrowserPage,
   NAV_LABELS,
   OnboardingPage,
   OrgChartPage,
   ProjectSettingsPage,
   WorkersPage,
-  navRevealSentence,
+  buildGuideHash,
+  navRevealSummary,
+  parseGuideHash,
   projectIdFromLocation,
+  useAgentChat,
   useAsksCount,
   useNavReveal,
   usePrefersReducedMotion,
   useSessionPermalink,
+  type GuideParagraphMap,
   type NavEntry,
 } from "@agentkit/chat-ui";
 import { AuthConfig, AuthState, clearAuthState, fetchAuthConfig, loadAuthState, mintProjectToken, saveAuthState } from "./auth";
+import GuidePage from "./GuidePage";
+import { GUIDE_PAGES } from "./guide/pages.generated.js";
 import LoginScreen from "./LoginScreen";
 import ProjectPicker from "./ProjectPicker";
-import { useOnboardingSession } from "./onboarding";
+import { deskPath, useInterviewState, useOnboardingSession } from "./onboarding";
 import Sidebar from "./Sidebar";
 import { darkTheme, lightTheme } from "./theme";
 
@@ -80,6 +87,25 @@ type View = NavEntry;
 // both were unreachable.
 const LIVE_REFRESH_MS = 15_000;
 
+// The bridge C2 depends on: `GUIDE_PAGES` (built by build-guide.mjs from
+// docs/guide/*.md, ticket C1) is keyed by slug and carries each page's
+// `surfaces` list; `AboutThisScreen` looks a paragraph up BY SURFACE. This is
+// the one place that inversion happens, so `web/` itself never has to import
+// a generated file to make the lookup it needs (design §3 G2). First page
+// wins a surface named on more than one: `GUIDE_PAGES` is already sorted by
+// part/order (build-guide.mjs), so "first" is deterministic, and two pages
+// claiming the same surface is a Stream-B authoring mistake this shell is not
+// the place to catch.
+function buildGuideParagraphs(pages: typeof GUIDE_PAGES): GuideParagraphMap {
+  const map: GuideParagraphMap = {};
+  for (const page of pages) {
+    for (const surface of page.surfaces) {
+      if (!(surface in map)) map[surface] = { slug: page.slug, text: page.firstParagraph };
+    }
+  }
+  return map;
+}
+
 // App state machine: loading → dev (legacy /dev/token, straight to chat)
 //                            → login → project picker → chat (per-project JWT)
 export default function App() {
@@ -91,6 +117,10 @@ export default function App() {
   // value, not by inversion (design §3.3).
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
   const theme = prefersDark ? darkTheme : lightTheme;
+
+  // Built once: GUIDE_PAGES is a build-time constant (empty until docs/guide/
+  // has pages — C1's "guide not written yet" case), never refetched.
+  const guideParagraphs = useMemo(() => buildGuideParagraphs(GUIDE_PAGES), []);
 
   useEffect(() => {
     fetchAuthConfig(API)
@@ -234,7 +264,9 @@ export default function App() {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <ProjectPicker auth={auth} onSelect={selectProject} onCreate={createProject} onSignOut={signOut} />
+        <GuideProvider paragraphs={guideParagraphs}>
+          <ProjectPicker auth={auth} onSelect={selectProject} onCreate={createProject} onSignOut={signOut} />
+        </GuideProvider>
       </ThemeProvider>
     );
   }
@@ -244,16 +276,18 @@ export default function App() {
       <CssBaseline />
       {/* Keyed by project: switching remounts the provider with the new token. */}
       <AgentChatProvider key={project} config={chatConfig}>
-        <ProjectWorkspace
-          auth={auth}
-          credentialMode={credentialMode}
-          project={project}
-          onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
-          onOnboardingDone={() => setPendingOnboarding(null)}
-          onSwitchProject={selectProject}
-          onCreateProject={createProject}
-          onSignOut={signOut}
-        />
+        <GuideProvider paragraphs={guideParagraphs}>
+          <ProjectWorkspace
+            auth={auth}
+            credentialMode={credentialMode}
+            project={project}
+            onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
+            onOnboardingDone={() => setPendingOnboarding(null)}
+            onSwitchProject={selectProject}
+            onCreateProject={createProject}
+            onSignOut={signOut}
+          />
+        </GuideProvider>
       </AgentChatProvider>
     </ThemeProvider>
   );
@@ -287,11 +321,41 @@ function ProjectWorkspace({
   onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
-  // "onboarding" is a shell-owned TRANSIENT view, deliberately not a NavEntry:
-  // the nav is progressive and its entries are earned by what a project
-  // contains (K9), whereas onboarding is a thing you are doing right now and
-  // never come back to from a nav bar.
-  const [view, setView] = useState<View | "onboarding">(onboardingGoal !== null ? "onboarding" : "desk");
+  // "onboarding" and "guide" are shell-owned views, deliberately not
+  // NavEntries: the nav is progressive and its entries are earned by what a
+  // project contains (K9). Onboarding is a thing you are doing right now and
+  // never come back to from a nav bar; the guide is the opposite case — it is
+  // NOT content-driven (it is a book, always there, design §3 G7) and is
+  // rendered as a permanent extra button rather than folded into the earned
+  // set, so adding it never needed a reveal rule.
+  const [view, setView] = useState<View | "onboarding" | "guide">(() => {
+    if (onboardingGoal !== null) return "onboarding";
+    if (parseGuideHash(window.location.hash) !== null) return "guide";
+    return "desk";
+  });
+
+  // The guide's own deep link (`#/guide/<slug>`, §3 G7) — kept beside `view`
+  // rather than inside GuidePage so a reload or a pasted link lands on the
+  // right page before GuidePage ever mounts. `null` slug is "not on the guide
+  // right now"; `""` is the bare index (GuidePage redirects that to page one).
+  const [guideSlug, setGuideSlug] = useState<string | null>(() => parseGuideHash(window.location.hash));
+  useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseGuideHash(window.location.hash);
+      if (parsed !== null) {
+        setGuideSlug(parsed);
+        setView("guide");
+      }
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  const openGuide = useCallback(() => {
+    // Preserve whatever page the reader last had open; buildGuideHash(null)
+    // → the bare index only the very first time this project opens the guide.
+    window.location.hash = buildGuideHash(guideSlug);
+    setView("guide");
+  }, [guideSlug]);
 
   // Which nav entries this project has earned (K9). Day one is four; Memory
   // arrives with the first memory, Activity with the first event, and Chart
@@ -308,8 +372,10 @@ function ProjectWorkspace({
 
   // A view can stop being visible only by the project changing under us (a
   // reveal is sticky), but a stale `view` would render a hidden surface — so
-  // fall back to the Desk, which is always there.
-  const shownView = view === "onboarding" || visible.includes(view) ? view : "desk";
+  // fall back to the Desk, which is always there. "guide" is exempt from the
+  // reveal check the same way "onboarding" is: it is not one of the earned
+  // NavEntries (§3 G7 — "it is not content-driven, it is a book").
+  const shownView = view === "onboarding" || view === "guide" || visible.includes(view) ? view : "desk";
 
   // The only number in the chrome (design §3.5): how many things are asking for
   // you — through useAsksCount, which applies the very join the Asks stack
@@ -319,21 +385,63 @@ function ProjectWorkspace({
   // While the Desk is open it already holds both lists, so it reports its own
   // count up and this hook stands down (W4 collapsing X7's duplicate fetch).
   const onDesk = view === "desk";
+  const projectToken = auth.projects.find((p) => p.id === project)?.token ?? "";
   // The interview itself: created once, reused on re-entry, and never started
   // at all unless this project is actually being onboarded.
   const { sessionId: onboardSessionId, error: onboardError } = useOnboardingSession({
     apiBase: API,
-    token: auth.projects.find((p) => p.id === project)?.token ?? "",
-    goal: onboardingGoal,
+    token: projectToken,
     enabled: view === "onboarding",
   });
+  // Whether this PROJECT (not this browser tab) is still in its interview —
+  // the server-derived replacement for the localStorage-only gate (design §3
+  // G1 / A2). Independent of `onboardSessionId` above, which only exists once
+  // the onboarding VIEW has actually started or rejoined the session; this
+  // one is known as soon as the workspace mounts, so the Desk and Workers can
+  // withhold the topology seed and Desk can offer a way back in before the
+  // human ever opens the onboarding view this visit.
+  const { inInterview, onboardSessionId: interviewSessionId, resolved: interviewResolved } =
+    useInterviewState({ apiBase: API, token: projectToken });
+  const openOnboarding = useCallback(() => setView("onboarding"), []);
+  // Leaving the interview for the Desk lets go of the interview session first:
+  // with it still bound, the permalink would write it into the address bar and
+  // a reload would land on the transcript instead of the Desk.
+  const { clearSession } = useAgentChat();
+  const openDeskAfterOnboarding = useCallback(() => {
+    clearSession();
+    window.history.pushState(null, "", deskPath(project) + window.location.search);
+    setView("desk");
+  }, [clearSession, project]);
+  // The pending goal is only a carrier for the text between project creation
+  // and the interview's first seed message (design §3 G1) — once the server
+  // says the interview is over, forget it, or a later reload of this project
+  // would read the stale goal and jump straight back into the onboarding view
+  // (the exact "state of the browser, not the project" bug G1 fixes).
+  //
+  // "Over" needs an interview session to exist. `inInterview` is also false
+  // before the interview has STARTED — the first check runs at mount, before
+  // the `onboard` session is created — and clearing the goal then (as this
+  // did) handed the onboarding screen a null goal, so the seed told the
+  // interviewer nobody had written one. Invisible while the seed was sent from
+  // startOnboarding, which captured the goal before the check came back; the
+  // same confusion DI29 was, one hook further out.
+  useEffect(() => {
+    if (interviewResolved && !inInterview && interviewSessionId !== null) onOnboardingDone();
+  }, [interviewResolved, inInterview, interviewSessionId, onOnboardingDone]);
   const [deskAsks, setDeskAsks] = useState(0);
   const { count: fetchedAsks } = useAsksCount({ enabled: !onDesk });
   const openAsks = onDesk ? deskAsks : fetchedAsks;
 
   // URL ⇄ active session, both directions: a pasted /p/<project>/s/<session>
   // resumes that session, and whatever session is open is already permalinked.
-  const { openSession, routeSessionId } = useSessionPermalink({ projectId: project });
+  //
+  // Not while onboarding: that screen resumes the interview into the provider,
+  // and a permalink written for it would, on a reload, resume the interview
+  // into the CHAT view below before the onboarding screen could claim it.
+  const { openSession, routeSessionId } = useSessionPermalink({
+    projectId: project,
+    enabled: shownView !== "onboarding",
+  });
 
   // Whenever the routed session CHANGES, show it. Same reasoning as
   // `showSession` below, applied to the two paths that do not go through it: a
@@ -346,6 +454,11 @@ function ProjectWorkspace({
   // wrong view first. Switching only on a *change* leaves the human free to
   // walk to Workers or Settings with a session open.
   const shownSession = useRef<string | null>(null);
+  // The interview is already "shown" — by the onboarding screen, which binds
+  // the provider to it. Without this, walking from onboarding to the Desk
+  // re-enables the permalink, it notices the provider's session, and this
+  // check would yank the human into Chat.
+  if (view === "onboarding" && onboardSessionId !== "") shownSession.current = onboardSessionId;
   if (routeSessionId !== null && shownSession.current !== routeSessionId) {
     shownSession.current = routeSessionId;
     setView("chat");
@@ -389,19 +502,41 @@ function ProjectWorkspace({
         <ViewNav
           view={shownView}
           entries={visible}
+          // Navigating away no longer ends the interview (design §3 G1): it is
+          // a state of the project, derived above from the server, so a nav
+          // click can never again strand the human with no way back to the
+          // charter and Approve. C1 arrived with the opposite behaviour still
+          // in this handler — `if (view === "onboarding") onOnboardingDone()`
+          // — because its branch predates A2; taking C1's side of the conflict
+          // would have silently reverted A2's whole ticket, so that line is
+          // deliberately gone and only the guide's cleanup survives from C1.
           onChange={(next) => {
-            // Leaving onboarding ends it: clearing the pending goal stops a
-            // later remount from dropping the human back into the interview.
-            if (view === "onboarding") onOnboardingDone();
+            // Leaving the guide clears its hash (a history REPLACE, so this
+            // does not cost a back-button step either): otherwise a reload
+            // on, say, Desk would find the guide's stale `#/guide/...` still
+            // in the address bar and jump straight back to it.
+            if (view === "guide") {
+              window.history.replaceState(null, "", window.location.pathname + window.location.search);
+            }
             setView(next);
           }}
           asks={openAsks}
+          onOpenGuide={openGuide}
         />
         <RevealNotice appeared={appeared} onDismiss={acknowledge} />
         {/* The sidebar stays mounted in every view: it carries the project
             switcher and the session list, which are how you leave a view. */}
         <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <Sidebar auth={auth} project={project} onSwitchProject={onSwitchProject} onCreateProject={onCreateProject} onSignOut={onSignOut} />
+          <Sidebar
+            auth={auth}
+            project={project}
+            onSwitchProject={onSwitchProject}
+            onCreateProject={onCreateProject}
+            onSignOut={onSignOut}
+            onboardSessionId={interviewSessionId}
+            inInterview={inInterview}
+            onOpenOnboarding={openOnboarding}
+          />
         </Box>
       </Box>
 
@@ -414,6 +549,9 @@ function ProjectWorkspace({
             onAsksCount={setDeskAsks}
             onStartFromTopology={() => setView("workers")}
             onOpenChat={() => setView("chat")}
+            inInterview={inInterview}
+            onOpenOnboarding={openOnboarding}
+            onOpenMemory={() => setView("memory")}
           />
         )}
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link
@@ -421,7 +559,7 @@ function ProjectWorkspace({
         {shownView === "chart" && (
           <OrgChartPage projectId={project} onOpenAutomation={openScheduleFromChart} />
         )}
-        {shownView === "chat" && <AgentChat />}
+        {shownView === "chat" && <AgentChat projectId={project} />}
         {shownView === "workers" && (
           <WorkersPage
             projectId={project}
@@ -429,11 +567,12 @@ function ProjectWorkspace({
             selected={workerFromChart}
             onSelect={setWorkerFromChart}
             initialTab={triggersFromChart ? "triggers" : undefined}
+            hideTopologySeed={inInterview}
           />
         )}
         {/* No fetchConfigEvents: GET /agent/config-events is mounted, so the
             changelog tab reads the route directly. */}
-        {shownView === "memory" && <MemoryBrowserPage onOpenSession={showSession} />}
+        {shownView === "memory" && <MemoryBrowserPage projectId={project} onOpenSession={showSession} />}
         {shownView === "activity" && (
           <ActivityPage
             projectId={project}
@@ -441,14 +580,18 @@ function ProjectWorkspace({
             onOpenSession={showSession}
           />
         )}
-        {shownView === "settings" && <ProjectSettingsPage />}
+        {shownView === "settings" && <ProjectSettingsPage projectId={project} />}
         {shownView === "onboarding" && (
           <OnboardingPage
             sessionId={onboardSessionId}
             sessionError={onboardError}
+            goal={onboardingGoal}
             refreshMs={4000}
+            projectId={project}
+            onOpenDesk={openDeskAfterOnboarding}
           />
         )}
+        {shownView === "guide" && <GuidePage slug={guideSlug} />}
       </Box>
     </Box>
   );
@@ -479,11 +622,8 @@ function RevealNotice({ appeared, onDismiss }: { appeared: NavEntry[]; onDismiss
         transition: reduced ? "none" : "opacity 180ms ease-out",
       }}
     >
-      {appeared.map((entry) => (
-        <Box key={entry} sx={{ mb: 0.5 }}>
-          {navRevealSentence(entry)}
-        </Box>
-      ))}
+      {/* One line for everything revealed at once, not one line each. */}
+      <Box sx={{ mb: 0.5 }}>{navRevealSummary(appeared)}</Box>
       <Button size="small" onClick={onDismiss} sx={{ textTransform: "none", fontSize: 11, minWidth: 0, p: 0 }}>
         Got it
       </Button>
@@ -501,14 +641,20 @@ function ViewNav({
   entries,
   onChange,
   asks,
+  onOpenGuide,
 }: {
-  // Widened for the shell's one transient view ("onboarding"), which is not a
-  // NavEntry and therefore highlights nothing here — correct: it is a thing
-  // you are doing, not a place you go back to.
-  view: View | "onboarding";
+  // Widened for the shell's two transient views ("onboarding", "guide"),
+  // neither of which is a NavEntry and so highlights nothing in the
+  // `entries.map` below — correct for onboarding (a thing you are doing, not
+  // a place you go back to) and for the guide for the opposite reason: it is
+  // drawn unconditionally, after this loop, because it is not earned by what
+  // the project contains (design §3 G7 — "it is not content-driven, it is a
+  // book").
+  view: View | "onboarding" | "guide";
   entries: NavEntry[];
   onChange: (v: View) => void;
   asks: number;
+  onOpenGuide: () => void;
 }) {
   return (
     <Box
@@ -530,6 +676,15 @@ function ViewNav({
           </Button>
         );
       })}
+      <Button
+        size="small"
+        variant={view === "guide" ? "contained" : "text"}
+        onClick={onOpenGuide}
+        data-testid="nav-guide"
+        sx={{ textTransform: "none", flexGrow: 1, minWidth: 0 }}
+      >
+        Guide
+      </Button>
     </Box>
   );
 }

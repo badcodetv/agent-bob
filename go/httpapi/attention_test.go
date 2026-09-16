@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/badcodetv/agent-bob"
 	"github.com/badcodetv/agent-bob/agentdb"
 )
 
@@ -256,5 +259,90 @@ func TestListAttentionRequests_LivePG(t *testing.T) {
 	}
 	if got := read(theirs, "?state=all"); len(got) != 1 || got[0].ID != "attn-theirs" {
 		t.Fatalf("the other project sees only its own row: %+v", got)
+	}
+}
+
+// fakeAnswerer is a fakeAttention that also implements the write half.
+type fakeAnswerer struct {
+	fakeAttention
+	answered []string // "project/session" per AnswerSessionAttention call
+	acked    []string // "project/id" per AcknowledgeAttentionRequest call
+	events   *[]string
+}
+
+func (f *fakeAnswerer) AnswerSessionAttention(_ context.Context, project, sessionID string, _ int64) (int, error) {
+	f.answered = append(f.answered, project+"/"+sessionID)
+	if f.events != nil {
+		*f.events = append(*f.events, "answer")
+	}
+	return 1, nil
+}
+
+func (f *fakeAnswerer) AcknowledgeAttentionRequest(_ context.Context, project, id string, at int64) (*agentdb.AttentionRequest, error) {
+	f.acked = append(f.acked, project+"/"+id)
+	if id != "r-1" {
+		return nil, agentdb.ErrAttentionRequestNotFound
+	}
+	return &agentdb.AttentionRequest{ID: id, Project: project, Kind: agentdb.AttentionKindNotice, AnsweredAt: at}, nil
+}
+
+func TestResolveAttentionRequest(t *testing.T) {
+	cases := []struct {
+		name     string
+		store    AttentionStore
+		identity IdentityFunc
+		path     string
+		want     int
+	}{
+		{name: "resolves within the token's project", store: &fakeAnswerer{}, identity: identityFor("acme"),
+			path: "/agent/attention-requests/r-1/resolve", want: http.StatusOK},
+		{name: "unknown id is 404", store: &fakeAnswerer{}, identity: identityFor("acme"),
+			path: "/agent/attention-requests/r-9/resolve", want: http.StatusNotFound},
+		{name: "projectless token is 403", store: &fakeAnswerer{}, identity: identityFor(""),
+			path: "/agent/attention-requests/r-1/resolve", want: http.StatusForbidden},
+		{name: "a read-only store is 501", store: &fakeAttention{}, identity: identityFor("acme"),
+			path: "/agent/attention-requests/r-1/resolve", want: http.StatusNotImplemented},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAttentionHandlers(t, tc.store, tc.identity)
+			rec := do(h, http.MethodPost, tc.path, "")
+			if rec.Code != tc.want {
+				t.Fatalf("status=%d want %d body=%s", rec.Code, tc.want, rec.Body)
+			}
+			if tc.want != http.StatusOK {
+				return
+			}
+			var got agentdb.AttentionRequest
+			decodeInto(t, rec, &got)
+			if got.AnsweredAt == 0 || got.Project != "acme" {
+				t.Fatalf("the resolved row must come back answered, in the token's project: %+v", got)
+			}
+		})
+	}
+}
+
+// A person's message closes what the session asked them — and does so BEFORE
+// the turn it starts, so a question asked in that turn stays open.
+func TestSendMessageAnswersAttentionFirst(t *testing.T) {
+	var order []string
+	store := &fakeAnswerer{events: &order}
+	h, _ := New(Config{
+		Runner: stubRunner{sendFn: func(context.Context, agentkit.SessionRef, agentkit.SendMessageRequest, agentkit.Writer) error {
+			order = append(order, "send")
+			return nil
+		}},
+		Store:     stubStore{},
+		Identity:  identityFor("acme"),
+		Attention: store,
+	})
+	req := httptest.NewRequest("POST", "/agent/session/s1/message", strings.NewReader(`{"content":"Thursday is fine"}`))
+	req.SetPathValue("id", "s1")
+	h.SendMessage(httptest.NewRecorder(), req)
+	if strings.Join(order, ",") != "answer,send" {
+		t.Fatalf("want the answer recorded before the turn starts, got %v", order)
+	}
+	if len(store.answered) != 1 || store.answered[0] != "acme/s1" {
+		t.Fatalf("answered: %v", store.answered)
 	}
 }

@@ -142,12 +142,22 @@ services:
       # setting it in .env is not a silent no-op; unset → agentd's 64MiB
       # default).
       AGENTKIT_DATASET_MAX_BYTES: ${AGENTKIT_DATASET_MAX_BYTES:-}
+      # Default daily token budgets for a BRAND NEW project (onboarding-work-plan
+      # §1.3). Applied only when a project has no project_settings row yet;
+      # existing projects keep what they have. Unset or 0 → off (today's
+      # behaviour).
+      AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT: ${AGENTKIT_DEFAULT_DAILY_TOKENS_SOFT:-}
+      AGENTKIT_DEFAULT_DAILY_TOKENS_HARD: ${AGENTKIT_DEFAULT_DAILY_TOKENS_HARD:-}
       # Agent Wolf project credentials (see .env.example). WOLF_API_KEY is
       # resolved via AGENTKIT_PROJECT_MAP's object form (api_key_env);
       # WOLF_MCP_TOKEN reaches session containers only because
       # AGENTKIT_MCP_ENV below allowlists its name.
       WOLF_API_KEY: ${WOLF_API_KEY:-}
       WOLF_MCP_TOKEN: ${WOLF_MCP_TOKEN:-}
+      # ENC website: a fine-grained GitHub token scoped to emperorsnewcoin/bob
+      # only. Reaches session containers only when AGENTKIT_MCP_ENV names it,
+      # and then reaches EVERY project's sessions — keep its scope to that repo.
+      ENC_GITHUB_TOKEN: ${ENC_GITHUB_TOKEN:-}
       AGENTKIT_JWT_SECRET: ${AGENTKIT_JWT_SECRET:-}
       # OPTIONAL. The signing key for per-session container tokens. Unset (the
       # normal case) agentd derives it from AGENTKIT_JWT_SECRET, so a session

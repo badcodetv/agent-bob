@@ -5,7 +5,10 @@
 > dies. Section 1 is a record of checks already run — re-run them if more than
 > a few weeks have passed, otherwise trust them and move on.
 
-Status: **READY TO EXECUTE — never yet applied to any cluster.**
+Status: **SUPERSEDED 2026-09-11 by `design/2026-09-11-ovh-compose-hosting.md`** — Bob will run
+as a Docker Compose stack on an OVH server, not on GKE (too expensive for the compute Bob needs).
+Kept as a record; §2's production-settings audit is still referenced by the new design.
+Previous status: **READY TO EXECUTE — never yet applied to any cluster.**
 Written 2026-09-09. The manifests it drives were written 2026-08-11 (`406f52b`)
 and their commit message says plainly: *"Nothing has been applied to any
 cluster."* That is still true. Everything below is the first run.

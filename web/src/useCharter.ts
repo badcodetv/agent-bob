@@ -10,10 +10,11 @@
 // revises, and the newest one wins). So the screen asks again, periodically,
 // and the panel appears when there is something to show.
 //
-// A 404 is the EMPTY STATE, not an error: "the interview has not deposited a
-// charter yet" is the normal condition for most of an interview's life, and
-// rendering it as a failure would put a red box on a screen where nothing is
-// wrong.
+// "No charter yet" is the EMPTY STATE, not an error: it is the normal condition
+// for most of an interview's life, and rendering it as a failure would put a
+// red box on a screen where nothing is wrong. The server says it with a 204
+// (it used to be a 404, which the browser logged as a failed request on every
+// poll); a 404 is still read the same way, for a server from before that.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { configApiStatus, useConfigApi, type ConfigApiOptions } from './configApi.js'
@@ -43,7 +44,8 @@ export interface CharterApi {
   charter: CharterCurrent | null
   /** True until the first fetch settles — distinct from "there is none". */
   loading: boolean
-  /** A read failure in the server's own words. A 404 is NOT one of these. */
+  /** A read failure in the server's own words. "No charter yet" (204, or a
+   *  404 from an older server) is NOT one of these. */
   error: string | null
   reload: () => Promise<void>
   /** POST /agent/charter/apply. Returns the read-back result, or null on
@@ -54,11 +56,20 @@ export interface CharterApi {
   applying: boolean
   applyError: string | null
   applyIssues: CharterIssue[]
-  /** True once an apply has succeeded in this session of the screen. The
-   *  server is the authority on whether a charter was applied; this is only
-   *  what THIS screen has seen, which is what the "Run the architect now"
-   *  control keys off. */
+  /** True when the charter has been approved — either because THIS screen saw
+   *  its own apply succeed, or because the server says so (`CharterCurrent`'s
+   *  `applied`, added for DI10). It used to be the first of those alone,
+   *  because the route reported nothing; the consequence was that a reload
+   *  mid-onboarding forgot the approval had happened and offered "Approve"
+   *  again on an already-approved charter. It is what the "Run the architect
+   *  now" control keys off, and what stops the poll. */
   applied: boolean
+  /** What THIS screen's apply said about the architect's first run, which the
+   *  server now starts on approval: the `architect.run` event id, or the
+   *  sentence explaining why it was not started. Null until this screen
+   *  applies (a reload knows only `applied`, and the team view reads the jobs
+   *  themselves). */
+  architectRun: { eventId: string; error: string } | null
 }
 
 export default function useCharter(options: UseCharterOptions = {}): CharterApi {
@@ -76,7 +87,15 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const [applyIssues, setApplyIssues] = useState<CharterIssue[]>([])
-  const [applied, setApplied] = useState(false)
+  // What THIS screen has seen. The exported `applied` below is this OR the
+  // server's own answer, so a reload no longer forgets an approval.
+  const [sawApply, setSawApply] = useState(false)
+  const [architectRun, setArchitectRun] = useState<CharterApi['architectRun']>(null)
+
+  // The exported answer: this screen's own apply, or the server's record of
+  // one. `charter.applied` is the field DI10 added to GET /agent/charter/current
+  // — before it existed this hook could only ever report the first half.
+  const applied = sawApply || charter?.applied === true
 
   const reload = useCallback(async () => {
     if (session === '') {
@@ -87,6 +106,9 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     setError(null)
     try {
       const raw = await request<unknown>(`${currentEndpoint}?session=${encodeURIComponent(session)}`)
+      // 204: nothing deposited yet. Same posture as the 404 below — keep any
+      // charter already on screen rather than clearing it.
+      if (raw === undefined) return
       setCharter(coerceCharterCurrent(raw))
     } catch (err) {
       if (configApiStatus(err) === 404) {
@@ -118,6 +140,9 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     if (session === '' || refreshMs <= 0 || applied) return
     const id = setInterval(() => void reloadRef.current(), refreshMs)
     return () => clearInterval(id)
+    // `applied` here is the combined answer, so the server confirming an
+    // approval this screen did not perform also stops the poll — which is what
+    // a second tab open on the same project needs.
   }, [applied, refreshMs, session])
 
   const apply = useCallback(
@@ -140,7 +165,12 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
             rationale: rationale ?? '',
           }),
         })
-        setApplied(true)
+        setSawApply(true)
+        const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+        setArchitectRun({
+          eventId: typeof r.architect_run_event_id === 'string' ? r.architect_run_event_id : '',
+          error: typeof r.architect_run_error === 'string' ? r.architect_run_error : '',
+        })
         return coerceTopologyApplyResult(raw)
       } catch (err) {
         if (configApiStatus(err) === 422 && err instanceof Error) {
@@ -169,6 +199,7 @@ export default function useCharter(options: UseCharterOptions = {}): CharterApi 
     applyError,
     applyIssues,
     applied,
+    architectRun,
   }
 }
 

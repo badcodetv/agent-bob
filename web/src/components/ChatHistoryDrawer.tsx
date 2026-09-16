@@ -36,9 +36,28 @@ function getRelativeTime(unixSeconds: number): string {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
-function getSessionTitle(session: AgentSessionListItem): string {
+/** The `onboard` session name examples/web gives a project's interview. */
+const ONBOARD_SESSION_NAME = 'onboard'
+
+export function getSessionTitle(session: AgentSessionListItem): string {
   if (session.title) return session.title
+  // A named session with no title yet: interviews created before they were
+  // given a title, and anything an embedder named. The name beats "Untitled".
+  if (session.name === ONBOARD_SESSION_NAME) return 'Onboarding interview'
+  if (session.name) return session.name
   return 'Untitled'
+}
+
+/**
+ * Who the session talks to, for the row's small italic label: the worker, else
+ * the persona. `workflow_id` is "agent" on every session the engine creates, so
+ * it said nothing and is shown only when it is something else.
+ */
+export function getSessionAgentLabel(session: AgentSessionListItem): string {
+  if (session.worker) return session.worker
+  if (session.persona) return session.persona
+  if (session.workflow_id && session.workflow_id !== 'agent') return session.workflow_id
+  return ''
 }
 
 function getContainerStateLabel(state: string | undefined): string {
@@ -324,6 +343,9 @@ export default function ChatHistoryDrawer({
                     secondary={
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, mt: 0.25 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          {/* The container state is only known for a session this
+                              tab has polled; "Unknown" on every other row was noise. */}
+                          {(isPublished || (s.container_state && s.container_state !== 'unknown')) && (
                           <Chip
                             label={isPublished ? 'Published' : getContainerStateLabel(s.container_state)}
                             size="small"
@@ -336,6 +358,7 @@ export default function ChatHistoryDrawer({
                               '& .MuiChip-label': { color: statusColor.fg },
                             }}
                           />
+                          )}
                           {getPersistenceIndicator(s.snapshot_state) && (
                             <Tooltip title={getPersistenceIndicator(s.snapshot_state)!.tooltip} arrow>
                               <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -358,9 +381,9 @@ export default function ChatHistoryDrawer({
                               </Typography>
                             </Box>
                           )}
-                          {s.workflow_id && (
+                          {getSessionAgentLabel(s) && (
                             <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', fontStyle: 'italic' }}>
-                              {s.workflow_id}
+                              {getSessionAgentLabel(s)}
                             </Typography>
                           )}
                           <Typography component="span" sx={{ fontSize: 11, color: 'text.disabled', ml: 'auto' }}>

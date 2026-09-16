@@ -34,13 +34,24 @@ import {
   type ProjectEvent,
   type Subscription,
 } from './events.js'
-import type { Schedule } from './schedules.js'
+import { describeCron, type Schedule } from './schedules.js'
+import type { MemoryRow } from './memories.js'
 
-/** The read route the Asks stack needs (design B1; go/httpapi/attention.go). */
+/** The routes the Asks and From-the-team stacks need (design B1; go/httpapi/attention.go). */
 export const ATTENTION_ENDPOINTS = {
   /** GET — `?state=open|all`, `?limit=`; `{"attention_requests": [...]}`. */
   list: '/agent/attention-requests',
+  /** POST — a person acknowledges one request ("Got it" / "Dismiss"). */
+  resolve: (id: string) => `/agent/attention-requests/${encodeURIComponent(id)}/resolve`,
 }
+
+/**
+ * `ask` — a question a person owes an answer to; its job parks at
+ * `awaiting_human`. `notice` — act-then-notify: the worker already did the
+ * thing and is saying so, nothing parks, and a person acknowledges it
+ * (engine migration 051).
+ */
+export type AttentionKind = 'ask' | 'notice'
 
 // ---------------------------------------------------------------------------
 // The attention request (go/agentdb.AttentionRequest's JSON, verbatim)
@@ -59,6 +70,9 @@ export interface AttentionRequest {
   session_id: string
   worker: string
   message: string
+  /** Optional because rows from an engine older than migration 051, and
+   *  fixtures, carry none — absent means `ask`, which is what those were. */
+  kind?: AttentionKind
   /** Permalink minted at request time, so a later base-URL change cannot
    *  rewrite history. */
   session_url: string
@@ -86,6 +100,7 @@ export function coerceAttentionRequest(raw: unknown): AttentionRequest {
     session_id: str(r.session_id),
     worker: str(r.worker),
     message: str(r.message),
+    kind: r.kind === 'notice' ? 'notice' : 'ask',
     session_url: str(r.session_url),
     channel: str(r.channel),
     delivered: bool(r.delivered),
@@ -94,6 +109,11 @@ export function coerceAttentionRequest(raw: unknown): AttentionRequest {
     answered_at: num(r.answered_at),
     timed_out_at: num(r.timed_out_at),
   }
+}
+
+/** A notice tells; an ask asks. Anything unmarked is an ask. */
+export function isAttentionNotice(r: Pick<AttentionRequest, 'kind'>): boolean {
+  return r.kind === 'notice'
 }
 
 /** Open = nobody has answered it and the sweep has not timed it out. */
@@ -116,13 +136,13 @@ export type DeskGlyph = (typeof DESK_GLYPHS)[number]
 // ---------------------------------------------------------------------------
 
 /**
- * The honest handling of the parked-row wart, stated once and rendered by the
- * page: a delivery parked at `awaiting_human` never leaves that status, so the
- * stack is computed from the *request*, not from the row.
+ * How an ask leaves the stack, stated once and rendered by the page. A reply in
+ * the thread closes the request and settles the parked job (engine
+ * 2026-09-13); the stack is still computed from the *request*, so an older
+ * engine that leaves the row parked shows the same thing.
  */
 export const DESK_ASKS_CAVEAT =
-  'An ask leaves this stack when its request is answered or times out. The delivery row itself ' +
-  'stays parked at awaiting_human — nothing rewrites it.'
+  'An ask leaves this stack when you reply in its thread, dismiss it here, or it times out.'
 
 /** One thing waiting for a person. */
 export interface DeskAsk {
@@ -151,7 +171,36 @@ export interface DeskAsk {
   /** `email-answerer · awaiting_human · 2h 40m`. */
   headline: string
   glyph: DeskGlyph
+  /** Unix SECONDS — attention requests stamp seconds, not milliseconds (J1). */
   createdAt: number
+  /** Always `'first-ask'`: every ask is a candidate, and `firsts.ts` picks
+   *  whichever is chronologically earliest. See `DeskFirstRecord`. */
+  firstKind: DeskFirstKind
+}
+
+// ---------------------------------------------------------------------------
+// Stack 1b — notices ("from the team")
+// ---------------------------------------------------------------------------
+
+/**
+ * One open notice: a worker telling a person what it did. There is no question
+ * in it, so it is never shown as "nobody has answered these" — it is shown as a
+ * note, and a person acknowledges it.
+ */
+export interface DeskNotice {
+  /** The request id — also what "Got it" resolves. */
+  id: string
+  requestId: string
+  worker: string
+  sessionId: string
+  sessionUrl: string
+  message: string
+  /** `note from architect`. */
+  headline: string
+  /** Unix SECONDS. */
+  createdAt: number
+  /** How long ago it was written, in seconds. */
+  ageSeconds: number
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +231,91 @@ export interface DeskChange {
   glyph: DeskGlyph
   /** Unix MILLISECONDS. */
   createdAt: number
+  /**
+   * Which "first of a kind" (design §3 G4, `firsts.ts`) this record would
+   * narrate as, or `null` when it is not one of the seven — most changes
+   * aren't. Set on every matching record, not only the project's actual
+   * first; `firsts.ts` is the one that decides which is earliest.
+   */
+  firstKind: DeskFirstKind | null
+}
+
+// ---------------------------------------------------------------------------
+// "Firsts" — the Desk narrating the first of a kind (design §3 G4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The seven kinds G4 narrates. Closed on purpose: `firsts.ts` writes one
+ * sentence per kind, once, and a kind that is not in this list can never
+ * narrate — there is no "8th first" a stray action string could smuggle in.
+ */
+export const DESK_FIRST_KINDS = [
+  'first-worker',
+  'first-memory',
+  'first-schedule',
+  'first-subscription',
+  'first-rewrite',
+  'first-ask',
+  'first-revert',
+] as const
+export type DeskFirstKind = (typeof DESK_FIRST_KINDS)[number]
+
+/**
+ * One candidate for `firsts.ts` to consider: a record of a given kind, and
+ * when it happened.
+ *
+ * `createdAtMs` is ALWAYS milliseconds, regardless of what the underlying
+ * table stamps — this is the J1 hazard made harmless at the one seam that
+ * has to compare timestamps of different kinds against each other to find
+ * "the earliest". Asks are the case that matters: `attention_requests` (and
+ * therefore `DeskAsk.createdAt`) stamp unix SECONDS, so it is multiplied by
+ * 1000 here. Do not remove that multiplication because a record "looks like"
+ * it is already in milliseconds — check the source table.
+ */
+export interface DeskFirstRecord {
+  kind: DeskFirstKind
+  createdAtMs: number
+  /** The id of the row that should carry the sentence (a `DeskChange.id`, a
+   *  `DeskAsk.id`, or a synthetic `memory:<created_at>` id). */
+  id: string
+}
+
+/**
+ * A config action's kind, or `null` when it is not one of the seven.
+ *
+ * Reverts are not their own action in the engine — §D's design reuses the
+ * ordinary mutation verbs and the compensating write's rationale is the only
+ * place a revert says what it is. The engine defaults that rationale to
+ * `revert of <action> (seq <n>, event <id>)` when the caller supplies none
+ * (`go/agentdb/config_revert.go`); the console's own revert control requires
+ * a human-typed reason, so this match is necessarily a heuristic; a revert
+ * whose rationale does not start this way narrates under its underlying
+ * action's kind instead (e.g. a reverted worker rewrite still narrates as
+ * `first-rewrite`), never as nothing.
+ */
+const REVERT_RATIONALE_RE = /^revert of /i
+
+export function looksLikeRevertRationale(rationale: string): boolean {
+  return REVERT_RATIONALE_RE.test(rationale.trim())
+}
+
+export function deskFirstKindForChange(
+  entry: Pick<ChangelogEntry, 'action' | 'rationale'>,
+): DeskFirstKind | null {
+  if (looksLikeRevertRationale(entry.rationale)) return 'first-revert'
+  switch (entry.action) {
+    case 'worker_create':
+      return 'first-worker'
+    case 'subscription_create':
+      return 'first-subscription'
+    case 'schedule_create':
+      return 'first-schedule'
+    case 'worker_prompt_write':
+    case 'project_prompt_write':
+      return 'first-rewrite'
+    default:
+      return null
+  }
 }
 
 /** The short verb §11.6 wants in a sentence, per config action. */
@@ -235,10 +369,24 @@ export function deskChangeSubject(entry: ChangelogEntry): string {
       return 'the project prompt'
     case 'project-settings':
       return 'project settings'
-    case 'subscription':
+    // A subscription or schedule is keyed by a uuid, which says nothing to a
+    // person. The payload is the row's full state, so name what it wakes and
+    // when — "numbers-clerk's schedule (At 18:00, on Thursday.)" — and keep the
+    // id only when the payload has nothing better.
+    case 'subscription': {
+      const p = entry.event.payload ?? {}
+      const worker = typeof p.worker === 'string' ? p.worker : ''
+      const type = typeof p.event_type === 'string' ? p.event_type : ''
+      if (worker !== '') return type === '' ? `${worker}'s subscription` : `${worker}'s subscription to ${type}`
       return name === '' ? 'a subscription' : `subscription ${name}`
-    case 'schedule':
+    }
+    case 'schedule': {
+      const p = entry.event.payload ?? {}
+      const worker = typeof p.worker === 'string' ? p.worker : ''
+      const when = typeof p.cron === 'string' ? describeCron(p.cron) : null
+      if (worker !== '') return when === null ? `${worker}'s schedule` : `${worker}'s schedule (${when.replace(/\.$/, '')})`
       return name === '' ? 'a schedule' : `schedule ${name}`
+    }
     case 'image':
     case 'skill':
       return name
@@ -311,6 +459,14 @@ export interface BuildDeskInput {
    * stacks; the halted-schedule line simply never appears.
    */
   schedules?: Schedule[]
+  /**
+   * Memory rows, read only for `created_at` (design §3 G4). Optional because a
+   * host that has not wired the Memory read route into the Desk still gets
+   * the other six firsts; `first-memory` simply never fires. Unix
+   * MILLISECONDS — the `memories` table stamps milliseconds, like config
+   * events (`go/agentdb/memories.go`'s own comment on the column).
+   */
+  memories?: { created_at: number }[]
   /** The clock, in unix seconds. */
   nowSeconds: number
   /**
@@ -335,6 +491,8 @@ export interface BuildDeskInput {
 
 export interface Desk {
   asks: DeskAsk[]
+  /** Open notices, newest first — reports that want reading, not answering. */
+  notices: DeskNotice[]
   changes: DeskChange[]
   /**
    * Changes at or before the mark, newest first, capped. Empty when the
@@ -343,6 +501,14 @@ export interface Desk {
    */
   earlierChanges: DeskChange[]
   trouble: DeskTrouble[]
+  /**
+   * Every "first of a kind" candidate the fold found (design §3 G4),
+   * UNWINDOWED — built from the whole changelog and every open ask, not just
+   * `changes`/`earlierChanges`'s capped tail, so a project older than the
+   * `earlierChangesLimit` window still gets its firsts right. `firsts.ts`
+   * reduces this list against a seen-set to decide what narrates.
+   */
+  firsts: DeskFirstRecord[]
 }
 
 /**
@@ -365,13 +531,49 @@ export interface Desk {
  * is a signal rather than a fault.
  */
 export function buildDesk(input: BuildDeskInput): Desk {
-  const { fresh, earlier } = buildDeskChangeStacks(input)
+  const { fresh, earlier, all } = buildDeskChangeStacks(input)
+  const asks = buildDeskAsks(input)
   return {
-    asks: buildDeskAsks(input),
+    asks,
+    notices: buildDeskNotices(input),
     changes: fresh,
     earlierChanges: earlier,
     trouble: buildDeskTrouble(input),
+    firsts: buildDeskFirstRecords(all, asks, input.memories ?? []),
   }
+}
+
+/**
+ * The fold's own tagged records, collapsed into the one flat list `firsts.ts`
+ * reduces (design §3 G4). Every unit here is normalised to milliseconds
+ * (`DeskFirstRecord.createdAtMs`) — see its doc comment for why that matters.
+ *
+ * `asks` here is `buildDeskAsks`'s output — OPEN asks only, joined to a live
+ * attention request. That is deliberate, not an oversight: an ask that has
+ * already been answered has no row left on the Desk to carry the sentence,
+ * so `first-ask` can only ever narrate on a still-open one. The practical
+ * consequence is that "first ask" means "the earliest ask that is STILL
+ * open" rather than "the literal first ask this project ever asked" — the
+ * same thing for a project narrating this in real time as records land, but
+ * an approximation if this feature is switched on for the first time on a
+ * project whose actual first ask has already been answered and closed.
+ */
+function buildDeskFirstRecords(
+  changes: DeskChange[],
+  asks: DeskAsk[],
+  memories: { created_at: number }[],
+): DeskFirstRecord[] {
+  const out: DeskFirstRecord[] = []
+  for (const change of changes) {
+    if (change.firstKind) out.push({ kind: change.firstKind, createdAtMs: change.createdAt, id: change.id })
+  }
+  for (const ask of asks) {
+    out.push({ kind: ask.firstKind, createdAtMs: ask.createdAt * 1000, id: ask.id })
+  }
+  for (const memory of memories) {
+    out.push({ kind: 'first-memory', createdAtMs: memory.created_at, id: `memory:${memory.created_at}` })
+  }
+  return out
 }
 
 /**
@@ -388,7 +590,8 @@ export function openRequestsBySession(
 ): Map<string, AttentionRequest> {
   const openBySession = new Map<string, AttentionRequest>()
   for (const request of attentionRequests) {
-    if (!isAttentionRequestOpen(request) || request.session_id === '') continue
+    // A notice is not an ask: it parks no job and nobody owes it an answer.
+    if (!isAttentionRequestOpen(request) || isAttentionNotice(request) || request.session_id === '') continue
     const held = openBySession.get(request.session_id)
     if (
       !held ||
@@ -412,9 +615,47 @@ export function countAsks(
   deliveries: EventDelivery[],
   attentionRequests: AttentionRequest[],
 ): number {
-  const openBySession = openRequestsBySession(attentionRequests)
-  return deliveries.filter((d) => d.status === 'awaiting_human' && openBySession.has(d.session_id))
-    .length
+  return askPairs(deliveries, openRequestsBySession(attentionRequests)).length
+}
+
+/**
+ * Which deliveries carry a live question, each with the request it waits on.
+ *
+ * A parked (`awaiting_human`) delivery with an open request, as always. And one
+ * more shape the first real-model walk found (2026-09-13): a person replies in a
+ * worker's thread, the reply settles the job to `ok`, the worker carries on in
+ * the same session and asks again — handing over the draft it was asked for.
+ * That second request is open and newer than the job's end, so it is a live
+ * question; without this it showed on Activity and nowhere on the Desk.
+ *
+ * Still not on the Desk: a request older than the job's end (a job that failed
+ * or moved on after asking — the stale row X7 is about). One delivery per
+ * session, the newest, so a session is never listed twice.
+ */
+function askPairs(
+  deliveries: EventDelivery[],
+  openBySession: Map<string, AttentionRequest>,
+): { delivery: EventDelivery; request: AttentionRequest; askedAgain: boolean }[] {
+  const out: { delivery: EventDelivery; request: AttentionRequest; askedAgain: boolean }[] = []
+  const settledBySession = new Map<string, EventDelivery>()
+  const parkedSessions = new Set<string>()
+  for (const delivery of deliveries) {
+    const request = openBySession.get(delivery.session_id)
+    if (!request) continue
+    if (delivery.status === 'awaiting_human') {
+      parkedSessions.add(delivery.session_id)
+      out.push({ delivery, request, askedAgain: false })
+      continue
+    }
+    if (delivery.status !== 'ok' || delivery.ended_at <= 0 || request.created_at < delivery.ended_at) continue
+    const held = settledBySession.get(delivery.session_id)
+    if (!held || delivery.ended_at > held.ended_at) settledBySession.set(delivery.session_id, delivery)
+  }
+  for (const [sessionId, delivery] of settledBySession) {
+    if (parkedSessions.has(sessionId)) continue
+    out.push({ delivery, request: openBySession.get(sessionId)!, askedAgain: true })
+  }
+  return out
 }
 
 function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
@@ -425,16 +666,13 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
   const workerBySubscription = new Map(subscriptions.map((s) => [s.id, s.worker]))
 
   const asks: DeskAsk[] = []
-  for (const delivery of deliveries) {
-    if (delivery.status !== 'awaiting_human') continue
-    const request = openBySession.get(delivery.session_id)
-    // No open request ⇒ answered, timed out, or never asked. Either way this
-    // row is not a live question, so it is not on the Desk.
-    if (!request) continue
-
-    const waitingSeconds =
-      deliveryDurationSeconds(delivery, nowSeconds) ??
-      Math.max(0, nowSeconds - (request.created_at || nowSeconds))
+  // No open request ⇒ answered, timed out, or never asked. Either way that row
+  // is not a live question, so it is not on the Desk.
+  for (const { delivery, request, askedAgain } of askPairs(deliveries, openBySession)) {
+    const askedFor = Math.max(0, nowSeconds - (request.created_at || nowSeconds))
+    const waitingSeconds = askedAgain ? askedFor : (deliveryDurationSeconds(delivery, nowSeconds) ?? askedFor)
+    // The job row says `ok` once a reply settled it; the question is still waiting.
+    const status = askedAgain ? 'awaiting_human' : delivery.status
     const worker =
       request.worker || delivery.worker || workerBySubscription.get(delivery.subscription_id) || ''
     const expiresInSeconds = request.expires_at > 0 ? request.expires_at - nowSeconds : null
@@ -447,7 +685,7 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
       sessionId: delivery.session_id,
       sessionUrl: request.session_url,
       message: request.message,
-      status: delivery.status,
+      status,
       waitingSeconds,
       waitingLabel: formatDuration(waitingSeconds),
       expiresInSeconds,
@@ -457,9 +695,10 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
           : expiresInSeconds <= 0
             ? 'expired'
             : `expires in ${formatDuration(expiresInSeconds)}`,
-      headline: `${worker === '' ? 'a worker' : worker} · ${delivery.status} · ${formatDuration(waitingSeconds)}`,
+      headline: `${worker === '' ? 'a worker' : worker} · ${status} · ${formatDuration(waitingSeconds)}`,
       glyph: 'attention',
       createdAt: request.created_at,
+      firstKind: 'first-ask',
     })
   }
 
@@ -468,21 +707,47 @@ function buildDeskAsks(input: BuildDeskInput): DeskAsk[] {
   return asks.sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
 }
 
+/** Open notices, newest first. Not joined to deliveries: a notice parks none. */
+function buildDeskNotices(input: BuildDeskInput): DeskNotice[] {
+  const { attentionRequests, nowSeconds } = input
+  return attentionRequests
+    .filter((r) => isAttentionNotice(r) && isAttentionRequestOpen(r))
+    .map((r) => ({
+      id: r.id,
+      requestId: r.id,
+      worker: r.worker,
+      sessionId: r.session_id,
+      sessionUrl: r.session_url,
+      message: r.message,
+      headline: `note from ${r.worker === '' ? 'a worker' : r.worker}`,
+      createdAt: r.created_at,
+      ageSeconds: Math.max(0, nowSeconds - (r.created_at || nowSeconds)),
+    }))
+    .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+}
+
 /** The default depth of the "earlier" tail under the waterline. */
 export const DESK_EARLIER_CHANGES_LIMIT = 10
 
 function buildDeskChangeStacks(input: BuildDeskInput): {
   fresh: DeskChange[]
   earlier: DeskChange[]
+  /** The full, unwindowed list — `buildDeskFirstRecords` needs every record,
+   *  not just what the waterline currently shows. */
+  all: DeskChange[]
 } {
   const { lastSeenMs, earlierChangesLimit = DESK_EARLIER_CHANGES_LIMIT } = input
   const all = buildDeskChanges(input)
   const fresh = all.filter((change) => change.createdAt > lastSeenMs)
   // Never looked ⇒ everything is "new", so there is nothing for a line to
   // separate and no tail to show. Same rule `waterlineIndex` applies.
-  if (lastSeenMs <= 0) return { fresh: all, earlier: [] }
+  if (lastSeenMs <= 0) return { fresh: all, earlier: [], all }
   const earlier = all.filter((change) => change.createdAt <= lastSeenMs)
-  return { fresh, earlier: earlierChangesLimit <= 0 ? [] : earlier.slice(0, earlierChangesLimit) }
+  return {
+    fresh,
+    earlier: earlierChangesLimit <= 0 ? [] : earlier.slice(0, earlierChangesLimit),
+    all,
+  }
 }
 
 function buildDeskChanges(input: BuildDeskInput): DeskChange[] {
@@ -509,6 +774,7 @@ function buildDeskChanges(input: BuildDeskInput): DeskChange[] {
         diffLabel: entry.diff ? `+${entry.diff.added} −${entry.diff.removed} lines` : '',
         glyph: byAgent ? 'agent' : 'human',
         createdAt: entry.createdAt,
+        firstKind: deskFirstKindForChange(entry),
       }
     })
 }
@@ -664,4 +930,51 @@ function buildDeskTrouble(input: BuildDeskInput): DeskTrouble[] {
 export function frozenTargetFromText(text: string): string {
   const m = /frozen worker "([^"]+)"/.exec(text) ?? /frozen worker “([^”]+)”/.exec(text)
   return m ? m[1]! : ''
+}
+
+// ---------------------------------------------------------------------------
+// Written down — what the team concluded
+// ---------------------------------------------------------------------------
+
+/** One memory as the Desk shows it: what it is, who wrote it, its opening. */
+export interface DeskNote {
+  id: string
+  /** `summary · review-2026-w37`, `rolling-summary · copywriter`. */
+  title: string
+  /** The worker that wrote it, or a plain phrase when no worker did. */
+  writer: string
+  /** Unix milliseconds (memories stamp ms). */
+  createdAtMs: number
+  /** The route's snippet — at most MEMORY_SNIPPET_CHARS; the Desk clamps it. */
+  excerpt: string
+  sessionId: string
+}
+
+/**
+ * The newest memories, as the Desk's "Written down" stack.
+ *
+ * Memory is where a worker's conclusions land, and it is not a configuration
+ * change, so before this the Desk — the page a first-time user is sent to
+ * after the team forms — showed the asks and the config log and not one thing
+ * the team had concluded (real-model walk, 2026-09-13).
+ */
+export function deskNotes(rows: MemoryRow[], limit = 5): DeskNote[] {
+  return rows.slice(0, Math.max(0, limit)).map((m) => {
+    const kind = m.labels.kind ?? ''
+    const which = m.labels.name ?? m.labels.worker ?? ''
+    const title = [kind, which].filter((part) => part !== '').join(' · ') || 'a note'
+    return {
+      id: m.id,
+      title,
+      writer:
+        m.created_by_worker !== ''
+          ? m.created_by_worker
+          : m.created_by_session !== ''
+            ? 'a chat session'
+            : 'you or the console',
+      createdAtMs: m.created_at,
+      excerpt: m.snippet,
+      sessionId: m.created_by_session,
+    }
+  })
 }

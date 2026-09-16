@@ -372,6 +372,41 @@ func TestRequestHumanAttentionExpiresIn(t *testing.T) {
 	}
 }
 
+// TestRequestHumanAttentionKind pins ask vs notice: a notice is recorded as
+// such and carries no deadline even when one is passed — nobody owes it an
+// answer, so there is nothing to lapse.
+func TestRequestHumanAttentionKind(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          attentionRequestInput
+		wantKind    string
+		wantExpires int64
+	}{
+		{name: "ask by default", in: attentionRequestInput{Message: "which one?", ExpiresIn: 60},
+			wantKind: agentdb.AttentionKindAsk, wantExpires: 1_800_000_060},
+		{name: "notice drops the deadline", in: attentionRequestInput{Message: "I hired a scribe", ExpiresIn: 60, Notice: true},
+			wantKind: agentdb.AttentionKindNotice, wantExpires: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeAttentionStore()
+			store.addSession("s-1", "acme", "architect")
+			svc, _, _ := newTestAttentionService(store, nil)
+			tc.in.Project, tc.in.SessionID = "acme", "s-1"
+			res, err := svc.Request(context.Background(), tc.in)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			if res.Kind != tc.wantKind || store.requests[0].Kind != tc.wantKind {
+				t.Fatalf("kind: want %q, got %q / %q", tc.wantKind, res.Kind, store.requests[0].Kind)
+			}
+			if res.ExpiresAt != tc.wantExpires {
+				t.Fatalf("expires_at: want %d, got %d", tc.wantExpires, res.ExpiresAt)
+			}
+		})
+	}
+}
+
 // TestRequestHumanAttentionHTTP covers the route: project from the JWT, the
 // permalink echoed under `session_url`.
 func TestRequestHumanAttentionHTTP(t *testing.T) {

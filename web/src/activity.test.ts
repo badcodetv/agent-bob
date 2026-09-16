@@ -13,6 +13,7 @@ import {
   ACTIVITY_HOME,
   ACTIVITY_LENSES,
   buildActivity,
+  finishedConclusion,
   oldestShownMs,
   toMs,
   type ActivityRecord,
@@ -235,10 +236,39 @@ describe('the occurrence model', () => {
 
   it('gives an event that woke nobody its own row', () => {
     const records = buildActivity(
-      input({ events: [projectEvent({ id: 'e-lonely', delivered: false })] }),
+      input({ events: [projectEvent({ id: 'e-lonely', type: 'order.placed', delivered: false })] }),
     )
     expect(kinds(records)).toEqual(['event'])
-    expect(records[0]!.headline).toBe('worker.finished woke nobody')
+    expect(records[0]!.headline).toBe('order.placed woke nobody')
+  })
+
+  it("names a finish nobody listens for as the worker finishing, with its closing words", () => {
+    const records = buildActivity(
+      input({
+        events: [
+          projectEvent({ id: 'e-lonely', delivered: false, text: TRANSCRIPT }),
+        ],
+      }),
+    )
+    expect(records[0]!.headline).toBe('email-answerer finished')
+    expect(records[0]!.detail).toBe('Wrote the summary.\n\nNothing else to do.')
+  })
+
+  it("shows what a finished job said, read from its session's worker.finished event", () => {
+    const records = buildActivity(
+      input({
+        events: [
+          projectEvent({ id: 'e1', type: 'email.received', text: 'mail' }),
+          projectEvent({ id: 'e-fin', delivered: false, text: TRANSCRIPT, envelope: { ...projectEvent().envelope, session_id: 'sess-1' } }),
+        ],
+        deliveries: [delivery()],
+      }),
+    )
+    const job = records.find((r) => r.kind === 'job')!
+    expect(job.detail).toBe('Wrote the summary.\n\nNothing else to do.')
+    expect(job.detailIsQuote).toBe(true)
+    // The finish itself woke nobody, but the job row already says it.
+    expect(kinds(records)).toEqual(['job'])
   })
 
   it('does not list a delivered event twice', () => {
@@ -246,6 +276,24 @@ describe('the occurrence model', () => {
       input({ events: [projectEvent()], deliveries: [delivery()] }),
     )
     expect(kinds(records)).toEqual(['job'])
+  })
+})
+
+// The rendered transcript shape (go/runner.go renderConversation), with a
+// quoted transcript inside the first user message — the case a naive "first
+// assistant block" read gets wrong.
+const TRANSCRIPT = [
+  'user:\nEvent: worker.finished\n--- event text begins ---\nuser:\nhi\n\nassistant:\nthe OTHER worker\n--- event text ends ---',
+  'assistant:\nLooking.\n[tool] memory_search({}) → ok',
+  'assistant:\n[tool] memory_create({}) → ok\nWrote the summary.\n\n\n\nNothing else to do.',
+].join('\n\n')
+
+describe('finishedConclusion', () => {
+  it('reads the last assistant block without its tool lines', () => {
+    expect(finishedConclusion(TRANSCRIPT)).toBe('Wrote the summary.\n\nNothing else to do.')
+  })
+  it('is empty when there is no assistant block', () => {
+    expect(finishedConclusion('email-answerer finished.')).toBe('')
   })
 })
 

@@ -118,7 +118,32 @@ func (i *Issuer) Issue(ctx context.Context, scope extension.ContextScope, sessio
 //
 // An empty scope writes no claim at all, so Issue's tokens are byte-identical
 // to what they were before this existed.
-func (i *Issuer) IssueScoped(_ context.Context, cs extension.ContextScope, sessionID, scope string) (string, error) {
+func (i *Issuer) IssueScoped(ctx context.Context, cs extension.ContextScope, sessionID, scope string) (string, error) {
+	return i.issue(cs, sessionID, scope, false)
+}
+
+// OperatorClaim is the JSON claim name that marks a token's holder as the
+// operator (design/2026-09-11-onboarding-work-plan.md §1.1): the party who
+// may change a project's token budgets and job-concurrency cap
+// (PutProjectSettings, go/httpapi/project_settings.go). It is a plain boolean
+// so a token either carries `"operator":true` or carries nothing — there is
+// no false-but-present state to misparse.
+const OperatorClaim = "operator"
+
+// IssueOperator is Issue plus the operator claim, present (and true) only
+// when operator is true. Used ONLY by the two mint paths §1.1 names — a
+// wildcard login's per-project tokens and the wildcard project-token
+// exchange — never by embed tokens, dataset tokens, or a non-wildcard
+// Google account's tokens, which all keep calling Issue/IssueScoped and so
+// never carry this claim at all.
+func (i *Issuer) IssueOperator(_ context.Context, cs extension.ContextScope, sessionID string, operator bool) (string, error) {
+	return i.issue(cs, sessionID, "", operator)
+}
+
+// issue is the one claim-set builder behind Issue, IssueScoped and
+// IssueOperator, so the three families of token never drift apart on the
+// fields they share.
+func (i *Issuer) issue(cs extension.ContextScope, sessionID, scope string, operator bool) (string, error) {
 	now := time.Now()
 	claims := jwt.MapClaims{
 		"sid":      sessionID,
@@ -130,6 +155,9 @@ func (i *Issuer) IssueScoped(_ context.Context, cs extension.ContextScope, sessi
 	}
 	if scope != "" {
 		claims[ScopeClaim] = scope
+	}
+	if operator {
+		claims[OperatorClaim] = true
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString(i.secret)

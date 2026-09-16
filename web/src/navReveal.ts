@@ -177,12 +177,35 @@ export const NAV_LABELS: Record<NavEntry, string> = {
 export function navRevealSentence(entry: NavEntry): string {
   switch (entry) {
     case 'memory':
-      return 'Memory is now in the sidebar — it holds what your workers have written down.'
+      return 'Memory is now in the menu above — it holds what your workers have written down.'
     case 'activity':
-      return 'Activity is now in the sidebar — it lists everything this project does.'
+      return 'Activity is now in the menu above — it lists everything this project does.'
     case 'chart':
-      return 'Chart is now in the sidebar — it draws which worker wakes which.'
+      return 'Chart is now in the menu above — it draws which worker wakes which.'
     default:
-      return `${NAV_LABELS[entry]} is now in the sidebar.`
+      return `${NAV_LABELS[entry]} is now in the menu above.`
   }
+}
+
+/** What each revealed entry is for, as a phrase — the tail of its sentence. */
+const NAV_REVEAL_PURPOSE: Partial<Record<NavEntry, string>> = {
+  memory: 'what your workers have written down',
+  activity: 'everything this project does',
+  chart: 'which worker wakes which',
+}
+
+/**
+ * ONE sentence for every entry revealed at once. Three stacked "X is now in the
+ * menu above" lines read as clutter at the busiest moment of a first run; one
+ * line naming all three, each with what it is for, says the same thing.
+ */
+export function navRevealSummary(entries: NavEntry[]): string {
+  if (entries.length === 0) return ''
+  if (entries.length === 1) return navRevealSentence(entries[0]!)
+  const parts = entries.map((entry) => {
+    const purpose = NAV_REVEAL_PURPOSE[entry]
+    return purpose === undefined ? NAV_LABELS[entry] : `${NAV_LABELS[entry]} (${purpose})`
+  })
+  const list = `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+  return `New in the menu above: ${list}.`
 }

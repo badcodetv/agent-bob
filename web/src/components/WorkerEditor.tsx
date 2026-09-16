@@ -34,6 +34,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DeleteIcon from '@mui/icons-material/Delete'
 import LockIcon from '@mui/icons-material/Lock'
 import JsonObjectEditor from './JsonObjectEditor.js'
+import AboutThisScreen from './AboutThisScreen.js'
 import { formatJsonObject, parseJsonObject } from '../projectSettings.js'
 import {
   describeImageRef,
@@ -67,6 +68,8 @@ export interface WorkerEditorProps {
   imageOptions?: string[]
   /** The project's base image, named in the picker's helper text when unset. */
   projectBaseImage?: string
+  /** Scopes the "About this screen" disclosure's dismissal (C2). */
+  projectId?: string
   /**
    * Pre-filled one-line reason. Used by the lineage's "Restore this version"
    * (design §7.1), which is an ordinary forward save carrying a reason that
@@ -85,6 +88,7 @@ export default function WorkerEditor({
   saving = false,
   imageOptions = [],
   projectBaseImage = '',
+  projectId = '',
   initialRationale = '',
 }: WorkerEditorProps) {
   const seed = () => (worker ? { ...worker } : newWorkerDraft())
@@ -143,6 +147,8 @@ export default function WorkerEditor({
 
   return (
     <Box sx={{ p: 3, maxWidth: 880 }}>
+      <AboutThisScreen surface="worker-configuration" projectId={projectId} />
+
       {error !== null && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {error}
@@ -397,6 +403,11 @@ export default function WorkerEditor({
             <Button color="error" disabled={saving} onClick={() => void onDelete(draft.name, rationale)}>
               Delete
             </Button>
+          )}
+          {!canSave && rationale.trim() === '' && (
+            <Typography variant="caption" color="text.secondary">
+              Saving needs a reason — it becomes this change's entry in the changelog.
+            </Typography>
           )}
           {!dirty && !isNew && (
             <Typography variant="caption" color="text.secondary">

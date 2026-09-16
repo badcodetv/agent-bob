@@ -5,9 +5,10 @@ import { defineConfig } from '@playwright/test'
 // playwright.config.ts, which drives the older Vite+mock-server harness with
 // its own global setup/teardown.
 //
-// Two kinds of spec run here (see e2e/README.md):
+// Three kinds of spec run here (see e2e/README.md):
 //   stack.spec.ts        the browser journey — login → session → streamed reply
 //   features/*.spec.ts   product-layer features through the HTTP API
+//   guide/*.spec.ts      captures real fixtures/screenshots for docs/guide/ (B7)
 const BASE_URL = process.env.STACK_BASE_URL || 'http://localhost:8080'
 
 export default defineConfig({
@@ -19,7 +20,7 @@ export default defineConfig({
   // exactly the runs that leak. See helpers/occupancy.ts.
   globalSetup: './stack-setup.ts',
   globalTeardown: './stack-teardown.ts',
-  testMatch: ['stack.spec.ts', 'features/*.spec.ts'],
+  testMatch: ['stack.spec.ts', 'features/*.spec.ts', 'guide/*.spec.ts'],
   timeout: 240_000,
   expect: { timeout: 30_000 },
   // Parallel across FILES, serial within one. `fullyParallel: false` is what

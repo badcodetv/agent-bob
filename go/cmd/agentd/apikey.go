@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/badcodetv/agent-bob/connections"
 )
@@ -156,6 +157,64 @@ func (p *projectKeyIndex) allowedOrigins() []string {
 }
 
 func (p *projectKeyIndex) hasKeys() bool { return p != nil && len(p.entries) > 0 }
+
+// projectKeysHolder makes the resolved API-key index reloadable (A6): when the
+// project map comes from AGENTKIT_PROJECT_MAP_FILE, it may be re-read without
+// a process restart, and api_key_env/allowed_origins live in that same file's
+// "projects" section — so apiAuthMiddleware, which holds this value as a
+// projectKeys, must see a fresh index after each reload rather than the one
+// resolved once at boot. It implements projectKeys itself, delegating to
+// whichever *projectKeyIndex is currently stored.
+type projectKeysHolder struct {
+	ptr atomic.Pointer[projectKeyIndex]
+}
+
+// newProjectKeysHolder resolves the initial index exactly as newProjectKeys
+// does — the same boot-time failures (a short key, or one value granting two
+// projects) are fatal here too, via the returned error.
+func newProjectKeysHolder(cfgs map[string]projectConfig, getenv func(string) string, logf func(string, ...any)) (*projectKeysHolder, error) {
+	idx, err := newProjectKeys(cfgs, getenv, logf)
+	if err != nil {
+		return nil, err
+	}
+	h := &projectKeysHolder{}
+	h.ptr.Store(idx)
+	return h, nil
+}
+
+// reload recomputes the index from cfgs — the projects half of a freshly
+// re-read project map. Unlike boot, a bad config here must not take a working
+// deployment offline: it logs and keeps serving the previous index, the same
+// rule projectSettingsHolder.reload applies to the map itself.
+func (h *projectKeysHolder) reload(cfgs map[string]projectConfig, getenv func(string) string, logf func(string, ...any)) {
+	idx, err := newProjectKeys(cfgs, getenv, logf)
+	if err != nil {
+		logf("[agentd] project map reload: API keys: %v — keeping the previous keys", err)
+		return
+	}
+	h.ptr.Store(idx)
+}
+
+func (h *projectKeysHolder) get() *projectKeyIndex {
+	if h == nil {
+		return nil
+	}
+	return h.ptr.Load()
+}
+
+func (h *projectKeysHolder) ProjectForKey(raw string) (string, bool) {
+	return h.get().ProjectForKey(raw)
+}
+
+func (h *projectKeysHolder) AllowedOrigins(project string) []string {
+	return h.get().AllowedOrigins(project)
+}
+
+func (h *projectKeysHolder) hasKeys() bool { return h.get().hasKeys() }
+
+// allowedOrigins mirrors projectKeyIndex.allowedOrigins — see its comment for
+// why it is kept off the projectKeys interface.
+func (h *projectKeysHolder) allowedOrigins() []string { return h.get().allowedOrigins() }
 
 // projectConfigsOf is the nil-tolerant accessor for the projects half of the
 // map: a deployment with no project map at all still gets a working (empty) key

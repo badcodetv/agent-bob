@@ -186,7 +186,11 @@ rewiring is delete + create.
 | `enabled` | |
 
 **Schedules** — `/agent/schedules` CRUD, the UI editor, or `schedule_create` / `schedule_update` /
-`schedule_delete`. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
+`schedule_delete`. `POST /agent/schedules/{id}/run` fires one **enabled** schedule now — the
+scheduler's own firing at the current minute (same claim, event, delivery and dispatch gate), so
+two presses in one minute fire once; a disabled schedule answers 409, and running is not a config
+event (`go/cmd/agentd/schedulerun.go`). The console's "Run a cycle now" calls it for every enabled
+schedule. Five-field cron in stack-local time (`TZ` on agentd, default UTC); cron
 nicknames like `@daily` are **refused**, not expanded. A row carries **either** `worker` **or**
 `target_session` (the NAME of an existing session), never both and never neither — the store
 enforces the XOR (`go/agentdb/schedules.go:207-220`). A session-mode firing restores the session if
@@ -712,14 +716,15 @@ Stated plainly because each one will otherwise be discovered the hard way.
 - **A briefing that cannot load is only logged.** `BuildBriefingSections` returns no error by
   design, so a misconfigured `briefing` selector yields a worker running with a missing section
   and nothing in the job's output says so — look in agentd's log.
-- **A delivery parked at `awaiting_human` never leaves that status.** The human clicks the
-  permalink and replies, and the *session* resumes exactly as §9 intends — but the reply arrives
-  through the ordinary chat path, which knows nothing about deliveries, so the job-history row
-  stays parked with no `ended_at`. It is a display wart, not a stall: the parked row holds no
-  capacity slot, the lease reaper only touches `running` rows, and the worker keeps running new
-  jobs. Closing it would mean either a resume hook on the message path or extending the attention
-  sweep — and `expires_in`-less requests, which are the common case, are invisible to that sweep.
-  Deliberately not fixed by growing an approval state machine, which §9 explicitly deletes.
+- ~~A delivery parked at `awaiting_human` never left that status.~~ **Fixed 2026-09-13.** A
+  person's message to a session (`POST /agent/session/{id}/message`) now closes that session's
+  open attention requests *before* the turn it starts, and closing the last one settles the
+  session's parked deliveries to `ok` with an `ended_at`. The Desk's "Got it" / "Dismiss" is
+  `POST /agent/attention-requests/{id}/resolve`, which records the same answered state. A
+  timeout still does not settle the row — the timeout event wakes the worker instead.
+  `request_human_attention` also takes `notice: true` (migration `051`) for act-then-notify
+  reports: a notice never parks the job and never lapses, and the Desk shows it as a note to
+  acknowledge rather than an ask. The architect's STEP 5 report is a notice.
 
 ---
 
@@ -792,6 +797,14 @@ untrusted party. In one transaction it writes:
 Then, outside the transaction, it disables the `interviewer` — otherwise it
 would persist enabled and unwired, and the architect's first reconciliation
 pass would find an orphan worker it is free to rewrite or delete.
+
+And then it **starts the architect's first run**: it writes one `architect.run`
+event (external envelope — the same write `POST /agent/events` performs), so the
+router wakes the architect through the subscription it just created, with its
+briefing. The response names it as `architect_run_event_id`; if the event could
+not be written the charter still stands and `architect_run_error` says why. A
+re-apply is refused by the store (409) before this point, so it never
+double-fires. The console follows it with a "Your team is forming" view.
 
 ### The architect's standing loop
 
