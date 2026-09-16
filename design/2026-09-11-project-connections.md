@@ -1057,6 +1057,15 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   no connections — the route is mounted whenever Postgres is, and then refuses every request (403 or 404). Harmless;
   noted so nobody reads the line as "connections are configured".
 - (T10) None beyond what's in the ticket notes above — the topology_apply hand-copy concern the ticket flagged was already handled by T6's UpsertWorker change; nothing new to log.
+- (T16) `cipher.AEAD.Open` **panics** on a nonce that is not 12 bytes; it does not return an
+  error. A row read back from `connection_credentials` is untrusted input, so `Sealer.Open` checks
+  the length first and returns its one fixed error. T22 can therefore hand a stored nonce straight
+  to `Open`, but must still compare `key_id` first to get the readable wrong-key reason: `Open`
+  itself cannot tell a wrong key from tampering.
+- (T16) `openssl rand -hex 32` (the likeliest operator mistake) produces 64 characters that are all
+  valid base64 and decode to 48 bytes, so it is refused on length ("must decode to 32 bytes, got
+  48"), not as "not base64". The message still points at `openssl rand -base64 32`. `ParseKey`
+  does not trim whitespace, so a value with a trailing space is refused too.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1433,8 +1442,11 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd go && go test ./connections/... -count=1 -race` → PASS; `go vet ./...` clean.
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/connections/sealed.go` + `sealed_test.go`, standard library only. Every `Open` failure
+  is one fixed error with no input in it; a wrong-length nonce is refused rather than panicking.
+  Key-shape errors are checked against any 6-character run of the input. Validation (`-race`,
+  plus the sealer tests at `-count=200`), `go build ./...` and `go vet ./...` pass.
 
 ### T17: `connection_credentials` table, store methods, config log   [Status: pending | Model: sonnet]
 - **Scope:** migration `052_connection_credentials` (addendum SQL); `agentdb.ConnectionCredential`
