@@ -1218,7 +1218,7 @@ the database, a config event, a log line, git, or a session container.
   recorded ("Connected as …") without another API call. The list lives in one Go constant
   (`googleConnectScopes`). A project-map edit cannot widen what Richard is asked to approve.
   If Google's consent screen lets Richard untick a box, the callback refuses to store a token
-  that lacks any of the four product scopes, and says which one is missing.
+  that lacks any of the five product scopes, and says which one is missing.
 - **A4. Who may connect or disconnect.** Only a request whose principal is a **console login JWT
   with the operator claim**: `principal.operator && !principal.apiKey && embedSession == "" &&
   datasetScope == ""`, and only when `AGENTKIT_JWT_SECRET` is set (dev-open mode has no login, so
@@ -1693,7 +1693,7 @@ then strips the query with `history.replaceState`.
   and `go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1` (agentdb without
   `AGENTKIT_TEST_POSTGRES_URL`, so its live-Postgres cases skipped as usual).
 
-### T21: OAuth state, pending connects, authorize URL   [Status: pending | Model: opus]
+### T21: OAuth state, pending connects, authorize URL   [Status: done | Model: opus]
 - **Scope:** create `go/cmd/agentd/googleconnect_state.go`:
   - `googleConnectConfig{clientID, clientSecret, publicBase string; sealer *connections.Sealer;
     disabledReason string; authURL, tokenURL, tokeninfoURL, revokeURL string}` and
