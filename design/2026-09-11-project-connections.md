@@ -769,8 +769,35 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   `cd .. && docker compose config >/dev/null` → exit 0 (run once with a `local-config/connections.env`
   present, once without).
 - **Depends on:** T4, T5, T7, T8, T9, T13
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/connections.go` adds `buildConnectionRegistry` (always a non-nil Registry;
+  one boot line per project, `name=available` / `name=UNAVAILABLE (env var X is not set)`),
+  `warnIfBothProjectMaps`, `newConnectHandler(reg, auth, workers, logf)` (a `logf` fourth argument
+  beyond the ticket's three), `mountConnectRoute` (the Postgres gate; a nil `*agentdb.Store` counts
+  as no store, route left absent) and `connectionServersFor` (wraps `connections.Servers`, logging
+  unavailable AND unknown/stale grants). `main.go`: the project map + Registry now load right after
+  the MCP credential env block, above the session-context provider; the old load site keeps a
+  pointer comment. Wired: `withConnectionServers` on the provider, `ConnectionServers` on the
+  dispatcher, `ConnectionNames: connRegistry.Names` on httpapi, the Registry as
+  `newManagementTools`' catalog, `/connect/` mounted after the core MCP block using
+  `modelProxySessions` (the correctly-nil lookup) for the verifier. One file outside the list:
+  `mcpserver.go` gained `errSessionTokenExpired`, wrapped by `verifyToken` beside
+  `errMCPUnauthorized` (same message text) so the adapter maps expiry to
+  `connections.ErrSessionExpired` without matching strings. `connections_test.go`: the adapter
+  table (forwarded with the real Bearer; expired+live forwarded; expired+archived 401 expired;
+  no/wrong token and unknown session 401; workerless session 403 even with worker-naming headers;
+  disabled and deleted worker 403; store error 503), worker read from the row not persona/headers,
+  grant re-read per request, route absent with no store (incl. typed nil), dual-map warning,
+  registry boot log (no values, sorted), resolver logging. Tests written first and failed to
+  compile; two mutations (requireLive=false, dropping the Enabled check) each turned a case red.
+  Compose: `env_file` (`required: false`) + `./local-config:/etc/agent-bob:ro` on agentd with the
+  `environment:`-overrides-`env_file` trap in a comment; `.gitignore` `local-config/*` except the two
+  tracked files (checked with `git check-ignore`); `.env.example` documents
+  `AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-map.json`; `local-config/README.md` +
+  `project-map.example.json` (GitHub + Gmail + Docs; confirmed it parses and builds a Registry).
+  Validation: `go build ./... && go vet ./... && go test ./cmd/agentd/ -count=1` PASS;
+  `docker compose config >/dev/null` exit 0 with and without `local-config/connections.env`
+  (Compose 2.29.7). Not run: live Postgres, the stack itself (T15).
 
 ### T13: Guard `/agent-proxy/` with the session token   [Status: done | Model: sonnet]
 - **Scope:** in real-key mode only (the `modelproxy.Handler` branch of `newModelProxyHandler`,
@@ -989,4 +1016,17 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
 - (T11) Rule.NotImportable in go/gitproj/allowlist.go is purely documentary today — no non-test code reads it. The real enforcement mechanism is the separate, hand-maintained `notImportable` map in go/gitproj/parse.go, keyed by bare frontmatter string (not by (struct, field)). This is a latent drift risk: a future NotImportable rule added to allowlist.go (for any of the six guarded structs) will pass TestAllowlistRulesAreWellFormed and TestNotImportableFieldsArePinned yet do nothing at the actual import door unless someone remembers to also add the matching key to parse.go's map. Worth a follow-up ticket to either (a) derive parse.go's notImportable set mechanically from allowlist.go's Rule.NotImportable flags across all six guardedStructs, or (b) add a cross-check test asserting the two sets agree, so the next NotImportable field added anywhere fails loudly instead of silently doing nothing.
 - (T11) docs/21-git-projection.md documents the four/five ProjectSettings not-importable git_* fields in its field table but says nothing about Worker.Connections being not-importable on import. Not fixed here (docs weren't in this ticket's file list and design/2026-09-11-project-connections.md itself is explicitly off-limits to me), but a reader of docs/21 alone would not learn that editing a worker's connections in git has no effect.
 - (T11) gitimport.go's generic 'ignored git configuration' notice text ('git configuration is not importable; ignored: %s', built in the shared loop at gitimport.go around line 304) now also fires for a dropped 'connections' key with the same wording ('git configuration is not importable; ignored: connections'), which reads oddly since connection grants are not git configuration. Left as-is because it's the one shared code path already used for all NotImportableFields()-dropped keys and rewording it was not in this ticket's scope; the TestGitImportConnectionsFieldIsIgnored test only asserts the notice mentions 'connections', not the exact sentence.
+- (T12) A file-map reload (A6: SIGHUP or the 60s timer) now applies only PART of the map: users,
+  API keys and the git token fallback pick up the edit, but connections do not — the Registry is
+  built once at boot (Decision 1). An operator who edits `local-config/project-map.json` and sees
+  the users change may reasonably assume the connections did too. Nothing logs "connections
+  changed; restart to apply". T14's doc must say "restart agentd after editing connections"
+  plainly; a reload-time log line comparing `connectionSpecsOf` before/after would be the cheap fix.
+- (T12) `verifyToken` returned expiry as a plain formatted error, so the `/connect/` adapter had no
+  way to pick the proxy's "session token expired" row except by matching text. Added the
+  `errSessionTokenExpired` sentinel in `mcpserver.go` (not in T12's file list); the error message
+  is unchanged, and `/mcp` and `/agent-proxy/` behave exactly as before.
+- (T12) The mount log line says `connections proxy: <selfURL>/connect/` even for a project map with
+  no connections — the route is mounted whenever Postgres is, and then refuses every request (403 or 404). Harmless;
+  noted so nobody reads the line as "connections are configured".
 - (T10) None beyond what's in the ticket notes above — the topology_apply hand-copy concern the ticket flagged was already handled by T6's UpsertWorker change; nothing new to log.

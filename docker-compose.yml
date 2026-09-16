@@ -91,6 +91,19 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+    # Project connections (docs/22-connections.md, design/2026-09-11-project-
+    # connections.md Decision 8). Tokens for the external services workers
+    # reach through agentd's /connect/ proxy live in local-config/connections.env
+    # — any variable names, no compose edit per token — and the project map that
+    # NAMES them is local-config/project-map.json, mounted below (set
+    # AGENTKIT_PROJECT_MAP_FILE=/etc/agent-bob/project-map.json in .env).
+    # Optional: absent file, nothing loaded. Needs Docker Compose >= 2.24.
+    # TRAP: a variable listed under `environment:` below OVERRIDES the same name
+    # from this file (e.g. GOOGLE_CLIENT_ID is forwarded from .env as blank when
+    # unset), so never define those names here — set them in .env instead.
+    env_file:
+      - path: ./local-config/connections.env
+        required: false
     environment:
       ADDR: ":8099"
       DATABASE_URL: postgres://${POSTGRES_USER:-agentbob}:${POSTGRES_PASSWORD:-agentbob}@postgres:5432/${POSTGRES_DB:-agentbob}?sslmode=disable
@@ -216,6 +229,9 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     volumes:
       - agentd-data:/data
+      # local-config/ (gitignored apart from its README and example map): the
+      # project map and connections.env. Read-only — agentd never writes it.
+      - ./local-config:/etc/agent-bob:ro
       # Offline mock-model script as a file, for scripts too long to sit on one
       # .env line. Uncomment BOTH this and AGENTKIT_MOCK_MODEL_SCRIPT_FILE:
       #  - ./mock-model-script.json:/mock-model-script.json:ro

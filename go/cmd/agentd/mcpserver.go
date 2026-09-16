@@ -180,6 +180,13 @@ type mcpAuthFunc func(r *http.Request) (mcpCaller, error)
 // unverifiable token.
 var errMCPUnauthorized = errors.New("unauthorized")
 
+// errSessionTokenExpired is wrapped (alongside errMCPUnauthorized) by
+// verifyToken for exactly one refusal: a correctly signed token that has
+// expired and whose session may no longer honour it. It exists so the
+// `/connect/` adapter (connections.go) can tell that case apart and answer the
+// proxy's "session token expired" row without matching on error text.
+var errSessionTokenExpired = errors.New("session token expired")
+
 // mcpServer is the HTTP transport plus a tool registry.
 type mcpServer struct {
 	name  string
@@ -565,7 +572,7 @@ func (a *sessionTokenAuth) verifyToken(ctx context.Context, raw string, requireL
 	// attacker; it does not need to survive an idle-archive or a terminal
 	// error either. See sessionIsLive.
 	if expired && (!sessionKnown || (requireLive && !live)) {
-		return mcpCaller{}, fmt.Errorf("%w: session token expired", errMCPUnauthorized)
+		return mcpCaller{}, fmt.Errorf("%w: %w", errMCPUnauthorized, errSessionTokenExpired)
 	}
 	return caller, nil
 }

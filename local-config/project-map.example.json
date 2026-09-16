@@ -1,0 +1,37 @@
+{
+  "users": {
+    "kai@example.com": ["wolf"]
+  },
+  "projects": {
+    "wolf": {
+      "api_key_env": "WOLF_API_KEY",
+      "connections": {
+        "github": {
+          "description": "badcodetv repos, issues and pull requests",
+          "url": "https://api.githubcopilot.com/mcp/",
+          "auth": { "type": "bearer", "token_env": "WOLF_GITHUB_PAT" }
+        },
+        "gmail": {
+          "description": "Kai's inbox: read, search, label, draft (cannot send)",
+          "url": "https://gmailmcp.googleapis.com/mcp/v1",
+          "auth": {
+            "type": "google_oauth",
+            "client_id_env": "GOOGLE_CLIENT_ID",
+            "client_secret_env": "GOOGLE_CLIENT_SECRET",
+            "refresh_token_env": "KAI_GOOGLE_REFRESH"
+          }
+        },
+        "docs": {
+          "description": "Kai's Google Docs: read, and edit the files it creates",
+          "url": "https://docsmcp.googleapis.com/mcp/v1",
+          "auth": {
+            "type": "google_oauth",
+            "client_id_env": "GOOGLE_CLIENT_ID",
+            "client_secret_env": "GOOGLE_CLIENT_SECRET",
+            "refresh_token_env": "KAI_GOOGLE_REFRESH"
+          }
+        }
+      }
+    }
+  }
+}
