@@ -1142,6 +1142,30 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   anything T20 touches). The acceptance criterion is satisfied by construction: `whoami.go` reads
   `identity.Operator`, which is the same `devclaims.OperatorClaim` this ticket's tests decode
   directly off the minted token — see `TestAuthGoogleHandler_PerProjectOperatorClaim`'s comment.
+- (T21) **The scope list is five product scopes, not four.** A3 still says "any of the four
+  product scopes" in one sentence; with `gmail.readonly` added there are five
+  (`drive`, `gmail.readonly`, `gmail.compose`, `documents`, `spreadsheets`). `requiredProductScopes`
+  is *derived* from `googleConnectScopes` (everything but `openid`/`email`), so the pinned
+  constant stays the only list; T23's `missing_scopes` check must use it, not a literal.
+- (T21) "Key equal to `AGENTKIT_JWT_SECRET`" has two spellings and both fail boot: the two env
+  strings are identical (the likely copy-paste), or the decoded 32 key bytes equal the JWT secret's
+  raw bytes. In dev-open mode (no JWT secret) the check is skipped. A malformed key is an error
+  even when `GOOGLE_CLIENT_ID`/`_SECRET` are unset; when the key is valid but a client variable is
+  missing, the config is disabled **but still carries the `Sealer`**, which T22/T24 may ignore.
+- (T21) `verifyState` checks the HMAC before decoding anything, so a forged or other-key state is
+  always `errStateInvalid`, even when its (unsigned) `exp` is in the past; only a genuine state can
+  be `errStateExpired`. Expiry is `now >= exp` (unix seconds). The payload decoder refuses unknown
+  fields and any `v` other than 1, and every field must be non-empty. The error values are fixed and
+  never quote the input, so T23 can log `err` freely.
+- (T21) PKCE uses `oauth2.GenerateVerifier`/`S256ChallengeFromVerifier` (already a dependency),
+  wrapped as `newPKCEVerifier`/`pkceChallenge`, which is what T23's `oauth2.VerifierOption` pairs
+  with. The cookie/state nonce is separate: `newConnectNonce()`, 32 random bytes base64url, and it
+  is the key of `pendingConnects`.
+- (T21) `pendingConnects.take` on an entry that exists but has expired **removes** it and reports a
+  miss, so T23 maps that to `expired` exactly like a replay. T23's ordering (cookie check before
+  `take`) is what keeps a wrong-browser callback from consuming the entry; `pendingConnects` itself
+  cannot tell. `put` refuses with `errPendingConnectsFull` (a user-safe sentence) at 256 live
+  entries; T23 should answer that as 503, not 500.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1697,8 +1721,18 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleConnect' -count=1 -race` → PASS.
 - **Depends on:** T16
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/googleconnect_state.go` + `_test.go`. `googleConnectConfig` (with `enabled()`
+  and `redirectURI()`), `loadGoogleConnectConfig`, `googleConnectScopes` (A3 with `gmail.readonly`,
+  pinned by `TestGoogleConnectScopes_Pinned`) and a derived `requiredProductScopes`,
+  `connectState`/`signState`/`verifyState` (`errStateInvalid`, `errStateExpired`),
+  `newConnectNonce`, `pendingConnects` (`put`/`take`, cap 256, `errPendingConnectsFull`),
+  `newPKCEVerifier`/`pkceChallenge`, `authorizeURL`; constants `googleConnectTTL` and
+  `googleConnectCallbackPath`. Tests were written first and mutation-checked (removing the
+  single-use delete, the HMAC compare, the expiry check, the cap or `prompt=consent` each turns a
+  test red). Validation (`-race`) passes; `go build ./... && go vet ./...` and
+  `go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1` pass (agentdb live cases
+  skipped, no `AGENTKIT_TEST_POSTGRES_URL`).
 
 ### T22: Store-backed `AccountSource`   [Status: pending | Model: sonnet]
 - **Scope:** create `go/cmd/agentd/googleaccounts.go`: `googleAccounts` implementing
