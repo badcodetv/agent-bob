@@ -1577,7 +1577,7 @@ then strips the query with `history.replaceState`.
   filter. Go validation and `vitest` pass; `web` typecheck is red on the base commit for an
   unrelated test fixture (see Discovered Issues).
 
-### T19: `google_account` auth type and use-time availability   [Status: pending | Model: opus]
+### T19: `google_account` auth type and use-time availability   [Status: done | Model: opus]
 - **Scope:** in `go/connections`: `AuthGoogleAccount`, `DefaultGoogleAccount`, `Auth.Account`;
   `Spec.Validate` for the new type (no `*_env`, account defaulted then name-checked; `account`
   set on another type is refused); `NewRegistry` builds no token for it and marks nothing
