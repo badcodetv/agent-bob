@@ -1635,7 +1635,7 @@ then strips the query with `history.replaceState`.
   three agentd tests incl. the T5 map parse. Existing T1–T4 tests unchanged; the only edit to them
   is `newProxyHarness`'s `NewProxy` wiring moved into a `wire` helper. Validation passes.
 
-### T20: Per-project `operators` in the project map   [Status: pending | Model: sonnet]
+### T20: Per-project `operators` in the project map   [Status: done | Model: sonnet]
 - **Scope:** `projectConfig.Operators []string` (`json:"operators"`), lowercased; parse error when
   an operator email has no `users` entry covering the project (the project itself or `"*"`).
   `mintProjectTokens` takes a per-project operator decision instead of one bool: operator =
