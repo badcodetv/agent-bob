@@ -128,6 +128,61 @@ func registerGoogleConnect(apiMux, root *http.ServeMux, deps googleConnectDeps) 
 
 type googleConnect struct{ googleConnectDeps }
 
+// wireGoogleConnect is T24: main.go's one call, made once the Registry, the
+// project map holder, jwtSecret and Connect Google's boot config
+// (loadGoogleConnectConfig) all exist. It installs the AccountSource on reg
+// — a working googleAccounts, or a reason nothing can use google_account
+// connections yet — and, only when a store exists, mounts the four routes
+// via registerGoogleConnect.
+//
+// store follows the same typed-nil rule mountConnectRoute (connections.go)
+// already applies: a nil *agentdb.Store handed in as the googleConnectStore
+// interface is treated as "no store", never boxed into a non-nil interface
+// that lies about it (the T13 nil-store trap this package keeps re-stating).
+// That is what lets main.go pass agentDB straight through, on the sqlite
+// fallback or on Postgres, without its own nil check.
+func wireGoogleConnect(apiMux, root *http.ServeMux, store googleConnectStore, reg *connections.Registry, cfg googleConnectConfig, settings *projectSettingsHolder, testLoginEmail string, jwtSecret []byte, logf func(string, ...any)) {
+	if s, ok := store.(*agentdb.Store); ok && s == nil {
+		store = nil
+	}
+
+	disabledReason := cfg.disabledReason
+	if store == nil {
+		disabledReason = "Connect Google needs DATABASE_URL"
+	}
+
+	var accounts *googleAccounts
+	if store != nil && cfg.enabled() {
+		accounts = newGoogleAccounts(store, cfg, logf)
+		reg.SetAccounts(accounts, "")
+		logf("[agentd] connect google: enabled (redirect %s)", cfg.redirectURI())
+	} else {
+		reg.SetAccounts(nil, disabledReason)
+		logf("[agentd] connect google: DISABLED (%s)", disabledReason)
+	}
+
+	if store == nil {
+		return
+	}
+	// accounts may be nil here (store set but cfg disabled): accountInvalidator
+	// must then be a true nil interface, never a *googleAccounts(nil) boxed
+	// into one — the same trap this file's doc comment on accountInvalidator
+	// names.
+	var inv accountInvalidator
+	if accounts != nil {
+		inv = accounts
+	}
+	registerGoogleConnect(apiMux, root, googleConnectDeps{
+		cfg:           cfg,
+		registry:      reg,
+		store:         store,
+		accounts:      inv,
+		stillOperator: connectOperatorRecheck(settings, testLoginEmail),
+		jwtSecretSet:  len(jwtSecret) > 0,
+		logf:          logf,
+	})
+}
+
 // connectOperatorRecheck answers A4's callback question — does email still
 // hold operator authority for project — from the live holder on every call.
 // A wildcard users entry, or the AGENTKIT_TEST_LOGIN email (an implicit

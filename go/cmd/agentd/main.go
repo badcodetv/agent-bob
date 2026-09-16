@@ -280,6 +280,16 @@ func main() {
 	must(err)
 	connServers := connectionServersFor(connRegistry, selfURL, log.Printf)
 
+	// Connect Google's boot configuration (T24, addendum A1-A12). Loaded here
+	// — after the Registry and permalinks.BaseURL() both exist — so a
+	// malformed AGENTKIT_CONNECTIONS_KEY, or one equal to AGENTKIT_JWT_SECRET,
+	// fails boot rather than surfacing later as every stored connection
+	// refusing to open. Missing env just disables the feature (cfg.enabled()
+	// false); wireGoogleConnect below turns that into the Registry's
+	// AccountSource and, once agentDB is known, the four HTTP routes.
+	googleConnectCfg, err := loadGoogleConnectConfig(os.Getenv, permalinks.BaseURL(), jwtSecret)
+	must(err)
+
 	// ── Session context (project settings + workers) ─────────────────────────────
 	// The §5 defaults chain: worker beats project beats global, for base image,
 	// system prompt and MCP config. Needs the product-layer tables, so it is
@@ -614,6 +624,11 @@ func main() {
 	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
 	testLogin := os.Getenv("AGENTKIT_TEST_LOGIN")
 	loginEnabled := googleClientID != "" || testLogin != ""
+	// testLoginEmail is Connect Google's A4 re-check reaching the one login
+	// that has no `users` entry of its own (connectOperatorRecheck, T23):
+	// filled in below, once, only if AGENTKIT_TEST_LOGIN parses — which by
+	// then it must, or the process has already exited.
+	var testLoginEmail string
 
 	root := http.NewServeMux()
 	root.HandleFunc("/health", healthHandler)
@@ -714,6 +729,7 @@ func main() {
 		if testLogin != "" {
 			email, password, err := parseTestLogin(testLogin)
 			must(err)
+			testLoginEmail = email
 			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] WARNING: password test login enabled for %s — all projects granted; test/dev only", email)
 		}
@@ -818,6 +834,17 @@ func main() {
 	if mountConnectRoute(root, connRegistry, newSessionTokenAuth(sessionSecret, modelProxySessions), agentDB, log.Printf) {
 		log.Printf("[agentd] connections proxy: %s%s", selfURL, connectPath)
 	}
+
+	// ── Connect Google (T24) ──────────────────────────────────────────────────────
+	// Installs the AccountSource on connRegistry (or a reason, when there is
+	// none) and, only with a database, mounts the four routes from
+	// registerGoogleConnect: three on apiMux — behind apiAuthMiddleware, which
+	// wraps apiMux below — and the unauthenticated callback on root. Passing
+	// agentDB straight in as the googleConnectStore interface is deliberate:
+	// wireGoogleConnect applies the same typed-nil check mountConnectRoute
+	// does just above, rather than agentd re-deriving a second "is there
+	// really a store" boolean.
+	wireGoogleConnect(apiMux, root, agentDB, connRegistry, googleConnectCfg, projectMapHolder, testLoginEmail, jwtSecret, log.Printf)
 
 	// ── The git projection's inbound door ────────────────────────────────────────
 	// POST /agent/git/webhook, mounted on the ROOT mux for the same reason the

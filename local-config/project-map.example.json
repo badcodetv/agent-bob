@@ -1,6 +1,7 @@
 {
   "users": {
-    "kai@example.com": ["wolf"]
+    "kai@example.com": ["wolf"],
+    "richard@example.com": ["enc"]
   },
   "projects": {
     "wolf": {
@@ -30,6 +31,21 @@
             "client_secret_env": "GOOGLE_CLIENT_SECRET",
             "refresh_token_env": "KAI_GOOGLE_REFRESH"
           }
+        }
+      }
+    },
+    "enc": {
+      "operators": ["richard@example.com"],
+      "connections": {
+        "gmail": {
+          "description": "ENC's Gmail: find and draft emails (cannot send)",
+          "url": "https://gmailmcp.googleapis.com/mcp/v1",
+          "auth": { "type": "google_account", "account": "google" }
+        },
+        "drive": {
+          "description": "ENC's Google Drive",
+          "url": "https://drivemcp.googleapis.com/mcp/v1",
+          "auth": { "type": "google_account" }
         }
       }
     }
