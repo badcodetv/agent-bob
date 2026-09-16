@@ -1001,6 +1001,33 @@ export type { Whoami, UseWhoamiOptions, WhoamiApi } from './whoami.js'
 // tier: it takes a status and renders it, and ProjectSettingsPage owns the read.
 export { default as GitProjectionPanel } from './components/GitProjectionPanel.js'
 export type { GitProjectionPanelProps } from './components/GitProjectionPanel.js'
+// Connections (T25) — the project's MCP connections and the Connect Google
+// button: the pure client for GET /agent/connections and the callback's
+// ?connect= result, the hook, and the panel ProjectSettingsPage mounts.
+export {
+  CONNECTIONS_ENDPOINT,
+  CONNECT_ERROR_REASONS,
+  coerceConnections,
+  connectEndpoint,
+  disconnectEndpoint,
+  parseConnectResult,
+  describeConnectError,
+  describeConnectResult,
+  googleAccountLabel,
+  readApiErrorMessage,
+  isSafeAuthorizeUrl,
+} from './connections.js'
+export type {
+  ConnectionRow,
+  AccountRow,
+  ConnectionsState,
+  ConnectResult,
+  ConnectErrorReason,
+} from './connections.js'
+export { default as useConnections } from './useConnections.js'
+export type { UseConnectionsOptions, ConnectionsApi, DisconnectOutcome } from './useConnections.js'
+export { default as ConnectionsPanel, DISCONNECT_CONFIRM_TEXT } from './components/ConnectionsPanel.js'
+export type { ConnectionsPanelProps } from './components/ConnectionsPanel.js'
 export { default as NlAssistField } from './components/NlAssistField.js'
 export type { NlAssistFieldProps } from './components/NlAssistField.js'
 

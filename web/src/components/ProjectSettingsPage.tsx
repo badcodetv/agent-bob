@@ -15,7 +15,7 @@
 // these" holds the project system prompt (the "background prose" §1 refers
 // to — `project_background` in the design doc never shipped as its own
 // field, `system_prompt` is the field that plays that role), the
-// project-wide briefing, and the budget panel. "Advanced" holds everything
+// project-wide briefing, the Connections panel (T25), and the budget panel. "Advanced" holds everything
 // else — base image, both JSON editors, the git projection fields, and the
 // remaining numeric caps (`daily_tokens_soft`/`daily_tokens_hard` moved out
 // of that list: `BudgetPanel` is now the one editor for those two fields,
@@ -62,6 +62,8 @@ import {
 import JsonObjectEditor from './JsonObjectEditor.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import BudgetPanel from './BudgetPanel.js'
+import ConnectionsPanel from './ConnectionsPanel.js'
+import type { ConnectResult } from '../connections.js'
 import useWhoami from '../whoami.js'
 
 /** `localStorage` key for whether a project's Advanced tier is expanded —
@@ -110,11 +112,18 @@ export interface ProjectSettingsPageProps extends UseProjectSettingsOptions {
    * `readRevealed`'s caller would hit if it forgot to pass a project id.
    */
   projectId?: string
+  /**
+   * What Google's redirect back to Settings said — the host passes
+   * `parseConnectResult(location.search)` (T26). Shown as a one-line banner in
+   * the Connections panel. Optional; absent or null shows no banner.
+   */
+  connectResult?: ConnectResult | null
 }
 
 export default function ProjectSettingsPage({
   title = 'Project settings',
   projectId = '',
+  connectResult = null,
   ...options
 }: ProjectSettingsPageProps) {
   // Re-read the projection after a save: turning a repository on (or off) is a
@@ -213,6 +222,15 @@ export default function ProjectSettingsPage({
         <ProjectBriefing
           entries={s.draft.briefing}
           onChange={(briefing) => s.update({ briefing })}
+        />
+
+        {/* Connect Google (T25) — above the budget panel. The panel renders
+            nothing on a deployment without the connections routes. */}
+        <ConnectionsPanel
+          projectId={projectId}
+          connectResult={connectResult}
+          apiBaseUrl={options.apiBaseUrl}
+          getAuthToken={options.getAuthToken}
         />
 
         <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
