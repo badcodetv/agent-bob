@@ -495,7 +495,7 @@ function ProjectWorkspace({
   // Leaving the interview for the Desk lets go of the interview session first:
   // with it still bound, the permalink would write it into the address bar and
   // a reload would land on the transcript instead of the Desk.
-  const { clearSession } = useAgentChat();
+  const { clearSession, createSession } = useAgentChat();
   const openDeskAfterOnboarding = useCallback(() => {
     clearSession();
     window.history.pushState(null, "", deskPath(project) + window.location.search);
@@ -580,6 +580,24 @@ function ProjectWorkspace({
     [openSession],
   );
 
+  // "Chat to <worker>" on the Desk: a new session composed server-side from
+  // that worker's prompt and tools (the same request WorkerChatPanel makes),
+  // then shown. A refusal — an unknown or disabled worker — is thrown so the
+  // card can say it.
+  const chatWithWorker = useCallback(
+    async (worker: string) => {
+      const id = await createSession({ customer: project, worker });
+      if (id === null) throw new Error(`Could not start a chat with ${worker}.`);
+      setView("chat");
+    },
+    [createSession, project],
+  );
+  const openWorker = useCallback((worker: string) => {
+    setWorkerFromChart(worker);
+    setTriggersFromChart(false);
+    setView("workers");
+  }, []);
+
   return (
     <Box sx={{ display: "flex", height: "100vh" }}>
       <Box sx={{ width: 280, borderRight: 1, borderColor: "divider", display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -640,7 +658,11 @@ function ProjectWorkspace({
             onOpenChat={() => setView("chat")}
             inInterview={inInterview}
             onOpenOnboarding={openOnboarding}
-            onOpenMemory={() => setView("memory")}
+            onChatWithWorker={chatWithWorker}
+            // Only link to views the menu already shows (navReveal): a link to
+            // a hidden view would land back on the Desk.
+            onOpenWorker={visible.includes("workers") ? openWorker : undefined}
+            onOpenActivity={visible.includes("activity") ? () => setView("activity") : undefined}
           />
         )}
         {/* Schedules are not edited on the canvas (K3): a clock is a deep link

@@ -220,6 +220,17 @@ export type {
   CycleSkip,
   FormingStep,
 } from './teamForming.js'
+export {
+  workerRoleLine,
+  describeClock,
+  describeHandler,
+  buildWakeRules,
+  wakeRulesFor,
+  workerStatus,
+  ROLE_LINE_MAX_CHARS,
+  RECENT_ACTIVITY_LIMIT,
+} from './team.js'
+export type { WakeRule, WakeRules, WorkerStatus, WorkerStatusTone } from './team.js'
 export { default as useTeamForming } from './useTeamForming.js'
 export type { UseTeamFormingOptions, TeamFormingApi } from './useTeamForming.js'
 
@@ -671,6 +682,8 @@ export { default as useAsksCount } from './useAsksCount.js'
 export type { UseAsksCountOptions, AsksCountApi } from './useAsksCount.js'
 export { default as DeskPage } from './components/DeskPage.js'
 export type { DeskPageProps } from './components/DeskPage.js'
+export { TeamSection, RecentActivitySection, WakeSection } from './components/TeamDashboard.js'
+export type { TeamSectionProps, RecentActivitySectionProps } from './components/TeamDashboard.js'
 
 // The org chart (OC1) — a pure, deterministic, layered layout (§6.2, K6).
 // No graph library, no stored positions (§6.3): coordinates are derived.
