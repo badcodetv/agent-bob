@@ -31,13 +31,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConfigApi, type ConfigApiOptions } from './configApi.js'
+import { buildActivity, type ActivityRecord } from './activity.js'
 import { ATTENTION_ENDPOINTS, buildDesk, type AttentionRequest, type Desk } from './desk.js'
 import useAttentionRequests from './useAttentionRequests.js'
 import useConfigLog from './useConfigLog.js'
 import useEventsOverview from './useEvents.js'
 import useSchedules from './useSchedules.js'
 import useWorkers from './useWorkers.js'
-import { deliveryDurationSeconds, type EventDelivery } from './events.js'
+import { deliveryDurationSeconds, type EventDelivery, type Subscription } from './events.js'
+import type { Schedule } from './schedules.js'
+import type { Worker } from './workers.js'
 import { readWatermark, useFeedWatermark, watermarkKey, writeWatermark } from './watermark.js'
 import useElapsedTicker, { tickIntervalForRows } from './useElapsedTicker.js'
 
@@ -136,6 +139,18 @@ export interface DeskApi {
   asksRouteAvailable: boolean
   /** The project's workers, for the first-run state. */
   workerCount: number
+  /** The project's workers, as loaded (the team view's cards). */
+  workers: Worker[]
+  /** Every schedule — the team view's "On a clock" list. */
+  schedules: Schedule[]
+  /** Every subscription — the team view's "When something happens" list. */
+  subscriptions: Subscription[]
+  /**
+   * Everything that happened, newest first — the same fold the Activity page
+   * draws (`buildActivity`), over the lists this hook already holds, so the
+   * Desk's "What happened" column and Activity can never disagree.
+   */
+  activity: ActivityRecord[]
   /** Unix MILLISECONDS; 0 means "never looked". */
   lastSeenMs: number
   /** Mark everything currently shown as seen, from now on. */
@@ -269,6 +284,33 @@ export default function useDesk(options: UseDeskOptions = {}): DeskApi {
     ],
   )
 
+  const activity = useMemo(
+    () =>
+      buildActivity({
+        events: overview.events,
+        deliveries: overview.deliveries,
+        subscriptions: overview.subscriptions,
+        configEvents: log.events,
+        attentionRequests: attention.ok
+          ? attention.requests
+          : deliveriesAsRequests(overview.deliveries),
+        schedules: schedules.schedules,
+        nowMs: tickNowSeconds * 1000,
+        projectId,
+      }),
+    [
+      attention.ok,
+      attention.requests,
+      log.events,
+      overview.deliveries,
+      overview.events,
+      overview.subscriptions,
+      projectId,
+      schedules.schedules,
+      tickNowSeconds,
+    ],
+  )
+
   return {
     desk,
     loading:
@@ -284,6 +326,10 @@ export default function useDesk(options: UseDeskOptions = {}): DeskApi {
     asksHaveMessages: attention.ok,
     asksRouteAvailable: attention.available,
     workerCount: workers.workers.length,
+    workers: workers.workers,
+    schedules: schedules.schedules,
+    subscriptions: overview.subscriptions,
+    activity,
     lastSeenMs,
     markSeen,
     reload,

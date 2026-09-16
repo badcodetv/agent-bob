@@ -154,6 +154,10 @@ services:
       # AGENTKIT_MCP_ENV below allowlists its name.
       WOLF_API_KEY: ${WOLF_API_KEY:-}
       WOLF_MCP_TOKEN: ${WOLF_MCP_TOKEN:-}
+      # ENC website: a fine-grained GitHub token scoped to emperorsnewcoin/bob
+      # only. Reaches session containers only when AGENTKIT_MCP_ENV names it,
+      # and then reaches EVERY project's sessions — keep its scope to that repo.
+      ENC_GITHUB_TOKEN: ${ENC_GITHUB_TOKEN:-}
       AGENTKIT_JWT_SECRET: ${AGENTKIT_JWT_SECRET:-}
       # OPTIONAL. The signing key for per-session container tokens. Unset (the
       # normal case) agentd derives it from AGENTKIT_JWT_SECRET, so a session
