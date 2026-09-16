@@ -194,6 +194,8 @@ func signState(key []byte, st connectState) (string, error) {
 // verifyState checks the signature first and only then looks inside, so an
 // unsigned payload never decides anything — not even which error is returned.
 // It returns errStateInvalid or errStateExpired, never text from the input.
+// With errStateExpired the verified payload is returned too, so the callback
+// can redirect to that project's Settings with reason "expired".
 func verifyState(key []byte, raw string, now time.Time) (connectState, error) {
 	payload, sig, ok := strings.Cut(raw, ".")
 	if !ok || payload == "" || strings.Contains(sig, ".") {
@@ -217,7 +219,9 @@ func verifyState(key []byte, raw string, now time.Time) (connectState, error) {
 		return connectState{}, errStateInvalid
 	}
 	if now.Unix() >= st.Exp {
-		return connectState{}, errStateExpired
+		// The signature verified, so the payload may name where to send the
+		// person back to with "expired" (T23); it must not be used for more.
+		return st, errStateExpired
 	}
 	return st, nil
 }

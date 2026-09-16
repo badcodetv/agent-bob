@@ -256,6 +256,10 @@ func TestGoogleConnectState_Verify(t *testing.T) {
 		{name: "missing nonce", raw: sign(key, connectState{Project: "enc", Account: "google", Email: "a@b.c", Exp: good.Exp}), want: errStateInvalid},
 		{name: "missing project", raw: sign(key, connectState{Account: "google", Email: "a@b.c", Nonce: "n", Exp: good.Exp}), want: errStateInvalid},
 	}
+	// A genuine expired state still names its project (T23 redirects there).
+	if st, err := verifyState(key, sign(key, expired), now); !errors.Is(err, errStateExpired) || st.Project != "enc" || st.Account != "google" {
+		t.Fatalf("expired state = %+v, %v; want the verified payload with errStateExpired", st, err)
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := verifyState(key, tt.raw, now)

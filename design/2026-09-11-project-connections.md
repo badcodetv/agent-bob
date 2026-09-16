@@ -1186,6 +1186,30 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   still log independently, and the same account logs again after one success followed by a fresh
   failure. Seemed like the more useful reading of the ticket text than a single agentd-wide
   once-ever log.
+- (T23) **`verifyState` now returns the payload alongside `errStateExpired`** (one-line change in
+  T21's file, plus a test). As T21 shipped it returned an empty struct, so an expired callback could
+  not name a project and could only have been the HTML 400 page — but the route table wants a
+  redirect with `reason=expired`. Safe: the HMAC has already verified by then. `errStateInvalid`
+  still returns nothing.
+- (T23) **`missing_scopes` carries one extra query parameter, `missing`**: the short scope names,
+  comma-separated (`&missing=gmail.compose`). A3 says the callback "says which one is missing"; the
+  route table's reason codes alone could not. Scope names are not secret. T25's
+  `parseConnectResult` may ignore it or show it.
+- (T23) **The A4 re-check needs to know about the test login.** `projectSettingsHolder.isOperator`
+  takes `wildcard` from the caller, and `AGENTKIT_TEST_LOGIN` is an implicit wildcard with no
+  `users` entry, so re-deriving wildcard from the map alone would answer `not_allowed` to every
+  password-login connect on the local stack. `connectOperatorRecheck(holder, testLoginEmail)` treats
+  that email as a wildcard; T24 must pass the parsed test-login email (or "").
+- (T23) A principal whose customer is `"*"` (a wildcard login token, before the project-token
+  exchange) is refused by A4 and by the list as "no project in token", rather than treated as an
+  operator of a project called `*`.
+- (T23) Errors from the token exchange and from `googleVerifier.Verify` are **never logged
+  verbatim**: a transport error from `Verify` quotes the tokeninfo URL, which carries the ID token
+  in its query. The exchange is reduced to Google's error code + HTTP status. Callback responses
+  (redirect and HTML page) also set `Referrer-Policy: no-referrer`, because the callback URL holds
+  the code and state and the HTML page has a link on it.
+- (T23) The callback checks that the pending entry's project/account/email equal the state's
+  (they always should — both were written together); a mismatch is answered `expired`.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1827,8 +1851,15 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleConnect|Connections' -count=1 -race` → PASS.
 - **Depends on:** T17, T19, T20, T21, T22
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/googleconnect.go` + `_test.go`. `registerGoogleConnect(apiMux, root,
+  googleConnectDeps{cfg, registry, store, accounts, stillOperator, jwtSecretSet, logf})` plus
+  `connectOperatorRecheck(holder, testLoginEmail)` and `connectAuthority`. Every acceptance
+  criterion has a test (fake Google token/tokeninfo/revoke via `httptest`, fake store), and one
+  more registers on the real `httpapi` mux to prove no pattern conflict; guards mutation-checked
+  (cookie check, re-check, scope check, API-key refusal, single use). `verifyState` changed to
+  return the payload with `errStateExpired` (Discovered Issues). Validation (`-race`) and the full
+  gate pass (agentdb live cases skipped).
 
 ### T24: Wire Connect Google into agentd   [Status: pending | Model: sonnet]
 - **Scope:** in `go/cmd/agentd/main.go`: after the Registry is built (`main.go:279`) and the
