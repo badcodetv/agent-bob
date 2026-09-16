@@ -78,6 +78,8 @@ export const CONFIG_ACTIONS = [
   'image_create',
   'skill_create',
   'topology_apply',
+  'connection_connect',
+  'connection_disconnect',
 ] as const
 export type ConfigAction = (typeof CONFIG_ACTIONS)[number]
 
@@ -148,6 +150,7 @@ export type ConfigEntityKind =
   | 'image'
   | 'skill'
   | 'topology'
+  | 'connection'
   | 'unknown'
 
 /**
@@ -187,6 +190,12 @@ export function configEntity(ev: Pick<ConfigEvent, 'action' | 'payload'>): Confi
   if (ev.action === 'skill_create') return make('skill', name('name'))
   // T2's apply bracket keys on the applied name@version, not on a row name.
   if (ev.action === 'topology_apply') return make('topology', name('topology'))
+  // Keyed on the account NAME (`google`), as the engine keys it. The payload
+  // also carries the connected mailbox's email; that is metadata for the entry
+  // body, never part of the title or the key.
+  if (ev.action === 'connection_connect' || ev.action === 'connection_disconnect') {
+    return make('connection', name('account'))
+  }
   return make('unknown', '')
 }
 
@@ -234,6 +243,10 @@ export function describeConfigAction(action: string): string {
       // The bracket record of one topology apply (T2): the rows it created
       // each have their own entries; this one names the org chart itself.
       return 'Applied topology'
+    case 'connection_connect':
+      return 'Connected Google account'
+    case 'connection_disconnect':
+      return 'Disconnected Google account'
     default:
       return action
   }
@@ -668,6 +681,8 @@ const NO_INVERSE: Partial<Record<ConfigEntityKind, string>> = {
   topology: 'Applying an org chart wrote several things at once, so there is no single change to put back. Revert the individual entries it created instead.',
   image: 'Published images are kept forever — there is nothing to put back to.',
   skill: 'Installed skills are kept forever — there is nothing to put back to.',
+  connection:
+    'A connection credential is not in the log, so there is nothing to put back — use Connect Google or Disconnect in Settings.',
 }
 
 /** Why one entry cannot be reverted, or null when it can. */

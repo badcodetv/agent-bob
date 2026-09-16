@@ -109,6 +109,37 @@ func TestConfigHistoryReturnsProvenanceAndPermalinks(t *testing.T) {
 	}
 }
 
+// A Google connect is keyed by its account, and `connection:<account>` is a
+// filter the tool accepts rather than refuses as a mistyped kind.
+func TestConfigHistoryKeysConnectionsByAccount(t *testing.T) {
+	store := &fakeConfigHistoryStore{rows: []*agentdb.ConfigEvent{
+		historyRow("ce-7", agentdb.ActionConnectionDisconnect,
+			agentdb.JSONMap{"account": "google", "provider": "google", "account_email": "office@example.com"},
+			"", "", "Google account disconnected from the console"),
+		historyRow("ce-6", agentdb.ActionConnectionConnect,
+			agentdb.JSONMap{"account": "google", "provider": "google", "account_email": "office@example.com"},
+			"", "", "Google account connected from the console"),
+	}}
+	out, err := invokeTool(t, configHistoryTools(store), "config_history",
+		mcpCaller{Project: "acme"}, map[string]any{"entity": "connection:google", "action": "connection_*"})
+	if err != nil {
+		t.Fatalf("config_history refused a connection filter: %v", err)
+	}
+	if q := store.queries[0]; q.Entity != "connection:google" || q.Action != "connection_*" {
+		t.Fatalf("filters lost on the way to the store: %+v", q)
+	}
+	records, _ := out["records"].([]any)
+	if len(records) != 2 {
+		t.Fatalf("want 2 records, got %v", out["records"])
+	}
+	for _, r := range records {
+		rec, _ := r.(map[string]any)
+		if rec["entity"] != "connection:google" {
+			t.Errorf("record %v: entity = %v, want connection:google", rec["id"], rec["entity"])
+		}
+	}
+}
+
 // TestConfigHistoryFiltersReachTheStore covers the §15.9 filter surface,
 // including the ms-vs-RFC3339 flexibility of since/until.
 func TestConfigHistoryFiltersReachTheStore(t *testing.T) {

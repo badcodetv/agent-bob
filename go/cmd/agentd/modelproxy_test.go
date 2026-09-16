@@ -7,6 +7,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/badcodetv/agent-bob/agentdb"
 )
 
 // TestCredentialMode pins the three answers the browser is told, in the same
@@ -59,7 +62,7 @@ func TestAuthConfigReportsCredentialMode(t *testing.T) {
 
 func TestNewModelProxyHandler_MockWhenNoKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	h := newModelProxyHandler()
+	h := newModelProxyHandler(newSessionTokenAuth([]byte("s3cret"), nil))
 	if h == nil {
 		t.Fatal("handler is nil")
 	}
@@ -148,4 +151,207 @@ func TestSessionEnv_ModeSwitchLeavesNoStaleWiring(t *testing.T) {
 			t.Errorf("ANTHROPIC_BASE_URL = %q", got["ANTHROPIC_BASE_URL"])
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// T13 — /agent-proxy/ guarded by the session token (H6)
+// ---------------------------------------------------------------------------
+
+// realKeyProxyHandler stands up the real-key branch of newModelProxyHandler
+// pointed at a fake upstream, so the tests below can prove both that a
+// request is forwarded (and what the upstream actually received) and that a
+// refused request never reaches the upstream at all.
+func realKeyProxyHandler(t *testing.T, auth *sessionTokenAuth, upstream *httptest.Server) http.Handler {
+	t.Helper()
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api03-real-test-key")
+	t.Setenv("ANTHROPIC_UPSTREAM_URL", upstream.URL)
+	return newModelProxyHandler(auth)
+}
+
+func TestModelProxy_NoToken_401AndUpstreamNeverContacted(t *testing.T) {
+	contacted := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		contacted = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := realKeyProxyHandler(t, newSessionTokenAuth([]byte("s3cret"), nil), upstream)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if contacted {
+		t.Fatal("the upstream must never be contacted for an unauthenticated request")
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] == "" {
+		t.Fatalf("want a JSON {\"error\":...} body, got %q (err=%v)", rec.Body.String(), err)
+	}
+}
+
+func TestModelProxy_ForgedOrWrongSecretToken_401(t *testing.T) {
+	secret := []byte("s3cret")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("upstream contacted with a bad token")
+	}))
+	defer upstream.Close()
+	h := realKeyProxyHandler(t, newSessionTokenAuth(secret, nil), upstream)
+
+	for _, tok := range []string{
+		"not-a-jwt",
+		mintSessionToken(t, []byte("some-other-secret"), time.Hour, "acme", "sess-1"),
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+		req.Header.Set("X-Api-Key", tok)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("token %q: status = %d, want 401", tok, rec.Code)
+		}
+	}
+}
+
+// TestModelProxy_ValidSessionToken_ForwardedWithRealKey proves the credential
+// swap: the upstream sees the real ANTHROPIC_API_KEY (x-api-key, per
+// modelproxy.buildProxyRequest), never the session JWT.
+func TestModelProxy_ValidSessionToken_ForwardedWithRealKey(t *testing.T) {
+	secret := []byte("s3cret")
+	sessions := &fakeSessionLookup{sessions: map[string]*agentdb.Session{
+		"sess-1": {ID: "sess-1", Customer: "acme", Status: "running"},
+	}}
+	var gotKey string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotKey = r.Header.Get("x-api-key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	h := realKeyProxyHandler(t, newSessionTokenAuth(secret, sessions), upstream)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req.Header.Set("X-Api-Key", mintSessionToken(t, secret, time.Hour, "acme", "sess-1"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+	if gotKey != "sk-ant-api03-real-test-key" {
+		t.Fatalf("upstream x-api-key = %q, want the real configured key", gotKey)
+	}
+}
+
+// TestModelProxy_AuthorizationFallback: a client that sends the token under
+// Authorization instead of X-Api-Key (the header the SDK actually uses) still
+// gets through.
+func TestModelProxy_AuthorizationFallback(t *testing.T) {
+	secret := []byte("s3cret")
+	sessions := &fakeSessionLookup{sessions: map[string]*agentdb.Session{
+		"sess-1": {ID: "sess-1", Customer: "acme", Status: "running"},
+	}}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	h := realKeyProxyHandler(t, newSessionTokenAuth(secret, sessions), upstream)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req.Header.Set("Authorization", mintSessionToken(t, secret, time.Hour, "acme", "sess-1"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+}
+
+// TestModelProxy_ExpiredToken_LiveVsArchived is the T13 hazard itself: an
+// expired token (one Bash could have read out of a container long after the
+// turn that used it) must keep working for a session still in progress, and
+// must stop working the moment that session is no longer live.
+func TestModelProxy_ExpiredToken_LiveVsArchived(t *testing.T) {
+	secret := []byte("s3cret")
+	sessions := &fakeSessionLookup{sessions: map[string]*agentdb.Session{
+		"live":     {ID: "live", Customer: "acme", Status: "running"},
+		"archived": {ID: "archived", Customer: "acme", Status: "running", SnapshotState: "archived"},
+		"errored":  {ID: "errored", Customer: "acme", Status: "error"},
+	}}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	h := realKeyProxyHandler(t, newSessionTokenAuth(secret, sessions), upstream)
+
+	call := func(sessionID string) int {
+		expired := mintSessionToken(t, secret, -time.Minute, "acme", sessionID)
+		req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+		req.Header.Set("X-Api-Key", expired)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	if got := call("live"); got != http.StatusOK {
+		t.Fatalf("expired token for a LIVE session: status = %d, want 200", got)
+	}
+	if got := call("archived"); got != http.StatusUnauthorized {
+		t.Fatalf("expired token for an ARCHIVED session: status = %d, want 401", got)
+	}
+	if got := call("errored"); got != http.StatusUnauthorized {
+		t.Fatalf("expired token for an ERRORED session: status = %d, want 401", got)
+	}
+}
+
+// TestModelProxy_NoDatabase_ValidTokenForwarded_NoPanic is the nil-store trap:
+// on the SQLite fallback agentDB is a nil *agentdb.Store, and boxing it
+// straight into the mcpSessionLookup interface makes a non-nil interface whose
+// GetSession panics. main.go must pass an untyped nil instead; here we prove
+// the resulting handler still forwards a valid (unexpired) token, and that an
+// EXPIRED one is refused outright rather than panicking (with no store,
+// sessionKnown can never become true).
+func TestModelProxy_NoDatabase_ValidTokenForwarded_NoPanic(t *testing.T) {
+	secret := []byte("s3cret")
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	// The exact construction main.go uses when agentDB == nil: leave the
+	// mcpSessionLookup interface at its zero value, never a boxed nil pointer.
+	var noStore mcpSessionLookup
+	h := realKeyProxyHandler(t, newSessionTokenAuth(secret, noStore), upstream)
+
+	valid := mintSessionToken(t, secret, time.Hour, "acme", "sess-1")
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req.Header.Set("X-Api-Key", valid)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req) // must not panic
+	if rec.Code != http.StatusOK {
+		t.Fatalf("valid token with no database: status = %d, want 200", rec.Code)
+	}
+
+	expired := mintSessionToken(t, secret, -time.Minute, "acme", "sess-1")
+	req2 := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req2.Header.Set("X-Api-Key", expired)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2) // must not panic
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("expired token with no database: status = %d, want 401", rec2.Code)
+	}
+}
+
+// TestModelProxy_MockMode_NoTokenRequired: the guard wraps ONLY the real-key
+// branch. With no ANTHROPIC_API_KEY set, the mock handler must still answer
+// with no session token at all — mounting a guard there would break every
+// offline stack.
+func TestModelProxy_MockMode_NoTokenRequired(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	h := newModelProxyHandler(newSessionTokenAuth([]byte("s3cret"), nil))
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-3","messages":[]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatalf("mock mode must not require a session token, got 401: %q", rec.Body.String())
+	}
 }

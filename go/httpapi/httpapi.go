@@ -36,6 +36,15 @@ type Identity struct {
 	// v3 must still resolve to that name's requested version after a tick moved
 	// it to v4. Empty means unrestricted within Customer.
 	DatasetScope string
+	// APIKey is true when the credential behind this request was a project
+	// API key (X-API-Key), rather than a console login JWT. It is what
+	// PutWorker checks before allowing a `connections` change (T7 of
+	// design/2026-09-11-project-connections.md, decision 3: "only a
+	// logged-in person grants over HTTP") — an embedding application holding
+	// its project's key must not be able to widen what its own workers can
+	// reach. The host sets it in its IdentityFunc; the zero value (false) is
+	// the safe default for a host that has not been taught about it.
+	APIKey bool
 	// Operator marks the identity allowed to change a project's token budgets
 	// and job-concurrency cap (onboarding-work-plan §1.1, PutProjectSettings).
 	// True for a wildcard login's project tokens, the wildcard project-token
@@ -81,6 +90,14 @@ type Config struct {
 	// from AgentDB in New(); nil with no AgentDB (the SQLite fallback) makes the
 	// routes 501. Set it explicitly to substitute a host store.
 	Workers WorkersStore
+
+	// ConnectionNames, when set, reports the connection names a project's
+	// project-map registry actually has (never including the wildcard "*",
+	// which PutWorker always accepts). PutWorker refuses an unknown name in
+	// a `connections` body with 400. Nil skips the existence check — a host
+	// that has not wired go/connections yet (or a test) still gets every
+	// other rule this route enforces.
+	ConnectionNames func(project string) []string
 
 	// Schedules backs the /agent/schedules CRUD routes (§8.6). Same defaulting
 	// rule as Workers: auto-filled from AgentDB, 501 without one.

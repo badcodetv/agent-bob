@@ -132,7 +132,8 @@ Use it to answer "why is this worker like this?", to review what the ` +
 Filters, all optional and all ANDed:
  - entity: one thing's whole history — "worker:email-answerer", "schedule:<id>", ` +
 	`"subscription:<id>", "image:toolbox:2", "skill:<name>", "project-settings", ` +
-	`"project-prompt".
+	`"project-prompt", "connection:<account>" (a Google account connected or ` +
+	`disconnected by a person in Settings — no worker can do either).
  - action: exactly one verb ("worker_prompt_write") or a trailing-* prefix ` +
 	`("worker_*", "schedule_*").
  - actor_worker: only changes made by that worker.
@@ -156,7 +157,7 @@ func (c *configLogTools) tools() []*mcpTool {
 			InputSchema: objectSchema(map[string]any{
 				"entity": map[string]any{
 					"type":        "string",
-					"description": "One entity's history: \"worker:<name>\", \"subscription:<id>\", \"schedule:<id>\", \"image:<name>:<version>\", \"skill:<name>\", \"project-settings\", \"project-prompt\".",
+					"description": "One entity's history: \"worker:<name>\", \"subscription:<id>\", \"schedule:<id>\", \"image:<name>:<version>\", \"skill:<name>\", \"project-settings\", \"project-prompt\", \"connection:<account>\".",
 				},
 				"action": map[string]any{
 					"type":        "string",

@@ -25,3 +25,10 @@ e2e/.stack-e2e-mode
 
 # ./stack wolf: local dev secrets for the Agent Wolf workflow (never commit)
 .stack-wolf-secrets.env
+
+# Project connections (design/2026-09-11-project-connections.md): the operator's
+# project map and connection tokens, mounted into agentd at /etc/agent-bob/.
+# Only the README and the worked example are tracked.
+local-config/*
+!local-config/README.md
+!local-config/project-map.example.json

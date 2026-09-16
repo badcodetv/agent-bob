@@ -721,9 +721,62 @@ func TestGitImportGitConfigFieldsAreIgnored(t *testing.T) {
 	if !told {
 		t.Fatalf("the operator was not told the git fields were ignored: %+v", res.Ignored)
 	}
-	// The list gitproj drops must stay exactly these four.
-	if want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
+	// The list gitproj drops must stay exactly these six (project-connections
+	// T11 added "connections" as the sixth, worker-only entry).
+	if want := []string{"connections", "git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}; !reflect.DeepEqual(gitproj.NotImportableFields(), want) {
 		t.Fatalf("NotImportableFields = %v, want %v", gitproj.NotImportableFields(), want)
+	}
+}
+
+// TestGitImportConnectionsFieldIsIgnored is TestGitImportGitConfigFieldsAreIgnored's
+// counterpart for project-connections T11 (Decision 3): a human commit editing
+// a worker's `connections` frontmatter key must leave the stored grant
+// untouched and be reported as an ignored edit, exactly like the five git_*
+// keys — otherwise anyone with push access to the mirror could grant a worker
+// "*" (every connection the project has) without going through CanGrant.
+func TestGitImportConnectionsFieldIsIgnored(t *testing.T) {
+	store := newFakeGitImportStore()
+	store.workers["architect"] = agentdb.Worker{
+		Project: gitImportProject, Name: "architect", Enabled: true,
+		MaxInstances: 1, SystemPrompt: "You are the architect.",
+		Connections: agentdb.ConnectionList{"github"},
+	}
+	g := newGitImportRepo(t)
+	base := g.human("seed", map[string]*string{
+		"bob/workers/architect.md": file(strings.Join([]string{
+			"connections:",
+			"  - github",
+			"enabled: true",
+			"max_instances: 1",
+			"name: architect",
+		}, "\n"), "You are the architect."),
+	})
+	head := g.human("grant myself everything", map[string]*string{
+		"bob/workers/architect.md": file(strings.Join([]string{
+			"connections:",
+			"  - \"*\"",
+			"enabled: true",
+			"max_instances: 1",
+			"name: architect",
+		}, "\n"), "You are the architect."),
+	})
+
+	res := runImport(t, store, g, base, head)
+	if res.Quarantined {
+		t.Fatalf("unexpected quarantine: %+v", res.Failures)
+	}
+	got := store.workers["architect"]
+	if !reflect.DeepEqual([]string(got.Connections), []string{"github"}) {
+		t.Fatalf("connections was rewritten by a commit: %v", got.Connections)
+	}
+	var told bool
+	for _, n := range res.Ignored {
+		if strings.Contains(n.Reason, "connections") {
+			told = true
+		}
+	}
+	if !told {
+		t.Fatalf("the operator was not told connections was ignored: %+v", res.Ignored)
 	}
 }
 

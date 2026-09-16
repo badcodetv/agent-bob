@@ -354,6 +354,10 @@ export function deskChangeVerb(action: string): string {
       return 'published'
     case 'topology_apply':
       return 'applied'
+    case 'connection_connect':
+      return 'connected'
+    case 'connection_disconnect':
+      return 'disconnected'
     default:
       return action
   }
@@ -392,6 +396,9 @@ export function deskChangeSubject(entry: ChangelogEntry): string {
       return name
     case 'topology':
       return name === '' ? 'a topology' : `topology ${name}`
+    // The account name only: who owns the mailbox is not a desk headline.
+    case 'connection':
+      return name === '' ? 'a Google account' : `Google account ${name}`
     default:
       return name === '' ? entry.action : name
   }

@@ -251,6 +251,45 @@ func main() {
 			mcpEnvVar, strings.Join(missingMCPEnv, ","))
 	}
 
+	// ── Project map + connections ───────────────────────────────────────────────
+	// The project map is loaded HERE, near the top, because the connections it
+	// declares (design/2026-09-11-project-connections.md, T12) feed consumers
+	// built from here on: the session-context provider just below, the Runner,
+	// httpapi.New, the dispatcher and the core tools. It only reads the
+	// environment (and the mounted file), so nothing above it is needed. The
+	// git projection's github_token_env fallback, API keys, framing origins and
+	// login still read it further down, from this same holder.
+	//
+	// It is held behind projectMapHolder rather than read once into a plain
+	// *projectSettings: when AGENTKIT_PROJECT_MAP_FILE is set, the map reloads
+	// on SIGHUP and on a timer (below), and every reader — resolve/allProjects
+	// for login, the API-key index, and the git-token-env fallback — goes
+	// through the holder so a reload reaches all of them without a restart
+	// (A6). An inline AGENTKIT_PROJECT_MAP has no file to watch, so it behaves
+	// exactly as before. Connections are the exception: the Registry is built
+	// once from the boot-time map, and changing one needs a restart
+	// (Decision 1; see connections.go).
+	warnIfBothProjectMaps(os.Getenv, log.Printf)
+	projectMapHolder, err := newProjectSettingsHolder(os.Getenv)
+	must(err)
+	// Always a non-nil Registry (empty with no map), so "no connections" is one
+	// state rather than two. connServers resolves a worker's grants into MCP
+	// entries at selfURL/connect/<name>/ — the address a session container
+	// reaches agentd on, the same one the core MCP server is advertised at.
+	connRegistry, err := buildConnectionRegistry(connectionSpecsOf(projectMapHolder.Get()), os.Getenv, log.Printf)
+	must(err)
+	connServers := connectionServersFor(connRegistry, selfURL, log.Printf)
+
+	// Connect Google's boot configuration (T24, addendum A1-A12). Loaded here
+	// — after the Registry and permalinks.BaseURL() both exist — so a
+	// malformed AGENTKIT_CONNECTIONS_KEY, or one equal to AGENTKIT_JWT_SECRET,
+	// fails boot rather than surfacing later as every stored connection
+	// refusing to open. Missing env just disables the feature (cfg.enabled()
+	// false); wireGoogleConnect below turns that into the Registry's
+	// AccountSource and, once agentDB is known, the four HTTP routes.
+	googleConnectCfg, err := loadGoogleConnectConfig(os.Getenv, permalinks.BaseURL(), jwtSecret)
+	must(err)
+
 	// ── Session context (project settings + workers) ─────────────────────────────
 	// The §5 defaults chain: worker beats project beats global, for base image,
 	// system prompt and MCP config. Needs the product-layer tables, so it is
@@ -258,7 +297,9 @@ func main() {
 	var sessionCtx extension.SessionContextProvider
 	baseImage := envOr("AGENTKIT_IMAGE", "agentkit-example:dev")
 	if agentDB != nil {
-		sessionCtx = newSessionContextProvider(agentDB, baseImage)
+		// Connections join the MCP map for a chat session run AS a worker
+		// (keyed on the session's worker, never its persona — Decision 6).
+		sessionCtx = newSessionContextProvider(agentDB, baseImage).withConnectionServers(connServers)
 	}
 	logSessionContextWiring(sessionCtx != nil)
 
@@ -428,6 +469,9 @@ func main() {
 		// bootstrap needs a clone, a lease and a projector — and empty until
 		// the product-layer block arms it.
 		GitBootstrap: gitBootstrap,
+		// PUT /agent/workers/{name}'s existence check for `connections` (T7):
+		// every entry must be "*" or a connection this project has.
+		ConnectionNames: connRegistry.Names,
 	})
 	must(err)
 
@@ -453,21 +497,10 @@ func main() {
 	// there is nothing to mount.
 	var gitWebhook *gitWebhookWiring
 
-	// The project map is loaded HERE, before the product-layer block, because
-	// the git projection needs its `github_token_env` half as the fallback for
-	// a project whose settings row names no push credential (DI3). Everything
-	// else it feeds — API keys, framing origins, login — is wired further down
-	// from the same value.
-	//
-	// It is held behind projectMapHolder rather than read once into a plain
-	// *projectSettings: when AGENTKIT_PROJECT_MAP_FILE is set, the map reloads
-	// on SIGHUP and on a timer (below), and every reader — resolve/allProjects
-	// for login, the API-key index, and the git-token-env fallback — goes
-	// through the holder so a reload reaches all of them without a restart
-	// (A6). An inline AGENTKIT_PROJECT_MAP has no file to watch, so it behaves
-	// exactly as before.
-	projectMapHolder, err := newProjectSettingsHolder(os.Getenv)
-	must(err)
+	// projectMapHolder was loaded near the top (see "Project map +
+	// connections"): the git projection below needs its `github_token_env` half
+	// as the fallback for a project whose settings row names no push
+	// credential (DI3), and connections needed it earlier still.
 
 	if agentDB != nil {
 		// The `config.changed` emitter (§15.4, §15.8 — J3). Installed FIRST and
@@ -528,6 +561,10 @@ func main() {
 			// base_image > global`. The SAME resolver the Runner holds, so the
 			// composed image and a launch-time resolution cannot disagree.
 			Images: imageResolver,
+			// A dispatched job's MCP map gains one /connect/ entry per grant the
+			// worker holds and the project can honour (T8). The same resolver the
+			// session-context provider holds.
+			ConnectionServers: connServers,
 		})
 
 		rt := newRouter(routerConfig{
@@ -587,6 +624,11 @@ func main() {
 	googleClientID := os.Getenv("GOOGLE_CLIENT_ID")
 	testLogin := os.Getenv("AGENTKIT_TEST_LOGIN")
 	loginEnabled := googleClientID != "" || testLogin != ""
+	// testLoginEmail is Connect Google's A4 re-check reaching the one login
+	// that has no `users` entry of its own (connectOperatorRecheck, T23):
+	// filled in below, once, only if AGENTKIT_TEST_LOGIN parses — which by
+	// then it must, or the process has already exited.
+	var testLoginEmail string
 
 	root := http.NewServeMux()
 	root.HandleFunc("/health", healthHandler)
@@ -681,17 +723,18 @@ func main() {
 		}
 		if googleClientID != "" {
 			root.HandleFunc("POST /auth/google", authGoogleHandler(
-				&googleVerifier{clientID: googleClientID}, logins, loginIssuer))
+				&googleVerifier{clientID: googleClientID}, logins, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] google login enabled (%d mapped account(s))", len(projectMapHolder.users()))
 		}
 		if testLogin != "" {
 			email, password, err := parseTestLogin(testLogin)
 			must(err)
-			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, loginIssuer))
+			testLoginEmail = email
+			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] WARNING: password test login enabled for %s — all projects granted; test/dev only", email)
 		}
 		// Wildcard-login exchange: mints tokens for new project IDs.
-		root.HandleFunc("POST /auth/project-token", authProjectTokenHandler(jwtSecret, loginIssuer))
+		root.HandleFunc("POST /auth/project-token", authProjectTokenHandler(jwtSecret, projectMapHolder, loginIssuer))
 	} else {
 		// /dev/token (DEV ONLY): issues a short-lived JWT for the bundled UI. Not
 		// registered when a login mode is on — it would mint valid demo tokens
@@ -719,7 +762,21 @@ func main() {
 		})
 	}
 
-	root.Handle("/agent-proxy/", http.StripPrefix("/agent-proxy", newModelProxyHandler()))
+	// modelProxySessions is deliberately NOT `agentDB` typed straight into the
+	// mcpSessionLookup interface: agentDB is a nil *agentdb.Store on the SQLite
+	// fallback, and a nil CONCRETE pointer boxed into a non-nil interface makes
+	// `a.sessions != nil` true while `a.sessions.GetSession` panics
+	// (agentdb/sessions.go GetSession dereferences s.gdb). Leaving the
+	// interface at its own zero value when there is no database keeps
+	// verifyToken's existing `a.sessions != nil` guard honest, and without a
+	// store an expired token is refused outright (sessionKnown can never
+	// become true) — exactly the T13 "nil-store trap" fallback.
+	var modelProxySessions mcpSessionLookup
+	if agentDB != nil {
+		modelProxySessions = agentDB
+	}
+	root.Handle("/agent-proxy/", http.StripPrefix("/agent-proxy",
+		newModelProxyHandler(newSessionTokenAuth(sessionSecret, modelProxySessions))))
 
 	// ── Core MCP tools (memory, images, skills, management) ──────────────────────
 	// One http MCP server, mounted outside the API auth middleware because it
@@ -737,7 +794,10 @@ func main() {
 		mcpSrv.register(newMemoryTools(agentDB, embedder, permalinks).tools()...)
 		mcpSrv.register(newImageTools(agentDB, runner, permalinks).tools()...)
 		mcpSrv.register(newSkillTools(agentDB, runner, permalinks).tools()...)
-		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks).tools()...)
+		// The connection catalog (T9): connection_list, and the existence check
+		// on worker_create/worker_update grants. Names, descriptions and
+		// availability only — never a URL or a credential.
+		mcpSrv.register(newManagementTools(agentDB, embedder, attention, permalinks, connRegistry).tools()...)
 		mcpSrv.register(newConfigLogTools(agentDB, permalinks).tools()...)
 		mcpSrv.register(newSessionTools(agentDB, permalinks).tools()...)
 		// charter_validate takes no store — validation is pure — but it is
@@ -761,6 +821,30 @@ func main() {
 	} else {
 		log.Printf("[agentd] core mcp DISABLED (no DATABASE_URL): memory requires Postgres")
 	}
+
+	// ── The connections proxy (/connect/, T12) ───────────────────────────────────
+	// Beside /mcp on the root mux, for the same reason: the caller is a session
+	// container bearing its session token. Authenticated by the same verifier
+	// under the live-only rule, grants re-read from the workers table on every
+	// request; the real credential is added here and never enters a container.
+	// mountConnectRoute is the Postgres gate — agentDB is a nil *Store on the
+	// SQLite fallback, which it treats as no store and leaves the route absent.
+	// The verifier gets modelProxySessions, the correctly-nil session lookup
+	// (see above), not agentDB boxed into an interface.
+	if mountConnectRoute(root, connRegistry, newSessionTokenAuth(sessionSecret, modelProxySessions), agentDB, log.Printf) {
+		log.Printf("[agentd] connections proxy: %s%s", selfURL, connectPath)
+	}
+
+	// ── Connect Google (T24) ──────────────────────────────────────────────────────
+	// Installs the AccountSource on connRegistry (or a reason, when there is
+	// none) and, only with a database, mounts the four routes from
+	// registerGoogleConnect: three on apiMux — behind apiAuthMiddleware, which
+	// wraps apiMux below — and the unauthenticated callback on root. Passing
+	// agentDB straight in as the googleConnectStore interface is deliberate:
+	// wireGoogleConnect applies the same typed-nil check mountConnectRoute
+	// does just above, rather than agentd re-deriving a second "is there
+	// really a store" boolean.
+	wireGoogleConnect(apiMux, root, agentDB, connRegistry, googleConnectCfg, projectMapHolder, testLoginEmail, jwtSecret, log.Printf)
 
 	// ── The git projection's inbound door ────────────────────────────────────────
 	// POST /agent/git/webhook, mounted on the ROOT mux for the same reason the

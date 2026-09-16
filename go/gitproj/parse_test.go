@@ -282,7 +282,10 @@ func TestParseAgainstDropsGitFields(t *testing.T) {
 		t.Fatalf("Fields = %#v, want exactly %#v (the git_* fields must never be importable)", ch.Fields, want)
 	}
 
-	wantDropped := NotImportableFields()
+	// This file carries only the five git_* keys, not "connections" (added in
+	// project-connections T11 — worker-only), so the expectation here is the
+	// git-only subset rather than every not-importable key there is.
+	wantDropped := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}
 	got := append([]string(nil), ch.DroppedFields...)
 	sort.Strings(got)
 	if !reflect.DeepEqual(got, wantDropped) {
@@ -290,8 +293,44 @@ func TestParseAgainstDropsGitFields(t *testing.T) {
 	}
 }
 
+// TestParseAgainstDropsConnections is TestParseAgainstDropsGitFields's
+// counterpart for project-connections T11: a worker file's `connections` key
+// renders for a human to read but must never come back in through the import
+// door, because a commit that could rewrite it would grant a worker "*" —
+// every connection the project has — without going through CanGrant.
+func TestParseAgainstDropsConnections(t *testing.T) {
+	oldValues := map[string]interface{}{
+		"name":        "architect",
+		"connections": []string{"github"},
+	}
+	old := workerFile(t, oldValues, "You are the architect.\n")
+
+	nextValues := map[string]interface{}{
+		"name":        "architect",
+		"connections": []string{"*"},
+	}
+	next := workerFile(t, nextValues, "You are the architect.\n")
+
+	ch, err := ParseAgainst("bob", "bob/workers/architect.md", old, next)
+	if err != nil {
+		t.Fatalf("ParseAgainst: %v", err)
+	}
+	if ch.Kind != KindWorker || ch.Name != "architect" {
+		t.Fatalf("got kind=%q name=%q, want a worker named architect", ch.Kind, ch.Name)
+	}
+	if _, present := ch.Fields["connections"]; present {
+		t.Fatalf("connections came back through the import door: %#v", ch.Fields)
+	}
+	if len(ch.Fields) != 0 {
+		t.Fatalf("only connections changed; want no importable fields, got %#v", ch.Fields)
+	}
+	if !reflect.DeepEqual(ch.DroppedFields, []string{"connections"}) {
+		t.Fatalf("DroppedFields = %v, want [connections]", ch.DroppedFields)
+	}
+}
+
 func TestNotImportableFields(t *testing.T) {
-	want := []string{"git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}
+	want := []string{"connections", "git_branch", "git_remote", "git_subfolder", "git_token_env", "git_webhook_secret_env"}
 	if got := NotImportableFields(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("NotImportableFields() = %v, want %v", got, want)
 	}

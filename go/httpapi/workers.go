@@ -4,10 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/badcodetv/agent-bob/agentdb"
 )
+
+// connectionsWildcard mirrors connections.Wildcard / agentdb's own
+// unexported connectionWildcard. Duplicated as a literal for the same reason
+// agentdb duplicates it: this package must not import go/connections (which
+// itself would need to reach back into agentdb) just to read one constant.
+const connectionsWildcard = "*"
+
+// contains reports whether name is in list. Small enough not to pull in a
+// generic slices helper for one call site.
+func contains(list []string, name string) bool {
+	for _, v := range list {
+		if v == name {
+			return true
+		}
+	}
+	return false
+}
+
+// connectionsEqual compares two connection lists structurally, the same way
+// agentdb.jsonValueEqual compares stored columns: nil and [] are different,
+// order matters. It is what tells "the caller re-sent the stored list
+// unchanged" (allowed for any caller) apart from "the caller is trying to
+// change it" (refused to an API key or scoped token).
+func connectionsEqual(a, b agentdb.ConnectionList) bool {
+	ab, err1 := json.Marshal(a)
+	bb, err2 := json.Marshal(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return string(ab) == string(bb)
+}
 
 // WorkersStore is the worker-catalogue seam the CRUD handlers need.
 // *agentdb.Store implements it; hosts may substitute their own.
@@ -58,6 +90,13 @@ type workerBody struct {
 	MaxInstances *int                 `json:"max_instances"` // nil → keep (1 on create)
 	Enabled      *bool                `json:"enabled"`       // nil → keep (true on create)
 	Frozen       *bool                `json:"frozen"`        // nil → keep (false on create)
+	// Connections is the list of connection names (or "*") this worker holds
+	// (design/2026-09-11-project-connections.md T7). Same nil-keeps/[]-clears
+	// rule as Briefing. Unlike every other field, CHANGING it is refused to a
+	// caller that is not a logged-in person (see the APIKey/Scope check in
+	// PutWorker) — granting reach is a trust decision the design reserves for
+	// a human at the console, never for an API key or a scoped token.
+	Connections agentdb.ConnectionList `json:"connections"` // nil → keep, [] → clear
 	// Rationale is the operator's one-line reason, threaded into the config
 	// event (design B3). Optional on the wire — the UI asks for one, the route
 	// does not refuse a write without one.
@@ -156,9 +195,40 @@ func (h *Handlers) PutWorker(w http.ResponseWriter, r *http.Request) {
 		worker.MaxInstances = prev.MaxInstances
 		worker.Enabled = prev.Enabled
 		worker.Frozen = prev.Frozen
+		worker.Connections = prev.Connections
 	case err != nil && !errors.Is(err, agentdb.ErrWorkerNotFound):
 		writeWorkerErr(w, err)
 		return
+	}
+
+	// Connections: validated and gated BEFORE any other field is applied, so
+	// a refusal here never writes a partial change. Existence is checked only
+	// for what the body actually sent — a name already stored (e.g. carried
+	// over from before a connection was removed from the project map) is not
+	// re-validated on a save that leaves it untouched.
+	if body.Connections != nil {
+		if h.cfg.ConnectionNames != nil {
+			known := h.cfg.ConnectionNames(id.Customer)
+			for _, name := range body.Connections {
+				if name == connectionsWildcard {
+					continue
+				}
+				if !contains(known, name) {
+					http.Error(w, fmt.Sprintf("unknown connection %q", name), http.StatusBadRequest)
+					return
+				}
+			}
+		}
+		// Only a CHANGE is gated — re-sending the stored list verbatim (a
+		// worker-list UI that round-trips every field on save) must still
+		// succeed for an API key. connectionsEqual is order-sensitive by
+		// design, matching agentdb's own jsonValueEqual: a grant list is
+		// operator-authored, not a set a client should be reordering.
+		if !connectionsEqual(worker.Connections, body.Connections) && (id.APIKey || id.SessionScope != "" || id.DatasetScope != "") {
+			http.Error(w, "connections may only be changed by a logged-in person", http.StatusForbidden)
+			return
+		}
+		worker.Connections = body.Connections
 	}
 
 	if body.Description != nil {

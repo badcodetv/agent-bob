@@ -37,6 +37,13 @@ export interface Worker {
   mcp_config: Record<string, unknown>
   image: string
   briefing: string[] | null
+  /** Connection names (or "*") this worker is granted
+   *  (design/2026-09-11-project-connections.md), null-preserving like
+   *  `briefing`. Read-only from this package's editor for now: there is no UI
+   *  to change it (grants are made by workers, over MCP, or by a console
+   *  login through the HTTP API directly) and `workerBody` deliberately never
+   *  sends this key, so a save from the current editor cannot wipe a grant. */
+  connections: string[] | null
   max_instances: number
   enabled: boolean
   /** Frozen — cannot be changed by other workers; only humans, through this
@@ -61,6 +68,7 @@ export function newWorkerDraft(project = ''): WorkerDraft {
     mcp_config: {},
     image: '',
     briefing: null,
+    connections: null,
     max_instances: DEFAULT_MAX_INSTANCES,
     enabled: true,
     frozen: false,
@@ -86,6 +94,7 @@ export function coerceWorker(raw: unknown, project = ''): Worker {
         : {},
     image: typeof r.image === 'string' ? r.image : '',
     briefing: Array.isArray(r.briefing) ? (r.briefing as unknown[]).map(String) : null,
+    connections: Array.isArray(r.connections) ? (r.connections as unknown[]).map(String) : null,
     max_instances:
       typeof r.max_instances === 'number' && Number.isFinite(r.max_instances)
         ? r.max_instances

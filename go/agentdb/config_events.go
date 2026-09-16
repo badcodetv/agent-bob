@@ -183,6 +183,15 @@ const (
 	// vocabulary is uniformly entity_verb, and `topology_*` keeps the family
 	// filterable like `worker_*`.
 	ActionTopologyApply = "topology_apply"
+
+	// ActionConnectionConnect / ActionConnectionDisconnect record an operator
+	// pressing Connect Google or Disconnect in the console (design/2026-09-11-
+	// project-connections.md, addendum A9). Their payload is METADATA ONLY —
+	// account, provider, account email, scopes, who and when — never the sealed
+	// credential, which is why neither can be reverted: the thing a revert
+	// would put back is not in the log (config_revert.go).
+	ActionConnectionConnect    = "connection_connect"
+	ActionConnectionDisconnect = "connection_disconnect"
 )
 
 // ConfigActions is the complete §15.3 vocabulary, in spec order.
@@ -206,6 +215,8 @@ var ConfigActions = []string{
 	ActionImageCreate,
 	ActionSkillCreate,
 	ActionTopologyApply,
+	ActionConnectionConnect,
+	ActionConnectionDisconnect,
 }
 
 // rationaleRequired lists the actions whose rationale may not be empty (§15.5).
@@ -836,6 +847,19 @@ var ConfigMutations = []ConfigMutation{
 		Method:  "CreateSkill",
 		Actions: []string{ActionSkillCreate},
 		Tables:  []string{"agent_skills"},
+	},
+	{
+		// The console's Connect Google callback (addendum A9). Registering the
+		// table puts `connection_credentials` under the write guard: a sealed
+		// credential must never appear or change without a record of who did it.
+		Method:  "PutConnectionCredential",
+		Actions: []string{ActionConnectionConnect},
+		Tables:  []string{"connection_credentials"},
+	},
+	{
+		Method:  "DeleteConnectionCredential",
+		Actions: []string{ActionConnectionDisconnect},
+		Tables:  []string{"connection_credentials"},
 	},
 }
 

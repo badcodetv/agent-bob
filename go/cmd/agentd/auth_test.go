@@ -229,6 +229,38 @@ func TestAuthMiddleware_APIKeyAuthenticatesItsProject(t *testing.T) {
 	if got.SessionScope != "" {
 		t.Fatalf("an API key arrived scoped to %q — a key grants the whole project", got.SessionScope)
 	}
+	if !got.APIKey {
+		t.Fatalf("an API-key request must set Identity.APIKey (T7)")
+	}
+}
+
+// T7 (design/2026-09-11-project-connections.md): PutWorker's `connections`
+// gate needs to tell an API key apart from a console login, so the flag it
+// checks (Identity.APIKey) must be true for exactly one of the two credential
+// classes this middleware issues.
+func TestAuthMiddleware_APIKeyFlagDistinguishesCredentialClasses(t *testing.T) {
+	var gotKey httpapi.Identity
+	h := captureIdentity([]byte("test-secret"), wolfKeys(t), &gotKey)
+	req := httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+	req.Header.Set(apiKeyHeader, goodKey)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if !gotKey.APIKey {
+		t.Fatalf("API-key request: Identity.APIKey = false, want true")
+	}
+
+	var gotJWT httpapi.Identity
+	h = captureIdentity([]byte("test-secret"), noKeys(t), &gotJWT)
+	tok, err := devclaims.New([]byte("test-secret")).Issue(context.Background(),
+		extensionScope("alice@acme.com", "acme"), "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/agent/sessions", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if gotJWT.APIKey {
+		t.Fatalf("console JWT: Identity.APIKey = true, want false")
+	}
 }
 
 func TestAuthMiddleware_InvalidAPIKeyIs401(t *testing.T) {

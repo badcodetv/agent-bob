@@ -360,6 +360,10 @@ func TestConfigChangedEventTextCoversEveryAction(t *testing.T) {
 		agentdb.ActionImageCreate:        {"name": "toolbox", "version": float64(2)},
 		agentdb.ActionSkillCreate:        {"name": "graph-gen"},
 		agentdb.ActionTopologyApply:      {"topology": "solo@v1", "answers": map[string]any{"cadence": "daily"}},
+		agentdb.ActionConnectionConnect: {"account": "google", "account_email": "office@example.com",
+			"provider": "google", "connected_by": "op@example.com"},
+		agentdb.ActionConnectionDisconnect: {"account": "google", "account_email": "office@example.com",
+			"provider": "google", "connected_by": "op@example.com", "disconnected_by": "op@example.com"},
 	}
 	for _, action := range agentdb.ConfigActions {
 		payload, ok := payloads[action]
@@ -369,6 +373,33 @@ func TestConfigChangedEventTextCoversEveryAction(t *testing.T) {
 		phrase := configChangePhrase(configEvent(action, payload, agentdb.ConfigWrite{}))
 		if phrase == "" || strings.Contains(phrase, "made a ") {
 			t.Fatalf("action %q has no human phrase: %q", action, phrase)
+		}
+	}
+}
+
+// A Google connect/disconnect announces the account NAME only. The payload
+// carries the connected mailbox's email (and the operator's), but this text is
+// routed into every subscribed worker's session, so neither appears in it.
+func TestConfigChangedEventTextForConnectionsCarriesNoEmail(t *testing.T) {
+	payload := agentdb.JSONMap{
+		"account": "google", "provider": "google", "account_email": "office@example.com",
+		"scopes": []any{"openid", "email"}, "connected_by": "op@example.com",
+	}
+	for _, tc := range []struct{ action, rationale, want string }{
+		{agentdb.ActionConnectionConnect, "Google account connected from the console",
+			`A human connected Google account "google".`},
+		{agentdb.ActionConnectionDisconnect, "Google account disconnected from the console",
+			`A human disconnected Google account "google".`},
+	} {
+		text := describeConfigChange(configEvent(tc.action, payload, agentdb.ConfigWrite{Rationale: tc.rationale}))
+		if !strings.HasPrefix(text, tc.want) {
+			t.Errorf("%s: text does not open with %q:\n%s", tc.action, tc.want, text)
+		}
+		if !strings.Contains(text, "entity connection:google") {
+			t.Errorf("%s: text does not name the entity:\n%s", tc.action, text)
+		}
+		if strings.Contains(text, "@") {
+			t.Errorf("%s: text carries an email address:\n%s", tc.action, text)
 		}
 	}
 }

@@ -83,6 +83,7 @@ const ACTION_FILTERS: { value: string; label: string }[] = [
   { value: 'image_create', label: 'Images published' },
   { value: 'skill_create', label: 'Skills published' },
   { value: 'topology_apply', label: 'Topologies applied' },
+  { value: 'connection_*', label: 'Google connections' },
 ]
 
 export default function ChangelogView({

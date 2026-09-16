@@ -14,6 +14,7 @@ const worker: Worker = {
   mcp_config: {},
   image: '',
   briefing: [],
+  connections: null,
   max_instances: 1,
   enabled: true,
   frozen: false,

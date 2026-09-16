@@ -332,6 +332,14 @@ type ComposeJobInput struct {
 	// Event is the triggering event, rendered as the first user message
 	// (§6.2 step 4). nil composes a session with no first message.
 	Event *agentdb.ProjectEvent
+	// Connections are the already-resolved MCP entries for the connections the
+	// dispatching worker holds (design/2026-09-11-project-connections.md,
+	// T2's connections.Servers). The caller computes them — from
+	// worker.Connections plus the project's connections.Registry — because
+	// composition itself reads no store. They outrank the project's and the
+	// worker's own mcp_config (operator-defined connections beat a worker's
+	// self-declared entries) but never core.
+	Connections agentdb.MCPServers
 	// CoreMCP are the engine's own tool servers (§7 memory tools, §9 management
 	// tools, §13 image tools). They are NON-OVERRIDABLE: they win name
 	// collisions against both project and worker config.
@@ -371,8 +379,8 @@ type ComposedJob struct {
 	// session row as `composed_prompt` (§6.2) by passing it as
 	// CreateSessionRequest.SystemPrompt alongside Worker.
 	SystemPrompt string
-	// MCPServers is core ∪ project ∪ worker (worker wins over project, core
-	// wins over both).
+	// MCPServers is core ∪ connections ∪ project ∪ worker (worker wins over
+	// project, connections win over both, core wins over everything).
 	MCPServers agentdb.MCPServers
 	// FirstMessage is the rendered triggering event, or "" when there is none.
 	FirstMessage string
@@ -492,9 +500,10 @@ func (in ComposeJobInput) composePrompt(settings *agentdb.ProjectSettings) strin
 	return strings.Join(parts, "\n\n")
 }
 
-// composeMCP is composition step 3 (§6.2): core ∪ project ∪ worker. The worker
-// wins name collisions with the project; core tools are non-overridable and so
-// are applied last.
+// composeMCP is composition step 3 (§6.2): core ∪ connections ∪ project ∪
+// worker. Connections are operator-defined (T8, Decision 5 of the connections
+// design) and so outrank a worker's own mcp_config; core tools are
+// non-overridable and so are applied last.
 //
 // Each source is validated separately, so the error names the row an operator
 // has to fix rather than "some server called gmail".
@@ -507,12 +516,15 @@ func (in ComposeJobInput) composeMCP(settings *agentdb.ProjectSettings) (agentdb
 	if err != nil {
 		return nil, err
 	}
+	if err := in.Connections.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: connections: %w", ErrComposeInvalid, err)
+	}
 	if err := in.CoreMCP.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: core mcp servers: %w", ErrComposeInvalid, err)
 	}
 
-	merged := make(agentdb.MCPServers, len(project)+len(worker)+len(in.CoreMCP))
-	for _, source := range []agentdb.MCPServers{project, worker, in.CoreMCP} {
+	merged := make(agentdb.MCPServers, len(project)+len(worker)+len(in.Connections)+len(in.CoreMCP))
+	for _, source := range []agentdb.MCPServers{project, worker, in.Connections, in.CoreMCP} {
 		for name, cfg := range source {
 			merged[name] = cfg
 		}

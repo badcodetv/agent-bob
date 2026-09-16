@@ -178,4 +178,30 @@ describe('entries with no inverse', () => {
       /revert the individual entries/i,
     )
   })
+
+  it('refuses a Google connect or disconnect, and points at Settings instead', async () => {
+    stored = [
+      event('ce-d', 4, {
+        action: 'connection_disconnect',
+        payload: { account: 'google', account_email: 'office@example.com', disconnected_by: 'op@example.com' },
+        actor_worker: '',
+        rationale: 'Google account disconnected from the console',
+      }),
+      event('ce-c', 3, {
+        action: 'connection_connect',
+        payload: { account: 'google', account_email: 'office@example.com', connected_by: 'op@example.com' },
+        actor_worker: '',
+        rationale: 'Google account connected from the console',
+      }),
+      ...stored,
+    ]
+    render(<ChangelogView />)
+    for (const id of ['ce-d', 'ce-c']) {
+      await screen.findByTestId(`revert-blocked-${id}`)
+      expect(screen.getByTestId(`revert-${id}`)).toBeDisabled()
+      expect(screen.getByTestId(`revert-blocked-${id}`).textContent).toMatch(
+        /use Connect Google or Disconnect in Settings/,
+      )
+    }
+  })
 })

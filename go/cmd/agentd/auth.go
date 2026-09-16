@@ -26,6 +26,13 @@ type principal struct {
 	// and confines the credential to that one dataset. Enforcement lives in
 	// httpapi/datasets.go, on the download route alone.
 	datasetScope string
+	// apiKey is true when this principal came from the X-API-Key branch below,
+	// rather than a console login JWT. It surfaces as httpapi.Identity.APIKey,
+	// which PutWorker checks before allowing a `connections` change (T7 of
+	// design/2026-09-11-project-connections.md): an embedding application
+	// holding its project's key must not be able to grant its own workers
+	// reach they did not already have.
+	apiKey bool
 	// operator marks the holder of a wildcard-login project token (or the
 	// wildcard project-token exchange, or an API key, or the dev-open
 	// principal) as the operator (onboarding-work-plan §1.1): the only
@@ -137,7 +144,7 @@ func apiAuthMiddleware(secret []byte, keys projectKeys, next http.Handler) http.
 			// the same footing as the human who holds the wildcard login
 			// (§1.1) — so it carries the operator claim too.
 			next.ServeHTTP(w, r.WithContext(contextWithPrincipal(
-				r.Context(), principal{email: apiKeyEmail(project), customer: project, operator: true})))
+				r.Context(), principal{email: apiKeyEmail(project), customer: project, apiKey: true, operator: true})))
 			return
 		}
 		// The ?token= leg (O5 of design/2026-08-20-agent-wolf.md): the ONE place
@@ -272,6 +279,7 @@ func identityFromRequest(r *http.Request) (httpapi.Identity, error) {
 		Customer:     p.customer,
 		SessionScope: p.embedSession,
 		DatasetScope: p.datasetScope,
+		APIKey:       p.apiKey,
 		Operator:     p.operator,
 	}, nil
 }

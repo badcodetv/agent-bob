@@ -25,3 +25,6 @@ export * from './agentContext.js'
 export * from './guide/surfaces.js'
 export * from './guide/frontMatter.js'
 export * from './guide/guideRoute.js'
+// Connections (T25): the GET /agent/connections body and the Connect Google
+// callback result. The hook and panel are in the root entry point only.
+export * from './connections.js'

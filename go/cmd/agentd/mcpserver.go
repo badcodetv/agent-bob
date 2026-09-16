@@ -180,6 +180,13 @@ type mcpAuthFunc func(r *http.Request) (mcpCaller, error)
 // unverifiable token.
 var errMCPUnauthorized = errors.New("unauthorized")
 
+// errSessionTokenExpired is wrapped (alongside errMCPUnauthorized) by
+// verifyToken for exactly one refusal: a correctly signed token that has
+// expired and whose session may no longer honour it. It exists so the
+// `/connect/` adapter (connections.go) can tell that case apart and answer the
+// proxy's "session token expired" row without matching on error text.
+var errSessionTokenExpired = errors.New("session token expired")
+
 // mcpServer is the HTTP transport plus a tool registry.
 type mcpServer struct {
 	name  string
@@ -461,9 +468,25 @@ func newSessionTokenAuth(secret []byte, sessions mcpSessionLookup) *sessionToken
 	return &sessionTokenAuth{secret: secret, sessions: sessions}
 }
 
-// authenticate implements mcpAuthFunc.
+// authenticate implements mcpAuthFunc. It is `/mcp`'s behaviour: an expired
+// token is honoured as long as the session row still exists, live or not
+// (requireLive=false) — see verifyToken below and docs/19-embedding.md H6.
 func (a *sessionTokenAuth) authenticate(r *http.Request) (mcpCaller, error) {
-	raw := bearerToken(r.Header.Get("Authorization"))
+	return a.verifyToken(r.Context(), bearerToken(r.Header.Get("Authorization")), false)
+}
+
+// verifyToken parses and resolves a session token into its caller. It is the
+// one place `/mcp` (requireLive=false), the real-key `/agent-proxy/` and T12's
+// `/connect/` (both requireLive=true) share, so the two paths cannot drift.
+//
+// requireLive changes exactly one thing: whether an EXPIRED token is honoured
+// for a session whose row exists but is no longer live (archived, or in a
+// terminal Status — see sessionIsLive). A valid, unexpired token is honoured
+// either way; expiry is what the T13 hazard is about — a token read out of a
+// container with Bash and replayed after the session it came from stopped
+// being used (docs/19-embedding.md H6, design/2026-09-11-project-connections.md
+// Decision 3's last bullet).
+func (a *sessionTokenAuth) verifyToken(ctx context.Context, raw string, requireLive bool) (mcpCaller, error) {
 	if raw == "" {
 		return mcpCaller{}, fmt.Errorf("%w: no session token (expected the Authorization header to carry ${SESSION_TOKEN})", errMCPUnauthorized)
 	}
@@ -503,8 +526,9 @@ func (a *sessionTokenAuth) authenticate(r *http.Request) (mcpCaller, error) {
 	// session row is the live authority on whether this caller is a real,
 	// still-known job of this project.
 	sessionKnown := false
+	live := false
 	if a.sessions != nil && caller.SessionID != "" {
-		sess, err := a.sessions.GetSession(r.Context(), caller.SessionID)
+		sess, err := a.sessions.GetSession(ctx, caller.SessionID)
 		switch {
 		case err != nil:
 			// RD4. This used to log and carry on, leaving caller.Worker empty —
@@ -531,6 +555,7 @@ func (a *sessionTokenAuth) authenticate(r *http.Request) (mcpCaller, error) {
 			return mcpCaller{}, fmt.Errorf("session token project %q does not match session %q", caller.Project, caller.SessionID)
 		default:
 			sessionKnown = true
+			live = sessionIsLive(sess)
 			caller.Worker = sess.Worker
 			// The row was read, so Worker is now authoritative — including when
 			// it is empty, which means a human chat session rather than an
@@ -539,10 +564,51 @@ func (a *sessionTokenAuth) authenticate(r *http.Request) (mcpCaller, error) {
 		}
 	}
 
-	if expired && !sessionKnown {
-		return mcpCaller{}, fmt.Errorf("%w: session token expired", errMCPUnauthorized)
+	// An expired token is honoured only while the session it names still
+	// exists (sessionKnown) — and, for a caller that asked for the live-only
+	// rule (requireLive: the real-key /agent-proxy/ and /connect/, never
+	// /mcp), only while that session is still LIVE. A stolen token read out of
+	// a container with Bash must not outlive the session's usefulness to an
+	// attacker; it does not need to survive an idle-archive or a terminal
+	// error either. See sessionIsLive.
+	if expired && (!sessionKnown || (requireLive && !live)) {
+		return mcpCaller{}, fmt.Errorf("%w: %w", errMCPUnauthorized, errSessionTokenExpired)
 	}
 	return caller, nil
+}
+
+// sessionIsLive says whether a session row is still one a live container might
+// resume — i.e. NOT archived and NOT in a terminal Status. It is the "live"
+// half of Decision 3's last bullet (design/2026-09-11-project-connections.md):
+// a session that is done is a session whose leaked token should stop working
+// the moment it expires, rather than living on for as long as the row itself
+// (which outlives idle archival indefinitely).
+//
+// Deleted sessions never reach here — GetSession already filters them out
+// (deleted_at), which verifyToken treats as "could not be read" before this
+// runs. The Status values actually SET on a session row today
+// (go/cmd/agentd/dispatch.go, go/httpapi/session.go) are "creating", "running"
+// and the terminal "error"; the gorm default is "active". SnapshotState is
+// only ever READ, never written, elsewhere in the codebase
+// (go/agentdb/sessions.go:455,484, go/httpapi/lifecycle.go:133) — the
+// idle-archive sweep (go/cmd/agentd/gc.go) calls SetSnapshotHandle but never
+// sets SnapshotState = "archived". So the archived half of this check has no
+// live path to it today: an expired token for an idle-archived session is
+// still honoured. It starts working the moment something makes the sweep
+// write that field; nothing here needs to change when it does.
+func sessionIsLive(sess *agentdb.Session) bool {
+	if sess == nil {
+		return false
+	}
+	if sess.SnapshotState == "archived" {
+		return false
+	}
+	switch sess.Status {
+	case "error":
+		return false
+	default:
+		return true
+	}
 }
 
 // bearerToken extracts the credential from an Authorization header value. Both

@@ -168,6 +168,10 @@ func seedForMutations(t *testing.T) (*fakeManagementStore, []*mcpTool) {
 	w := agentdb.NewWorker("acme", "email-answerer")
 	w.Description = "answers customer email"
 	w.SystemPrompt = "Answer customer email."
+	// "*": project_prompt_write requires the caller to hold every connection
+	// (project connections, Decision 3). Without it the control call below
+	// would be refused for that reason and prove nothing about attribution.
+	w.Connections = agentdb.ConnectionList{"*"}
 	store.seedWorker(w)
 	store.subscriptions[key("acme", "sub-seeded")] = &agentdb.Subscription{
 		ID: "sub-seeded", Project: "acme", EventType: "email.received", Worker: "email-answerer", Enabled: true,

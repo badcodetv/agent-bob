@@ -13,9 +13,11 @@ import {
   OnboardingPage,
   OrgChartPage,
   ProjectSettingsPage,
+  PROJECT_SEGMENT,
   WorkersPage,
   buildGuideHash,
   navRevealSummary,
+  parseConnectResult,
   parseGuideHash,
   projectIdFromLocation,
   useAgentChat,
@@ -23,6 +25,7 @@ import {
   useNavReveal,
   usePrefersReducedMotion,
   useSessionPermalink,
+  type ConnectResult,
   type GuideParagraphMap,
   type NavEntry,
 } from "@agentkit/chat-ui";
@@ -104,6 +107,48 @@ function buildGuideParagraphs(pages: typeof GUIDE_PAGES): GuideParagraphMap {
     }
   }
   return map;
+}
+
+// Returning from Google (T26). agentd's Connect Google callback ends with a 303
+// to `/p/<project>/settings?connect=<account>&result=connected|error[&reason=…]`.
+// This shell has no router, so that URL is recognised here, once, from the
+// address the page loaded with.
+export interface ConnectReturn {
+  project: string;
+  /** null when `connect=` is present but the rest cannot be read: Settings still
+   *  opens, it just has nothing to say about the outcome. */
+  result: ConnectResult | null;
+}
+
+/** The query parameters the callback adds, and the only ones stripped. */
+const CONNECT_RETURN_PARAMS = ["connect", "result", "reason", "missing"];
+
+export function connectReturnFromLocation(pathname: string, search: string): ConnectReturn | null {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length !== 3 || segments[0] !== PROJECT_SEGMENT || segments[2] !== "settings") return null;
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if ((params.get("connect") ?? "").trim() === "") return null;
+  let project: string;
+  try {
+    project = decodeURIComponent(segments[1]!);
+  } catch {
+    return null;
+  }
+  if (project === "") return null;
+  return { project, result: parseConnectResult(search) };
+}
+
+/** Removes the callback's parameters from the address bar (a REPLACE, so it
+ *  costs no back-button step), keeping the path, the hash and any other query. */
+function stripConnectReturnFromLocation(): void {
+  const params = new URLSearchParams(window.location.search);
+  for (const key of CONNECT_RETURN_PARAMS) params.delete(key);
+  const query = params.toString();
+  window.history.replaceState(
+    window.history.state,
+    "",
+    window.location.pathname + (query ? `?${query}` : "") + window.location.hash,
+  );
 }
 
 // App state machine: loading → dev (legacy /dev/token, straight to chat)
@@ -192,14 +237,32 @@ export default function App() {
   // Once only, guarded by a ref: after this, switching project is the human's
   // decision and the URL must not drag them back.
   const permalinkProjectApplied = useRef(false);
+
+  // A return from Google (T26), read from the address the page loaded with and
+  // held until the workspace for that project mounts and takes it. Held here,
+  // not in the workspace, for the same reason as `pendingOnboarding`: the
+  // workspace remounts when the permalink below selects the project.
+  const [connectReturn, setConnectReturn] = useState<ConnectReturn | null>(() =>
+    connectReturnFromLocation(window.location.pathname, window.location.search),
+  );
+  const takeConnectReturn = useCallback(() => {
+    setConnectReturn(null);
+    stripConnectReturnFromLocation();
+  }, []);
+
   useEffect(() => {
     if (permalinkProjectApplied.current || !auth) return;
     const wanted = projectIdFromLocation();
     if (!wanted) return;
     permalinkProjectApplied.current = true;
     // No token for that project means the reader was never authorised for it —
-    // leave them where they are rather than failing a fetch later.
-    if (!auth.projects.some((p) => p.id === wanted)) return;
+    // leave them where they are rather than failing a fetch later. A Google
+    // return for such a project is dropped too, so its banner can never appear
+    // on another project's Settings.
+    if (!auth.projects.some((p) => p.id === wanted)) {
+      setConnectReturn(null);
+      return;
+    }
     if (auth.selectedProject !== wanted) selectProject(wanted);
   }, [auth, selectProject]);
 
@@ -282,6 +345,8 @@ export default function App() {
             credentialMode={credentialMode}
             project={project}
             onboardingGoal={pendingOnboarding?.project === project ? pendingOnboarding.goal : null}
+            connectReturn={connectReturn?.project === project ? connectReturn : null}
+            onConnectReturnTaken={takeConnectReturn}
             onOnboardingDone={() => setPendingOnboarding(null)}
             onSwitchProject={selectProject}
             onCreateProject={createProject}
@@ -307,6 +372,8 @@ function ProjectWorkspace({
   project,
   onboardingGoal,
   onOnboardingDone,
+  connectReturn,
+  onConnectReturnTaken,
   onSwitchProject,
   onCreateProject,
   onSignOut,
@@ -318,6 +385,11 @@ function ProjectWorkspace({
   onSwitchProject: (projectID: string) => void;
   onboardingGoal: string | null;
   onOnboardingDone: () => void;
+  /** A return from Google for THIS project (T26), or null. Read once, at mount. */
+  connectReturn: ConnectReturn | null;
+  /** Called once the workspace has taken `connectReturn`: forgets it and strips
+   *  the query, so a reload does not show the banner again. */
+  onConnectReturnTaken: () => void;
   onCreateProject: (projectID: string, goal: string) => Promise<void>;
   onSignOut: () => void;
 }) {
@@ -329,6 +401,9 @@ function ProjectWorkspace({
   // rendered as a permanent extra button rather than folded into the earned
   // set, so adding it never needed a reveal rule.
   const [view, setView] = useState<View | "onboarding" | "guide">(() => {
+    // Returning from Google wins: the human pressed Connect Google on Settings
+    // a moment ago, and Settings is where the outcome is shown.
+    if (connectReturn !== null) return "settings";
     if (onboardingGoal !== null) return "onboarding";
     if (parseGuideHash(window.location.hash) !== null) return "guide";
     return "desk";
@@ -338,6 +413,17 @@ function ProjectWorkspace({
   // rather than inside GuidePage so a reload or a pasted link lands on the
   // right page before GuidePage ever mounts. `null` slug is "not on the guide
   // right now"; `""` is the bare index (GuidePage redirects that to page one).
+  // The outcome of that return, kept by the workspace (the App-level copy is
+  // forgotten as soon as it is taken) and let go when Settings is left, so
+  // walking back to Settings later does not repeat an old result.
+  const [connectResult, setConnectResult] = useState<ConnectResult | null>(() => connectReturn?.result ?? null);
+  const connectReturnTaken = useRef(false);
+  useEffect(() => {
+    if (connectReturnTaken.current || connectReturn === null) return;
+    connectReturnTaken.current = true;
+    onConnectReturnTaken();
+  }, [connectReturn, onConnectReturnTaken]);
+
   const [guideSlug, setGuideSlug] = useState<string | null>(() => parseGuideHash(window.location.hash));
   useEffect(() => {
     const onHashChange = () => {
@@ -376,6 +462,9 @@ function ProjectWorkspace({
   // reveal check the same way "onboarding" is: it is not one of the earned
   // NavEntries (§3 G7 — "it is not content-driven, it is a book").
   const shownView = view === "onboarding" || view === "guide" || visible.includes(view) ? view : "desk";
+  useEffect(() => {
+    if (shownView !== "settings") setConnectResult(null);
+  }, [shownView]);
 
   // The only number in the chrome (design §3.5): how many things are asking for
   // you — through useAsksCount, which applies the very join the Asks stack
@@ -602,7 +691,7 @@ function ProjectWorkspace({
             onOpenSession={showSession}
           />
         )}
-        {shownView === "settings" && <ProjectSettingsPage projectId={project} />}
+        {shownView === "settings" && <ProjectSettingsPage projectId={project} connectResult={connectResult} />}
         {shownView === "onboarding" && (
           <OnboardingPage
             sessionId={onboardSessionId}

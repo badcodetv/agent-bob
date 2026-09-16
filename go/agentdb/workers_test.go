@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -415,6 +416,190 @@ func TestWorkersSelectorListValueScan(t *testing.T) {
 	}
 }
 
+// connections is a jsonb list of connection names defaulting to null, exactly
+// like briefing: "no connections field ever set" (nil) and "explicitly holds
+// nothing" ([]) are different states and must both survive a write/read cycle.
+func TestWorkersConnectionsRoundTrip(t *testing.T) {
+	s := newWorkerTestStore(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		in   ConnectionList
+		want ConnectionList
+	}{
+		{"unset stays null", nil, nil},
+		{"empty list stays empty", ConnectionList{}, ConnectionList{}},
+		{"single connection", ConnectionList{"github"}, ConnectionList{"github"}},
+		{"wildcard", ConnectionList{"*"}, ConnectionList{"*"}},
+		{
+			"multiple connections keep order",
+			ConnectionList{"github", "gmail", "docs"},
+			ConnectionList{"github", "gmail", "docs"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewWorker("acme", "connected-worker")
+			w.Connections = tc.in
+			mustUpsertWorker(t, s, w)
+
+			read, err := s.GetWorker(ctx, "acme", "connected-worker")
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if !reflect.DeepEqual(read.Connections, tc.want) {
+				t.Fatalf("connections round-trip: want %#v, got %#v", tc.want, read.Connections)
+			}
+			if (tc.want == nil) != (read.Connections == nil) {
+				t.Fatalf("nil-ness lost: want nil=%v, got nil=%v", tc.want == nil, read.Connections == nil)
+			}
+		})
+	}
+}
+
+// Validation refuses empty entries, malformed names, duplicates (including a
+// doubled wildcard) and accepts a bare "*".
+func TestWorkersConnectionsValidation(t *testing.T) {
+	s := newWorkerTestStore(t)
+	ctx := context.Background()
+
+	bad := []struct {
+		name  string
+		conns ConnectionList
+	}{
+		{"empty entry", ConnectionList{""}},
+		{"blank entry", ConnectionList{"   "}},
+		{"malformed name with slash", ConnectionList{"git/hub"}},
+		{"malformed name with space", ConnectionList{"git hub"}},
+		{"duplicate name", ConnectionList{"github", "github"}},
+		{"duplicate wildcard", ConnectionList{"*", "*"}},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			w := NewWorker("acme", "bad-connections-worker")
+			w.Connections = tc.conns
+			if _, err := s.UpsertWorker(ctx, w, ConfigWrite{}); !errors.Is(err, ErrWorkerInvalid) {
+				t.Fatalf("want ErrWorkerInvalid, got %v", err)
+			}
+		})
+	}
+
+	// A bare wildcard, and an ordinary list, are both accepted.
+	for _, ok := range []ConnectionList{{"*"}, {"github", "gmail"}, {}, nil} {
+		w := NewWorker("acme", "ok-connections-worker")
+		w.Connections = ok
+		if _, err := s.UpsertWorker(ctx, w, ConfigWrite{}); err != nil {
+			t.Fatalf("valid connections %#v rejected: %v", ok, err)
+		}
+	}
+}
+
+// Updating ONLY connections on an existing worker must persist and must write
+// exactly one config event (not zero — workerConfigEqual has to see the
+// change), and must not be misclassified as a plain worker_enable when
+// `enabled` changes at the same time.
+func TestWorkersConnectionsOnlyChangeIsLogged(t *testing.T) {
+	s := newConfigLogTestStore(t)
+	ctx := context.Background()
+	project := "acme-conn-log"
+
+	w := NewWorker(project, "researcher")
+	w.SystemPrompt = "You research."
+	mustUpsertWorker(t, s, w)
+
+	before, err := s.ListConfigEvents(ctx, ConfigEventQuery{Project: project})
+	if err != nil {
+		t.Fatalf("list before: %v", err)
+	}
+	beforeCount := len(before)
+
+	// Change connections only.
+	w2 := NewWorker(project, "researcher")
+	w2.SystemPrompt = "You research."
+	w2.Connections = ConnectionList{"github"}
+	updated, err := s.UpsertWorker(ctx, w2, ConfigWrite{Rationale: "grant github"})
+	if err != nil {
+		t.Fatalf("upsert connections-only change: %v", err)
+	}
+	if !reflect.DeepEqual(updated.Connections, ConnectionList{"github"}) {
+		t.Fatalf("connections did not persist: %#v", updated.Connections)
+	}
+
+	after, err := s.ListConfigEvents(ctx, ConfigEventQuery{Project: project})
+	if err != nil {
+		t.Fatalf("list after: %v", err)
+	}
+	if len(after) != beforeCount+1 {
+		t.Fatalf("connections-only change: want exactly one new config event, got %d (before %d, after %d)",
+			len(after)-beforeCount, beforeCount, len(after))
+	}
+	latest := after[0]
+	if latest.Action != ActionWorkerUpdate {
+		t.Fatalf("connections-only change: want action %q, got %q", ActionWorkerUpdate, latest.Action)
+	}
+
+	// Changing connections AND enabled together must be logged as an update,
+	// never as the narrower worker_enable/worker_disable action.
+	w3 := NewWorker(project, "researcher")
+	w3.SystemPrompt = "You research."
+	w3.Connections = ConnectionList{"github", "gmail"}
+	w3.Enabled = false
+	if _, err := s.UpsertWorker(ctx, w3, ConfigWrite{Rationale: "grant gmail too, and pause"}); err != nil {
+		t.Fatalf("upsert combined change: %v", err)
+	}
+	combined, err := s.ListConfigEvents(ctx, ConfigEventQuery{Project: project})
+	if err != nil {
+		t.Fatalf("list combined: %v", err)
+	}
+	if combined[0].Action != ActionWorkerUpdate {
+		t.Fatalf("connections+enabled change: want action %q, got %q", ActionWorkerUpdate, combined[0].Action)
+	}
+}
+
+// A worker upsert that changes only connections writes a config event whose
+// payload carries the field, and reverting that event restores the previous
+// list.
+func TestWorkersConnectionsRevert(t *testing.T) {
+	s := newConfigLogTestStore(t)
+	ctx := context.Background()
+	project := "acme-conn-revert"
+
+	w := NewWorker(project, "researcher")
+	w.Connections = ConnectionList{"github"}
+	mustUpsertWorker(t, s, w)
+
+	w2 := NewWorker(project, "researcher")
+	w2.Connections = ConnectionList{"github", "gmail"}
+	if _, err := s.UpsertWorker(ctx, w2, ConfigWrite{Rationale: "grant gmail"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	evs, err := s.ListConfigEvents(ctx, ConfigEventQuery{Project: project, Entity: "worker:researcher"})
+	if err != nil {
+		t.Fatalf("list config events: %v", err)
+	}
+	if len(evs) == 0 {
+		t.Fatalf("no config events for worker:researcher")
+	}
+	target := evs[0]
+	if _, ok := target.Payload["connections"]; !ok {
+		t.Fatalf("payload does not carry connections: %#v", target.Payload)
+	}
+
+	if _, err := s.RevertEvent(ctx, project, target.ID, ConfigWrite{Rationale: "too broad"}); err != nil {
+		t.Fatalf("revert: %v", err)
+	}
+
+	restored, err := s.GetWorker(ctx, project, "researcher")
+	if err != nil {
+		t.Fatalf("get after revert: %v", err)
+	}
+	if !reflect.DeepEqual(restored.Connections, ConnectionList{"github"}) {
+		t.Fatalf("revert did not restore previous connections: %#v", restored.Connections)
+	}
+}
+
 // The session columns migration 021 adds: `worker` (which worker's job this
 // session is — distinct from the fleet-placement `worker_id`), `composed_prompt`
 // (§6.2 provenance) and `lease_expires_at` (§8.4).
@@ -527,6 +712,37 @@ func TestWorkersLivePG_SchemaDefaults(t *testing.T) {
 	}
 	if thawed.Frozen {
 		t.Fatalf("frozen: false did not persist on live Postgres — the gorm-default trap")
+	}
+}
+
+func TestValidateConnectionName(t *testing.T) {
+	tests := []struct {
+		name    string
+		conn    string
+		wantErr bool
+	}{
+		{"simple", "github", false},
+		{"digits and dash", "gmail-drafts2", false},
+		{"underscore", "gmail_drafts", false},
+		{"leading digit", "2fa", false},
+		{"empty", "", true},
+		{"leading hyphen", "-github", true},
+		{"leading underscore", "_github", true},
+		{"space", "git hub", true},
+		{"uppercase allowed", "GitHub", false},
+		{"too long", strings.Repeat("a", 65), true},
+		{"max length ok", strings.Repeat("a", 64), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateConnectionName(tc.conn)
+			if tc.wantErr && !errors.Is(err, ErrWorkerInvalid) {
+				t.Fatalf("ValidateConnectionName(%q): want ErrWorkerInvalid, got %v", tc.conn, err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("ValidateConnectionName(%q): want nil, got %v", tc.conn, err)
+			}
+		})
 	}
 }
 

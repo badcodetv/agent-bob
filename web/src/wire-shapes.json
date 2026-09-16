@@ -58,6 +58,7 @@
     ],
     "Worker": [
       "briefing",
+      "connections",
       "created_at",
       "description",
       "enabled",

@@ -15,9 +15,24 @@ import (
 
 // ContextScope identifies who/what a turn is for.
 type ContextScope struct {
-	Customer  string
-	Job       string
-	Persona   string
+	Customer string
+	Job      string
+	Persona  string
+	// Worker is the product-layer worker identity this session runs AS
+	// (docs/product/02-workers.md §6.5; session.go:44's `worker` field) —
+	// distinct from Persona, which is only what the prompt/image/MCP-defaults
+	// layer re-resolves per turn (cmd/agentd/sessioncontext.go). The two are
+	// usually equal (a worker-attached chat sets both), but a session created
+	// with `persona` alone leaves Worker empty.
+	//
+	// design/2026-09-11-project-connections.md, Decision 6: connections are
+	// granted to a worker, never to a persona, because the /connect/ proxy
+	// authorises every request against the session row's Worker column. A
+	// consumer keying its own connections layer off Persona instead would
+	// grant a chat tools it can never actually use (a 403 on every call) or,
+	// worse, grant a persona's own name the connections meant for a
+	// differently-named worker.
+	Worker    string
 	UserEmail string
 }
 

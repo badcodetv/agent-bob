@@ -272,6 +272,11 @@ var workerRules = []Rule{
 	{Field: "Enabled", Key: "enabled", Decision: Render, Reason: "a flag."},
 	{Field: "Frozen", Key: "frozen", Decision: Render,
 		Reason: "a flag, and one a human reviewing a diff especially wants to see change — it is the causal-isolation boundary."},
+	{Field: "Connections", Key: "connections", Decision: Render, NotImportable: true,
+		Reason: "connection names — the credential lives in agentd's environment and is never a field. " +
+			"Rendered so a reader sees who can reach what; NOT importable, because anyone with push access to " +
+			"the mirror could otherwise grant '*' (Decision 3). The importer drops the key rather than writing " +
+			"it (gitproj's notImportable map in parse.go, T11)."},
 	{Field: "CreatedAt", Decision: Never, Reason: "wall-clock timestamp; see ProjectSettings.UpdatedAt. Creation order is git's first commit of the file."},
 	{Field: "UpdatedAt", Decision: Never, Reason: "wall-clock timestamp; churns every commit. See ProjectSettings.UpdatedAt."},
 }

@@ -16,6 +16,7 @@ import {
   extractConfigEvents,
   filterChangelog,
   formatConfigTimestamp,
+  revertBlocks,
   type ConfigEvent,
 } from './configLog.js'
 import { formatCompactTime } from './timefmt.js'
@@ -34,8 +35,10 @@ const ev = (over: Partial<ConfigEvent> = {}): ConfigEvent =>
   })
 
 describe('the §15.3 vocabulary', () => {
-  it('carries all nineteen actions, including the topology bracket T2 gained', () => {
-    expect(CONFIG_ACTIONS).toHaveLength(19)
+  it('carries all twenty-one actions, including the topology bracket and the two connection verbs', () => {
+    expect(CONFIG_ACTIONS).toHaveLength(21)
+    expect(CONFIG_ACTIONS).toContain('connection_connect')
+    expect(CONFIG_ACTIONS).toContain('connection_disconnect')
     expect(CONFIG_ACTIONS).toContain('worker_delete')
     expect(CONFIG_ACTIONS).toContain('worker_prompt_write')
     expect(CONFIG_ACTIONS).toContain('worker_freeze')
@@ -63,6 +66,44 @@ describe('the §15.3 vocabulary', () => {
     expect(changelogTitle(applied)).toBe('Applied topology “solo@v1”')
     // The bracket's payload is {topology, answers} — no prompt, so no diff.
     expect(configPromptText(applied)).toBeNull()
+  })
+
+  it('renders connect and disconnect keyed to the account name, never the connected email', () => {
+    expect(describeConfigAction('connection_connect')).toBe('Connected Google account')
+    expect(describeConfigAction('connection_disconnect')).toBe('Disconnected Google account')
+    const payload = {
+      account: 'google',
+      provider: 'google',
+      account_email: 'office@example.com',
+      scopes: ['openid', 'email'],
+      connected_by: 'op@example.com',
+      connected_at: 1,
+    }
+    const connected = ev({ action: 'connection_connect', payload })
+    const disconnected = ev({
+      action: 'connection_disconnect',
+      payload: { ...payload, disconnected_by: 'op@example.com' },
+    })
+    for (const e of [connected, disconnected]) {
+      expect(configEntity(e)).toEqual({ kind: 'connection', name: 'google', key: 'connection:google' })
+      expect(configPromptText(e)).toBeNull()
+    }
+    expect(changelogTitle(connected)).toBe('Connected Google account “google”')
+    expect(changelogTitle(disconnected)).toBe('Disconnected Google account “google”')
+    expect(changelogTitle(connected)).not.toContain('@')
+  })
+
+  it('never offers Revert for a connection change — the credential is not in the log', () => {
+    const entries = buildChangelog([
+      ev({ id: 'k1', action: 'connection_connect', payload: { account: 'google' }, created_at: 1 }),
+      ev({ id: 'k2', action: 'connection_disconnect', payload: { account: 'google' }, created_at: 2 }),
+    ])
+    const blocks = revertBlocks(entries)
+    for (const id of ['k1', 'k2']) {
+      // Blocked for having no inverse — including the NEWEST one, which the
+      // newest-change rule alone would have offered.
+      expect(blocks.get(id)?.reason).toMatch(/Connect Google or Disconnect in Settings/)
+    }
   })
 
   it('a freeze entry carries the full row but no prompt diff — the prompt did not change', () => {
