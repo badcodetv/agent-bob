@@ -415,6 +415,9 @@ func (f *gitFold) Apply(ev *agentdb.ConfigEvent) error {
 		case agentdb.EntitySchedule:
 			delete(f.scheds, ref.Key)
 		}
+		// EntityConnection's `connection_disconnect` lands here too and is
+		// ignored: nothing was ever folded for it, so there is nothing to remove
+		// (see the EntityConnection case below).
 		return nil
 	}
 
@@ -483,6 +486,13 @@ func (f *gitFold) Apply(ev *agentdb.ConfigEvent) error {
 		// `topology_apply` records a DECISION, not a projection row: nothing in
 		// the repository represents it. Skipped deliberately — silently dropping
 		// it would be indistinguishable from forgetting it, so it is named here.
+	case agentdb.EntityConnection:
+		// `connection_connect` records that a Google account was connected
+		// (design/2026-09-11-project-connections.md, addendum A10: not
+		// rendered, decided explicitly). The credential itself is never in the
+		// log, and the payload's account email must never reach git — anything
+		// rendered is in history permanently. There is no ProjectState field for
+		// it, so the tree is unchanged and the renderer commits nothing.
 	}
 	return nil
 }

@@ -519,6 +519,8 @@ describe('changes', () => {
     expect(deskChangeVerb('schedule_update')).toBe('retuned')
     expect(deskChangeVerb('image_create')).toBe('published')
     expect(deskChangeVerb('topology_apply')).toBe('applied')
+    expect(deskChangeVerb('connection_connect')).toBe('connected')
+    expect(deskChangeVerb('connection_disconnect')).toBe('disconnected')
     // Anything the vocabulary has not seen renders as itself, never as a guess.
     expect(deskChangeVerb('worker_teleported')).toBe('worker_teleported')
   })
@@ -560,6 +562,13 @@ describe('changes', () => {
     expect(subjectOf({ action: 'topology_apply', payload: { topology: 'solo@v1' } })).toBe(
       'topology solo@v1',
     )
+    // The account NAME, never the connected mailbox's email.
+    expect(
+      subjectOf({
+        action: 'connection_connect',
+        payload: { account: 'google', account_email: 'office@example.com' },
+      }),
+    ).toBe('Google account google')
   })
 
   it('publishes the image sentence the design storyboard shows', () => {

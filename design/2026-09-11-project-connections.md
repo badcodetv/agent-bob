@@ -1083,6 +1083,27 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   `account` field. An account and a connection may share a name (`google` is both a default
   account and a plausible connection name), but only the two credential actions map to
   `EntityConnection`, so a worker's `connections` grants never appear in that history.
+- (T18) Most of T18's Go side was already true before it started: `gitFold.Apply`'s switch has no
+  default, so `EntityConnection` fell through to `return nil` and rendered nothing, and
+  `mcp_config_log.go` keys every record through `agentdb.EntityRefFor` with no kind switch. The
+  new Go tests (tree byte-identical with and without connection events, no commit on the live
+  hook path, no email in files/commit messages/`config.changed` text, `connection:google` accepted
+  as a `config_history` filter) therefore passed on first run. The backfill test was checked by
+  temporarily folding the payload into a worker row: it then fails on the tree hash. What T18
+  added in Go is the explicit, commented `EntityConnection` case (A10) and `connection:<account>`
+  in the tool's entity-filter description.
+- (T18) The `topology_apply` grep found one reader the ticket did not list: `web/src/desk.ts`
+  (`deskChangeVerb`/`deskChangeSubject`). Without it the desk would have printed the raw verb
+  `connection_connect`. Given `connected`/`disconnected` and the subject `Google account <name>`
+  (no email). The changelog filter list in `ChangelogView.tsx` also gained `connection_*`.
+- (T18) The changelog still shows the raw payload JSON when an entry is expanded, so the
+  connected account email IS visible there. That matches A8 (the email is console-visible
+  metadata); only titles, keys, the desk and `config.changed` text are email-free.
+- (T18) `web` `npm run typecheck` is red on the base commit, independent of T18:
+  `src/components/WorkerChatPanel.test.tsx(9,7)` builds a `Worker` fixture without the
+  `connections` field T6 made required (the fixture arrived with the main merge `85b78f7`). Reproduced
+  with T18's changes stashed. Not fixed here (outside T18's files); one missing field in a test
+  fixture. `npm test` (vitest) is green.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1525,8 +1546,17 @@ then strips the query with `history.replaceState`.
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'Git|ConfigChanged|ConfigLog' -count=1` →
   PASS; `cd web && npm run typecheck && npx vitest run src/configLog.test.ts src/components/ChangelogRevert.test.tsx` → PASS.
 - **Depends on:** T17
-- [ ] done
-- Notes:
+- [x] done
+- Notes: the two `configChangePhrase` cases came with T17. Added the commented `EntityConnection`
+  skip in `gitFold.Apply` (A10), `connection:<account>` in `config_history`'s filter description,
+  and tests: `TestGitBackfillSkipsConnectionEvents` (same tree hash, no commit, watermark past,
+  no email in files or messages), `TestGitProjectionConnectionEventCommitsNothing`,
+  `TestConfigChangedEventTextForConnectionsCarriesNoEmail`,
+  `TestConfigHistoryKeysConnectionsByAccount`. `web/src/configLog.ts`: both actions, kind
+  `connection` keyed on the account, labels "Connected/Disconnected Google account", Revert
+  disabled with the server's reason; also `desk.ts` verbs/subject and a `connection_*` changelog
+  filter. Go validation and `vitest` pass; `web` typecheck is red on the base commit for an
+  unrelated test fixture (see Discovered Issues).
 
 ### T19: `google_account` auth type and use-time availability   [Status: pending | Model: opus]
 - **Scope:** in `go/connections`: `AuthGoogleAccount`, `DefaultGoogleAccount`, `Auth.Account`;

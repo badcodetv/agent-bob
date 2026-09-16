@@ -777,3 +777,97 @@ func TestGitBackfillPagesTheWholeLogAscending(t *testing.T) {
 		t.Errorf("the log was read in %d call(s); this test exists to exercise paging", rig.store.pages)
 	}
 }
+
+// ── A10: a connected Google account is never published ──────────────────────
+
+// backfillConnectionEvent is what agentdb.PutConnectionCredential /
+// DeleteConnectionCredential write: metadata only, but metadata that includes
+// the connected mailbox's email — which is exactly what must not reach git.
+func backfillConnectionEvent(action, email string) *agentdb.ConfigEvent {
+	payload := agentdb.JSONMap{
+		"account":       "google",
+		"provider":      "google",
+		"account_email": email,
+		"scopes":        []any{"openid", "email"},
+		"connected_by":  "operator@example.com",
+		"connected_at":  float64(1789000000123),
+	}
+	rationale := "Google account connected from the console"
+	if action == agentdb.ActionConnectionDisconnect {
+		payload["disconnected_by"] = "operator@example.com"
+		rationale = "Google account disconnected from the console"
+	}
+	return &agentdb.ConfigEvent{Action: action, Payload: payload, Rationale: rationale}
+}
+
+// A project whose log holds connect/disconnect events renders the SAME tree as
+// the same project without them, commits nothing for them, and never writes
+// the account email into a file or a commit message (design addendum A10).
+func TestGitBackfillSkipsConnectionEvents(t *testing.T) {
+	const email = "enc-office@example.com"
+
+	plain := newBackfillRig(t, "wolf")
+	plain.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerCreate, backfillWorker("copywriter", "v1"), "create", "architect"))
+	plain.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerPromptWrite, backfillWorker("copywriter", "v2"), "sharpen", "architect"))
+
+	connected := newBackfillRig(t, "wolf")
+	connected.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerCreate, backfillWorker("copywriter", "v1"), "create", "architect"))
+	connected.store.append("wolf", backfillConnectionEvent(agentdb.ActionConnectionConnect, email))
+	connected.store.append("wolf", backfillWorkerEvent(agentdb.ActionWorkerPromptWrite, backfillWorker("copywriter", "v2"), "sharpen", "architect"))
+	connected.store.append("wolf", backfillConnectionEvent(agentdb.ActionConnectionDisconnect, email))
+	connected.store.append("wolf", backfillConnectionEvent(agentdb.ActionConnectionConnect, email))
+
+	for _, rig := range []*backfillRig{plain, connected} {
+		if err := rig.proj.BackfillProject(context.Background(), "wolf"); err != nil {
+			t.Fatalf("backfill: %v", err)
+		}
+	}
+
+	treeOf := func(rig *backfillRig) string {
+		out, _, err := runGit(context.Background(), rig.clone("wolf"), "rev-parse", "HEAD^{tree}")
+		if err != nil {
+			t.Fatalf("rev-parse tree: %v", err)
+		}
+		return strings.TrimSpace(out)
+	}
+	if a, b := treeOf(plain), treeOf(connected); a != b {
+		t.Fatalf("connection events changed the rendered tree: %s without them, %s with them", a, b)
+	}
+
+	got := connected.history("wolf")
+	if len(got) != 2 {
+		t.Fatalf("want 2 commits (the two worker events), got %d: %+v", len(got), got)
+	}
+	for _, c := range got {
+		if a := c.trailers["Bob-Action"]; strings.HasPrefix(a, "connection_") {
+			t.Errorf("a %s event produced a commit", a)
+		}
+	}
+	// The walk still moves past them, or the project would replay them for ever.
+	if got, want := connected.state.renderedSeq("wolf"), int64(5); got != want {
+		t.Errorf("watermark = %d, want %d", got, want)
+	}
+
+	// The email is nowhere: not in any commit message, not in any tracked file.
+	dir := connected.clone("wolf")
+	messages, _, err := runGit(context.Background(), dir, "log", "--all", "--format=%B")
+	if err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if strings.Contains(messages, email) {
+		t.Errorf("a commit message carries the connected account email:\n%s", messages)
+	}
+	files, _, err := runGit(context.Background(), dir, "ls-files")
+	if err != nil {
+		t.Fatalf("git ls-files: %v", err)
+	}
+	for _, f := range strings.Fields(files) {
+		b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(f)))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		if strings.Contains(string(b), email) {
+			t.Errorf("%s carries the connected account email", f)
+		}
+	}
+}

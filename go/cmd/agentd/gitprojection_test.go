@@ -1477,3 +1477,49 @@ func TestGitProjectionRecreatesAVanishedClone(t *testing.T) {
 		t.Fatalf("a recoverable missing clone was recorded as a failure: %q / %q", kind, rig.state.lastError("wolf"))
 	}
 }
+
+// The live path, same rule as the backfill (design addendum A10): a Google
+// connect is a config event, the post-commit hook sees it, and the render
+// finds nothing to publish — so there is no commit, and the watermark moves on.
+func TestGitProjectionConnectionEventCommitsNothing(t *testing.T) {
+	const email = "enc-office@example.com"
+	rig := newProjectionRig(t, "wolf")
+	first := rig.store.mutate("wolf", workerPromptWrite("copywriter", "first"))
+	rig.proj.Hook()(context.Background(), first)
+	rig.proj.RenderPending(context.Background())
+	if n := rig.commitCount("wolf"); n != 1 {
+		t.Fatalf("setup: want 1 commit, got %d", n)
+	}
+	head := rig.head("wolf")
+
+	for _, action := range []string{agentdb.ActionConnectionConnect, agentdb.ActionConnectionDisconnect} {
+		ev := rig.store.mutate("wolf", &agentdb.ConfigEvent{
+			ID:     "ev-" + action,
+			Action: action,
+			Payload: agentdb.JSONMap{
+				"account": "google", "provider": "google", "account_email": email,
+				"connected_by": "operator@example.com", "connected_at": float64(1789000000123),
+			},
+			Rationale: "Google account connected from the console",
+			CreatedAt: time.Now().UnixMilli(),
+		})
+		rig.proj.Hook()(context.Background(), ev)
+		rig.proj.RenderPending(context.Background())
+
+		if n := rig.commitCount("wolf"); n != 1 {
+			t.Fatalf("%s produced a commit (%d commits)", action, n)
+		}
+		if rig.head("wolf") != head {
+			t.Fatalf("%s moved HEAD", action)
+		}
+		rec, _ := rig.state.Get(context.Background(), "wolf")
+		if rec.LastRenderedSeq != ev.Seq {
+			t.Errorf("%s: watermark = %d, want %d", action, rec.LastRenderedSeq, ev.Seq)
+		}
+	}
+	for _, line := range rig.logs {
+		if strings.Contains(line, email) {
+			t.Errorf("the projector logged the connected account email: %q", line)
+		}
+	}
+}

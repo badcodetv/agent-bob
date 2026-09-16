@@ -377,6 +377,33 @@ func TestConfigChangedEventTextCoversEveryAction(t *testing.T) {
 	}
 }
 
+// A Google connect/disconnect announces the account NAME only. The payload
+// carries the connected mailbox's email (and the operator's), but this text is
+// routed into every subscribed worker's session, so neither appears in it.
+func TestConfigChangedEventTextForConnectionsCarriesNoEmail(t *testing.T) {
+	payload := agentdb.JSONMap{
+		"account": "google", "provider": "google", "account_email": "office@example.com",
+		"scopes": []any{"openid", "email"}, "connected_by": "op@example.com",
+	}
+	for _, tc := range []struct{ action, rationale, want string }{
+		{agentdb.ActionConnectionConnect, "Google account connected from the console",
+			`A human connected Google account "google".`},
+		{agentdb.ActionConnectionDisconnect, "Google account disconnected from the console",
+			`A human disconnected Google account "google".`},
+	} {
+		text := describeConfigChange(configEvent(tc.action, payload, agentdb.ConfigWrite{Rationale: tc.rationale}))
+		if !strings.HasPrefix(text, tc.want) {
+			t.Errorf("%s: text does not open with %q:\n%s", tc.action, tc.want, text)
+		}
+		if !strings.Contains(text, "entity connection:google") {
+			t.Errorf("%s: text does not name the entity:\n%s", tc.action, text)
+		}
+		if strings.Contains(text, "@") {
+			t.Errorf("%s: text carries an email address:\n%s", tc.action, text)
+		}
+	}
+}
+
 // TestConfigChangedEventUsesTheEventSpineClock guards the ms/seconds trap the
 // config log is full of: config_events.created_at is MILLISECONDS and the event
 // spine is SECONDS. Handing the spine a millisecond value dates the change
