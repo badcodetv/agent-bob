@@ -1210,6 +1210,25 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   the code and state and the HTML page has a link on it.
 - (T23) The callback checks that the pending entry's project/account/email equal the state's
   (they always should — both were written together); a mismatch is answered `expired`.
+- (T24) The handoff note said all the Connect Google variables go in local-config/connections.env. That is only true for AGENTKIT_CONNECTIONS_KEY and GOOGLE_CLIENT_SECRET. GOOGLE_CLIENT_ID is already listed under agentd's environment: in docker-compose.yml (`${GOOGLE_CLIENT_ID:-}`), which overrides the env_file, so it has to go in .env. The docs say so. docker-compose.yml was not changed.
+- (T24) The ticket's file list leaves out go/cmd/agentd/googleconnect.go, but the wiring function (`wireGoogleConnect`) lives there so the typed-nil store check can be unit-tested without calling main(). Tests are in a new file, googleconnect_wiring_test.go, not main_test.go or googleconnect_test.go.
+- (T24) `testLoginEmail` is filled in only inside main.go's `loginEnabled` branch. In dev-open mode it stays "", which is harmless because A4 refuses connects without a JWT secret.
+- (T25) agentd answers these routes with a JSON body {"error": "..."}, but useConfigApi's ConfigApiError message is the raw response body, so it would have shown the JSON text. Added readApiErrorMessage(message) in connections.ts, which pulls out `error` and passes any other text through unchanged; the hook uses it. configApi.ts itself is unchanged because it is not in T25's files. Every other surface that meets a JSON-error route has the same problem.
+- (T25) ConnectResult's error variant gained an optional `missing?: string[]` field, read from T23's `&missing=`. describeConnectError takes an optional second argument `missing` and adds ' Missing: a, b.' for missing_scopes. Both additions are optional, so T26's call `parseConnectResult(location.search)` works unchanged.
+- (T25) jsdom's window.location.assign cannot be replaced with vi.spyOn ('Cannot redefine property'). The tests use vi.stubGlobal('location', {...window.location, assign}), so the hook reads window.location.assign at call time rather than keeping its own reference. Useful for T26's shell test.
+- (T25) The no_refresh_token banner does not use A7's wording ('did not return a long-lived token') because T27 bans the word 'token' in anything shown to Richard. None of the reason sentences contain oauth, scope, token or an underscore, and a test checks this.
+- (T25) Disconnect is not gated on can_connect: when the deployment has Connect Google turned off, the server still lets a disconnect through. A non-operator can press it and sees the server's 403 sentence. `web` typecheck is green again, so the T18 note about WorkerChatPanel.test.tsx no longer applies on this branch.
+- (T25, orchestrator) The review found `busy` stayed set after `connect()` sent the browser to Google, so Back from Google restored (bfcache) a panel with every button disabled. Fixed in `useConnections.ts` with a `pageshow` listener that clears it when `persisted`; a test proves red→green.
+- (T25, orchestrator) The review also suggested disabling **Disconnect** unless `can_connect`. Not done on purpose: `can_connect` is false whenever Connect Google is off (for example the key was removed or changed), and that is exactly when an operator most needs to disconnect. The server's A4 check still refuses a non-operator with 403.
+- (T26) examples/web's `yarn typecheck` does not see the jest-dom matcher types (`toHaveAttribute`, `toBeInTheDocument`), although vitest registers them at run time in src/test-setup.ts. A shell test that uses them passes `yarn test` and fails `yarn typecheck`. The existing shell tests avoid them, and the new test now does too.
+- (T26) A full App render test needs a JWT-shaped token with a future `exp`. `loadAuthState` throws away any token it cannot decode, and the shell then shows the login screen with no error. The test builds `header.<base64 {exp}>.signature`.
+- (T26) A `connect=` whose `result` is neither `connected` nor `error` still opens Settings and still has its query stripped, but shows no banner, because parseConnectResult returns null for it. The ticket says the trigger is 'carries ?connect=', so this is deliberate.
+- (T26) Only the callback's four parameters (connect, result, reason, missing) are removed; the path `/p/<project>/settings`, the hash and any other query parameters stay. A reload of the bare `/p/<project>/settings` lands on Desk, as any `/p/<project>` URL already did: the shell has no route that opens Settings from the path alone.
+- (T27) Step 9, returning to Settings with a green banner, depends on T26, which was still pending when this was written. App.tsx:583 did not yet pass connectResult to ProjectSettingsPage. Re-check the step once T26 merges.
+- (T27) The guide says to click 'Go to Agent Bob (unsafe)' on Google's warning, but the name in that link is whatever the app is called on the login client's consent screen in Google Cloud. That name was not checked, so the guide adds '(the name in that link may be written slightly differently)'. T28 should record the exact wording.
+- (T27) The ticket's draft said Bob can 'find and read' Drive, Docs and Sheets. The permissions Richard approves (drive, documents, spreadsheets) also allow creating, changing and deleting files, so the guide says 'find, open, create and change'. It does not claim which tools the Google servers actually expose.
+- (T27) Being allowed to connect is fixed when a login token is created (T20), so someone Kai has just added to `operators` must sign out and sign in again before the button works. The guide says so. The not_allowed banner's own words, 'make you an operator of this project', use the word operator; the guide maps that message to 'Ask Kai' instead of repeating it.
+- (T27) If someone removes Bob on Google's side without pressing Disconnect, Settings will probably keep showing 'Connected as' until a worker call fails. The guide tells the user to press Disconnect as well. This was not checked live.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1861,7 +1880,7 @@ then strips the query with `history.replaceState`.
   return the payload with `errStateExpired` (Discovered Issues). Validation (`-race`) and the full
   gate pass (agentdb live cases skipped).
 
-### T24: Wire Connect Google into agentd   [Status: pending | Model: sonnet]
+### T24: Wire Connect Google into agentd   [Status: done | Model: sonnet]
 - **Scope:** in `go/cmd/agentd/main.go`: after the Registry is built (`main.go:279`) and the
   public base URL is resolved (`:173`), `loadGoogleConnectConfig` (boot fails on its error); when
   `agentDB != nil` and the config is enabled, build `googleAccounts` and
@@ -1883,10 +1902,10 @@ then strips the query with `history.replaceState`.
 - **Validation:** `cd go && go build ./... && go vet ./... && go test ./cmd/agentd/ -count=1` →
   PASS; `cd .. && docker compose config >/dev/null` → exit 0.
 - **Depends on:** T23
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `wireGoogleConnect(apiMux, root, store, reg, cfg, holder, testLoginEmail, jwtSecret, logf)` is in googleconnect.go and main.go calls it once. It handles the typed-nil store itself, mounts routes whenever a store exists (they answer 503 when disabled), and logs one boot line. `loadGoogleConnectConfig` runs after the Registry is built, and `must()` stops boot on a bad key. Tests are in googleconnect_wiring_test.go. Docs are in .env.example and local-config/README.md, and the example map has an `enc` project. deploy/web.nginx.conf's `location /auth/` proxies to agentd:8099 and reaches /auth/connections/google/callback, so it needs no change. (Built by the parallel workflow; validation re-run by the orchestrator.)
 
-### T25: `ConnectionsPanel` in the component library   [Status: pending | Model: sonnet]
+### T25: `ConnectionsPanel` in the component library   [Status: done | Model: sonnet]
 - **Scope:** `web/src/connections.ts` (pure, exported through `src/pure.ts` and `src/index.ts`),
   `web/src/useConnections.ts`, `web/src/components/ConnectionsPanel.tsx` exactly as in the
   addendum; mount the panel in `ProjectSettingsPage` in the "You may want to change these" tier
@@ -1908,10 +1927,10 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd web && npm run typecheck && npm test && npm run build && ./scripts/verify-package.sh` → PASS.
 - **Depends on:** T23 (the JSON contract; may be built in parallel against the addendum)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: connections.ts (pure, in /pure and root) + useConnections.ts + ConnectionsPanel.tsx; mounted in Settings' top tier between the briefing and the budget panel via new ProjectSettingsPage prop `connectResult?: ConnectResult | null`. ConnectResult's error variant gained optional `missing?: string[]`. typecheck, test (1881), build, verify-package all PASS. (Built by the parallel workflow; validation re-run by the orchestrator.)
 
-### T26: Shell returns from Google to Settings   [Status: pending | Model: sonnet]
+### T26: Shell returns from Google to Settings   [Status: done | Model: sonnet]
 - **Scope:** in `examples/web/src/App.tsx`: when the location is `/p/<project>/settings` and
   carries `?connect=`, select that project through the existing permalink-project path, open the
   `settings` view once, pass `parseConnectResult(location.search)` to `ProjectSettingsPage`, then
@@ -1923,10 +1942,10 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd web && npm run build && cd ../examples/web && yarn install --frozen-lockfile && yarn typecheck && yarn test` → PASS.
 - **Depends on:** T25
-- [ ] done
-- Notes:
+- [x] done
+- Notes: App.tsx: exported pure connectReturnFromLocation(pathname, search) -> {project, result: ConnectResult|null} | null. App holds it until the matching ProjectWorkspace mounts, which opens on `settings`, passes connectResult to ProjectSettingsPage, and strips only connect/result/reason/missing with replaceState (keeping path, hash and other params). The result is cleared when Settings is left. A project the user has no token for is dropped like a foreign permalink. Test: examples/web/src/connectReturn.test.tsx (11). web build, yarn install --frozen-lockfile, yarn typecheck, yarn test (24) all PASS. (Built by the parallel workflow; validation re-run by the orchestrator.)
 
-### T27: "How to connect Google" for Richard   [Status: pending | Model: sonnet]
+### T27: "How to connect Google" for Richard   [Status: done | Model: sonnet]
 - **Scope:** finalise the draft below so every button label, screen name and message matches the
   merged UI (re-read T25/T26 and the running mock stack; do not copy blindly), and save it as
   `docs/guides/connect-google-for-a-project.md` in this repo **with no real email address** (use
@@ -1942,8 +1961,8 @@ then strips the query with `history.replaceState`.
   steps; `grep -niE "oauth|token|scope|@gmail" docs/guides/connect-google-for-a-project.md` prints
   nothing.
 - **Depends on:** T25, T26
-- [ ] done
-- Notes: Draft text —
+- [x] done
+- Notes: docs/guides/connect-google-for-a-project.md: labels checked against T25's ConnectionsPanel and the shell (menu entry Settings, "You may want to change these", "Google — Not connected" / "Connected as", Connect Google, Disconnect dialog, all 9 result banners). Says plainly that Bob can read email, writes drafts but never sends, the unverified-app warning is expected, how to disconnect, and to ask Kai when the button is grey. Both greps PASS. (Built by the parallel workflow; validation re-run by the orchestrator.) Draft text —
 
   > **Connecting your Google account to Agent Bob**
   >
