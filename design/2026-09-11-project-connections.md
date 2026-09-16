@@ -1524,7 +1524,7 @@ then strips the query with `history.replaceState`.
   passed; the one failure in that run is the known pre-existing
   `TestLivePG_QueryEventsMixedPreAndPostMigrationRows`, reproduced on the base commit.
 
-### T18: The two new actions reach every reader of the log   [Status: pending | Model: sonnet]
+### T18: The two new actions reach every reader of the log   [Status: done | Model: sonnet]
 - **Scope:** every place that switches on the closed action vocabulary or entity kinds learns
   the new ones. `go/cmd/agentd/gitbackfill.go` `gitFold.Apply`: `EntityConnection` skipped with a
   comment naming A10 (and the delete branch ignores it). `go/cmd/agentd/configchanged.go`
