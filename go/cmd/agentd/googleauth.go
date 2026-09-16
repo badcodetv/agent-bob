@@ -77,6 +77,16 @@ type projectConfig struct {
 	// workers may *use* a connection is a database field (workers.connections,
 	// T6), granted by the architect; this is only what the project *has*.
 	Connections map[string]connections.Spec `json:"connections"`
+	// Operators lists the emails (lowercased at parse) that get the operator
+	// claim (§1.1) on THIS project's token even from a non-wildcard login
+	// (design/2026-09-11-project-connections.md addendum A5). It is how a
+	// non-admin human — signed in with their own Google account, not the
+	// wildcard dev login — is allowed to press Connect Google and edit this
+	// project's budgets. Every email here must also appear in "users" with
+	// this project (or the wildcard "*"): an operator who cannot log in is a
+	// typo, and parsing fails naming it. A wildcard login is always an
+	// operator regardless of this list (see isOperator).
+	Operators []string `json:"operators"`
 }
 
 // projectSettings is the whole parsed map file: who may log in, and per-project
@@ -183,6 +193,16 @@ func parseProjectSettingsObjectForm(probe map[string]json.RawMessage) (*projectS
 				if err := spec.Validate(); err != nil {
 					return nil, fmt.Errorf("project map: project %q: connections: %q: %w", id, name, err)
 				}
+			}
+			for i, email := range cfg.Operators {
+				email = strings.ToLower(strings.TrimSpace(email))
+				if email == "" {
+					return nil, fmt.Errorf("project map: project %q: operators: empty email", id)
+				}
+				if !projectMap(out.users).coversProject(email, id) {
+					return nil, fmt.Errorf("project map: project %q: operators: %q has no \"users\" entry covering this project (an operator who cannot log in is a typo)", id, email)
+				}
+				cfg.Operators[i] = email
 			}
 			out.projects[id] = cfg
 		}
@@ -311,6 +331,19 @@ func (pm projectMap) allProjects() []string {
 	return out
 }
 
+// coversProject reports whether email's "users" entry grants it project —
+// exactly (or via the wildcard "*"). Used to validate a project's operators
+// list at parse time (T20/A5): an operator email with no covering users entry
+// cannot log in at all, so it is a parse error rather than a silent no-op.
+func (pm projectMap) coversProject(email, project string) bool {
+	for _, p := range pm[email] {
+		if p == project || p == projectWildcard {
+			return true
+		}
+	}
+	return false
+}
+
 // resolve returns the effective projects for an email plus whether the entry
 // is a wildcard grant. ok=false when the email isn't in the map.
 func (pm projectMap) resolve(email string) (projects []string, wildcard, ok bool) {
@@ -324,6 +357,28 @@ func (pm projectMap) resolve(email string) (projects []string, wildcard, ok bool
 		}
 	}
 	return projects, false, true
+}
+
+// isOperator reports whether email should carry the operator claim (§1.1) on
+// project's token: true for a wildcard login (wildcard is passed in because
+// the caller — userDirectory.resolve — already knows it and recomputing it
+// here would mean asking the map the same question twice), or when the
+// project's own "operators" list (object form only; T20/A5) names email. A
+// nil receiver — the legacy flat form, or no map at all — carries no
+// per-project operators, so it answers only from wildcard.
+func (s *projectSettings) isOperator(project, email string, wildcard bool) bool {
+	if wildcard {
+		return true
+	}
+	if s == nil {
+		return false
+	}
+	for _, op := range s.projects[project].Operators {
+		if op == email {
+			return true
+		}
+	}
+	return false
 }
 
 // userDirectory is what the login handlers need from the user→projects half of
@@ -457,6 +512,14 @@ func (h *projectSettingsHolder) allProjects() []string {
 	return h.users().allProjects()
 }
 
+// isOperator reads through the live map (Get()), so a project-map reload
+// changes the very next login's operator claim without a restart — matching
+// resolve/allProjects above (A6). A nil holder (no map configured at all)
+// answers only from wildcard, via projectSettings.isOperator's nil receiver.
+func (h *projectSettingsHolder) isOperator(project, email string, wildcard bool) bool {
+	return h.Get().isOperator(project, email, wildcard)
+}
+
 // reload re-reads and re-parses the file, replacing the held settings on
 // success and reporting whether it did. A read failure or a parse failure
 // leaves the previous map in place and only logs it — a reload must never take
@@ -585,19 +648,20 @@ type loginResponse struct {
 	LoginToken string         `json:"login_token,omitempty"`
 }
 
-// mintProjectTokens issues one project-scoped JWT per project ID. operator
-// stamps the onboarding-plan §1.1 `operator:true` claim on every token minted:
-// true only for a wildcard login's tokens (writeLoginResponse) and the
-// wildcard project-token exchange (authProjectTokenHandler) — never for a
-// non-wildcard Google account.
-func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string, operator bool) ([]projectToken, error) {
+// mintProjectTokens issues one project-scoped JWT per project ID. isOperator
+// decides the onboarding-plan §1.1 `operator:true` claim per project (T20/A5):
+// a wildcard login's tokens (writeLoginResponse) and the wildcard
+// project-token exchange (authProjectTokenHandler) are the operator on every
+// project; a non-wildcard Google account is the operator only on a project
+// whose "operators" list names it.
+func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, projects []string, isOperator func(project string) bool) ([]projectToken, error) {
 	out := make([]projectToken, 0, len(projects))
 	for _, p := range projects {
 		tok, err := issuer.IssueOperator(r.Context(), extension.ContextScope{
 			UserEmail: email,
 			Customer:  p,
 			Job:       "web",
-		}, "", operator)
+		}, "", isOperator(p))
 		if err != nil {
 			return nil, err
 		}
@@ -606,11 +670,14 @@ func mintProjectTokens(r *http.Request, issuer *devclaims.Issuer, email string, 
 	return out, nil
 }
 
-func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaims.Issuer, email string, projects []string, wildcard bool) {
-	// The operator claim tracks wildcard-ness exactly (§1.1): a wildcard grant
-	// (including the test login, which is always a wildcard) is the operator;
-	// a plain per-project Google account is not.
-	tokens, err := mintProjectTokens(r, issuer, email, projects, wildcard)
+// writeLoginResponse mints and writes the per-project tokens for a resolved
+// login. settings is the live project map (may be nil: no object-form config
+// at all), read through at mint time so a reload changes the very next
+// login's operator claim (A6) — see projectSettingsHolder.isOperator.
+func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaims.Issuer, email string, projects []string, wildcard bool, settings *projectSettingsHolder) {
+	tokens, err := mintProjectTokens(r, issuer, email, projects, func(p string) bool {
+		return settings.isOperator(p, email, wildcard)
+	})
 	if err != nil {
 		http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -637,7 +704,9 @@ func writeLoginResponse(w http.ResponseWriter, r *http.Request, issuer *devclaim
 
 // authGoogleHandler serves POST /auth/google {credential} → 401 bad credential,
 // 403 email not in the project map, else {email, projects:[{id, token}]}.
-func authGoogleHandler(v *googleVerifier, pm userDirectory, issuer *devclaims.Issuer) http.HandlerFunc {
+// settings supplies the per-project operators list (T20/A5); nil is a legal,
+// safe value (no object-form config, so no non-wildcard operators).
+func authGoogleHandler(v *googleVerifier, pm userDirectory, settings *projectSettingsHolder, issuer *devclaims.Issuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Credential string `json:"credential"`
@@ -656,7 +725,7 @@ func authGoogleHandler(v *googleVerifier, pm userDirectory, issuer *devclaims.Is
 			http.Error(w, "no projects for this account", http.StatusForbidden)
 			return
 		}
-		writeLoginResponse(w, r, issuer, email, projects, wildcard)
+		writeLoginResponse(w, r, issuer, email, projects, wildcard, settings)
 	}
 }
 
@@ -742,8 +811,10 @@ func registerVerifyGoogle(mux *http.ServeMux, googleClientID string) {
 // authPasswordHandler serves POST /auth/password {email, password} against the
 // fixed AGENTKIT_TEST_LOGIN pair ("email:password"). TEST/DEV ONLY — it exists
 // so browser e2e can exercise the full login → project → session flow without
-// Google. The account is granted every project in the map.
-func authPasswordHandler(testEmail, testPassword string, pm userDirectory, issuer *devclaims.Issuer) http.HandlerFunc {
+// Google. The account is granted every project in the map, and — being an
+// implicit wildcard — is the operator on every one of them regardless of
+// settings (T20/A5 leaves wildcard unchanged).
+func authPasswordHandler(testEmail, testPassword string, pm userDirectory, settings *projectSettingsHolder, issuer *devclaims.Issuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Email    string `json:"email"`
@@ -761,7 +832,7 @@ func authPasswordHandler(testEmail, testPassword string, pm userDirectory, issue
 		}
 		// The test account is an implicit wildcard: every project, plus the
 		// ability to mint new ones (it exists for e2e and local dev).
-		writeLoginResponse(w, r, issuer, testEmail, pm.allProjects(), true)
+		writeLoginResponse(w, r, issuer, testEmail, pm.allProjects(), true, settings)
 	}
 }
 
@@ -769,8 +840,10 @@ func authPasswordHandler(testEmail, testPassword string, pm userDirectory, issue
 // the wildcard-login exchange: verifies the login token (HS256, customer="*")
 // and mints a project-scoped JWT for any well-formed project ID, including
 // ones no session carries yet. This is how a new project is "created": pick a
-// name, get a token, start a session in it.
-func authProjectTokenHandler(secret []byte, issuer *devclaims.Issuer) http.HandlerFunc {
+// name, get a token, start a session in it. Reaching here already proves the
+// login token was a wildcard grant, so every mint here is the operator
+// (T20/A5 leaves wildcard unchanged) regardless of settings.
+func authProjectTokenHandler(secret []byte, settings *projectSettingsHolder, issuer *devclaims.Issuer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Token   string `json:"token"`
@@ -798,8 +871,11 @@ func authProjectTokenHandler(secret []byte, issuer *devclaims.Issuer) http.Handl
 			return
 		}
 		// Reaching here already proved customer == projectWildcard (checked
-		// above), so this mint is always on behalf of an operator (§1.1).
-		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project}, true)
+		// above), so isOperator's wildcard shortcut always answers true here —
+		// still routed through settings.isOperator (T20/A5) for one code path.
+		minted, err := mintProjectTokens(r, issuer, email, []string{body.Project}, func(p string) bool {
+			return settings.isOperator(p, email, true)
+		})
 		if err != nil {
 			http.Error(w, "token generation failed: "+err.Error(), http.StatusInternalServerError)
 			return

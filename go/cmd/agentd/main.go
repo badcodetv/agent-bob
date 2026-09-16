@@ -708,17 +708,17 @@ func main() {
 		}
 		if googleClientID != "" {
 			root.HandleFunc("POST /auth/google", authGoogleHandler(
-				&googleVerifier{clientID: googleClientID}, logins, loginIssuer))
+				&googleVerifier{clientID: googleClientID}, logins, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] google login enabled (%d mapped account(s))", len(projectMapHolder.users()))
 		}
 		if testLogin != "" {
 			email, password, err := parseTestLogin(testLogin)
 			must(err)
-			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, loginIssuer))
+			root.HandleFunc("POST /auth/password", authPasswordHandler(email, password, logins, projectMapHolder, loginIssuer))
 			log.Printf("[agentd] WARNING: password test login enabled for %s — all projects granted; test/dev only", email)
 		}
 		// Wildcard-login exchange: mints tokens for new project IDs.
-		root.HandleFunc("POST /auth/project-token", authProjectTokenHandler(jwtSecret, loginIssuer))
+		root.HandleFunc("POST /auth/project-token", authProjectTokenHandler(jwtSecret, projectMapHolder, loginIssuer))
 	} else {
 		// /dev/token (DEV ONLY): issues a short-lived JWT for the bundled UI. Not
 		// registered when a login mode is on — it would mint valid demo tokens

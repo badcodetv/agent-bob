@@ -198,6 +198,64 @@ func TestParseProjectMapConnections(t *testing.T) {
 	}
 }
 
+// TestParseProjectMapOperators covers T20/A5: a project's "operators" list is
+// lowercased at parse, and every email in it must be covered by "users" for
+// that project (or the wildcard).
+func TestParseProjectMapOperators(t *testing.T) {
+	t.Run("a covered operator is lowercased and stored", func(t *testing.T) {
+		raw := `{
+		  "users":    {"richard@example.com": ["enc"]},
+		  "projects": {"enc": {"operators": ["Richard@Example.com"]}}
+		}`
+		s, err := parseProjectSettings([]byte(raw))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if got := s.projects["enc"].Operators; len(got) != 1 || got[0] != "richard@example.com" {
+			t.Fatalf("operators = %v", got)
+		}
+	})
+
+	t.Run("a wildcard user entry covers any project's operators list", func(t *testing.T) {
+		raw := `{
+		  "users":    {"kai@example.com": ["*"]},
+		  "projects": {"enc": {"operators": ["kai@example.com"]}}
+		}`
+		if _, err := parseProjectSettings([]byte(raw)); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+	})
+
+	t.Run("an operator with no covering users entry is a parse error naming it", func(t *testing.T) {
+		raw := `{
+		  "users":    {"richard@example.com": ["other-project"]},
+		  "projects": {"enc": {"operators": ["richard@example.com"]}}
+		}`
+		_, err := parseProjectSettings([]byte(raw))
+		if err == nil || !strings.Contains(err.Error(), "richard@example.com") {
+			t.Fatalf("err = %v, want an error naming richard@example.com", err)
+		}
+	})
+
+	t.Run("an operator email absent from users entirely is a parse error", func(t *testing.T) {
+		raw := `{"projects": {"enc": {"operators": ["nobody@example.com"]}}}`
+		_, err := parseProjectSettings([]byte(raw))
+		if err == nil || !strings.Contains(err.Error(), "nobody@example.com") {
+			t.Fatalf("err = %v, want an error naming nobody@example.com", err)
+		}
+	})
+
+	t.Run("the legacy flat form yields no operators", func(t *testing.T) {
+		s, err := parseProjectSettings([]byte(`{"a@b.c": ["p1"]}`))
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		if len(s.projects) != 0 {
+			t.Fatalf("projects = %v, want none for the flat form", s.projects)
+		}
+	})
+}
+
 // parseProjectMap keeps its old signature and old behaviour — it is what the
 // login handlers take — and simply reads the users half of whichever form
 // arrived.
@@ -245,6 +303,8 @@ func TestParseProjectMapObjectFormErrors(t *testing.T) {
 		{"connection missing auth type", `{"projects": {"wolf": {"connections": {"github": {"url": "https://x", "auth": {}}}}}}`, `project "wolf": connections: "github"`},
 		{"connection google_oauth missing fields", `{"projects": {"wolf": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_oauth"}}}}}}`, `project "wolf": connections: "gmail"`},
 		{"connection google_oauth with token_env", `{"projects": {"wolf": {"connections": {"gmail": {"url": "https://x", "auth": {"type": "google_oauth", "token_env": "X", "client_id_env": "A", "client_secret_env": "B", "refresh_token_env": "C"}}}}}}`, `project "wolf": connections: "gmail"`},
+		{"operator not covered by users", `{"users": {"richard@example.com": ["other"]}, "projects": {"enc": {"operators": ["richard@example.com"]}}}`, "richard@example.com"},
+		{"operator email empty", `{"projects": {"enc": {"operators": [""]}}}`, "operators"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -525,7 +585,7 @@ func TestAuthGoogleHandler(t *testing.T) {
 		"aud": "client-1", "email": "kai@example.com", "email_verified": "true",
 	})
 	defer srv.Close()
-	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, issuer)
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, nil, issuer)
 
 	t.Run("mapped email gets per-project tokens", func(t *testing.T) {
 		rec := httptest.NewRecorder()
@@ -552,7 +612,7 @@ func TestAuthGoogleHandler(t *testing.T) {
 			"aud": "client-1", "email": "stranger@example.com", "email_verified": "true",
 		})
 		defer srv2.Close()
-		h2 := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv2.URL}, pm, issuer)
+		h2 := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv2.URL}, pm, nil, issuer)
 		rec := httptest.NewRecorder()
 		h2(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
 		if rec.Code != http.StatusForbidden {
@@ -563,7 +623,7 @@ func TestAuthGoogleHandler(t *testing.T) {
 	t.Run("bad credential is 401", func(t *testing.T) {
 		srv2 := fakeTokeninfo(t, 400, map[string]string{"error": "invalid_token"})
 		defer srv2.Close()
-		h2 := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv2.URL}, pm, issuer)
+		h2 := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv2.URL}, pm, nil, issuer)
 		rec := httptest.NewRecorder()
 		h2(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
 		if rec.Code != http.StatusUnauthorized {
@@ -606,7 +666,7 @@ func TestAuthGoogleHandler_OperatorClaim(t *testing.T) {
 		"aud": "client-1", "email": "kai@example.com", "email_verified": "true",
 	})
 	defer srv.Close()
-	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, issuer)
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, pm, nil, issuer)
 
 	rec := httptest.NewRecorder()
 	h(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
@@ -622,6 +682,160 @@ func TestAuthGoogleHandler_OperatorClaim(t *testing.T) {
 	}
 	if value, present := decodeOperatorClaim(t, resp.Projects[0].Token, secret); present && value {
 		t.Fatalf("a non-wildcard Google account's token must not carry operator:true (present=%v value=%v)", present, value)
+	}
+}
+
+// TestProjectSettingsIsOperator is the unit-level table for T20/A5's core
+// rule: wildcard always wins, otherwise only a name on THIS project's
+// operators list counts, and a nil settings (no object-form config, or no
+// map at all) answers from wildcard alone.
+func TestProjectSettingsIsOperator(t *testing.T) {
+	s, err := parseProjectSettings([]byte(`{
+	  "users":    {"richard@example.com": ["enc"], "kai@example.com": ["*"]},
+	  "projects": {"enc": {"operators": ["richard@example.com"]}, "other": {}}
+	}`))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		project  string
+		email    string
+		wildcard bool
+		want     bool
+	}{
+		{"wildcard is always the operator", "enc", "kai@example.com", true, true},
+		{"wildcard on an unrelated project is still the operator", "other", "kai@example.com", true, true},
+		{"a listed operator on its project", "enc", "richard@example.com", false, true},
+		{"a listed operator on a DIFFERENT project is not", "other", "richard@example.com", false, false},
+		{"an unlisted user is not the operator", "enc", "stranger@example.com", false, false},
+		{"a project with no operators list grants nobody", "other", "kai@example.com", false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := s.isOperator(tt.project, tt.email, tt.wildcard); got != tt.want {
+				t.Fatalf("isOperator(%q, %q, %v) = %v, want %v", tt.project, tt.email, tt.wildcard, got, tt.want)
+			}
+		})
+	}
+
+	t.Run("a nil settings answers from wildcard alone", func(t *testing.T) {
+		var nilSettings *projectSettings
+		if nilSettings.isOperator("enc", "richard@example.com", false) {
+			t.Fatal("nil settings, non-wildcard: want false")
+		}
+		if !nilSettings.isOperator("enc", "richard@example.com", true) {
+			t.Fatal("nil settings, wildcard: want true")
+		}
+	})
+}
+
+// TestAuthGoogleHandler_PerProjectOperatorClaim is the HTTP-level acceptance
+// test for T20's ticket: a non-wildcard user listed in one project's
+// operators gets operator:true on THAT project's token and false on another
+// project's token from the same login (§1.1, A5). This is also what
+// GET /agent/whoami ends up reporting — that route (go/httpapi/whoami.go)
+// reads the very same claim off the identity apiAuthMiddleware built from the
+// token, so pinning the claim here pins whoami's answer too.
+func TestAuthGoogleHandler_PerProjectOperatorClaim(t *testing.T) {
+	secret := []byte("test-secret")
+	issuer := devclaims.NewWithTTL(secret, time.Hour)
+	env := map[string]string{"AGENTKIT_PROJECT_MAP": `{
+	  "users":    {"richard@example.com": ["enc", "other"]},
+	  "projects": {"enc": {"operators": ["richard@example.com"]}, "other": {}}
+	}`}
+	settings, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+
+	srv := fakeTokeninfo(t, 200, map[string]string{
+		"aud": "client-1", "email": "richard@example.com", "email_verified": "true",
+	})
+	defer srv.Close()
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, settings, settings, issuer)
+
+	rec := httptest.NewRecorder()
+	h(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var resp loginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Projects) != 2 {
+		t.Fatalf("projects = %v, want 2", resp.Projects)
+	}
+	for _, p := range resp.Projects {
+		value, present := decodeOperatorClaim(t, p.Token, secret)
+		switch p.ID {
+		case "enc":
+			if !present || !value {
+				t.Fatalf("project enc: operator present=%v value=%v, want true", present, value)
+			}
+		case "other":
+			if present && value {
+				t.Fatalf("project other: operator present=%v value=%v, want false", present, value)
+			}
+		default:
+			t.Fatalf("unexpected project %q", p.ID)
+		}
+	}
+}
+
+// TestAuthGoogleHandler_OperatorReloadChangesNextLogin exercises A6 for the
+// operator claim specifically: adding an email to a project's operators list
+// and reloading (no restart, no re-registering the handler) changes what the
+// very next login for that same handler mints.
+func TestAuthGoogleHandler_OperatorReloadChangesNextLogin(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "projects.json")
+	write := func(raw string) {
+		if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	write(`{"users": {"richard@example.com": ["enc"]}, "projects": {"enc": {}}}`)
+	env := map[string]string{"AGENTKIT_PROJECT_MAP_FILE": path}
+	settings, err := newProjectSettingsHolder(func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatalf("newProjectSettingsHolder: %v", err)
+	}
+
+	secret := []byte("test-secret")
+	issuer := devclaims.NewWithTTL(secret, time.Hour)
+	srv := fakeTokeninfo(t, 200, map[string]string{
+		"aud": "client-1", "email": "richard@example.com", "email_verified": "true",
+	})
+	defer srv.Close()
+	h := authGoogleHandler(&googleVerifier{clientID: "client-1", tokeninfoURL: srv.URL}, settings, settings, issuer)
+
+	login := func() (present, value bool) {
+		rec := httptest.NewRecorder()
+		h(rec, httptest.NewRequest(http.MethodPost, "/auth/google", strings.NewReader(`{"credential":"c"}`)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+		}
+		var resp loginResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || len(resp.Projects) != 1 {
+			t.Fatalf("decode: %v %s", err, rec.Body)
+		}
+		return decodeOperatorClaim(t, resp.Projects[0].Token, secret)
+	}
+
+	if present, value := login(); present && value {
+		t.Fatal("before the reload, richard is not yet an operator")
+	}
+
+	write(`{"users": {"richard@example.com": ["enc"]}, "projects": {"enc": {"operators": ["richard@example.com"]}}}`)
+	if ok := settings.reload(func(string, ...any) {}); !ok {
+		t.Fatal("reload reported failure")
+	}
+
+	if present, value := login(); !present || !value {
+		t.Fatalf("after the reload, want operator:true, got present=%v value=%v", present, value)
 	}
 }
 
@@ -809,7 +1023,7 @@ func TestAuthPasswordHandler(t *testing.T) {
 		"kai@example.com":  {"apples-oranges"},
 		"test@example.com": {"pears-plums"},
 	}
-	h := authPasswordHandler("test@example.com", "bob-e2e", pm, issuer)
+	h := authPasswordHandler("test@example.com", "bob-e2e", pm, nil, issuer)
 
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -876,7 +1090,7 @@ func TestAuthProjectTokenHandler(t *testing.T) {
 	pm := projectMap{"dev@example.com": {"*"}, "fixed@example.com": {"p1"}}
 
 	// Obtain a real wildcard login token via the password handler.
-	login := authPasswordHandler("dev@example.com", "pw", pm, issuer)
+	login := authPasswordHandler("dev@example.com", "pw", pm, nil, issuer)
 	rec := httptest.NewRecorder()
 	login(rec, httptest.NewRequest(http.MethodPost, "/auth/password", strings.NewReader(`{"email":"dev@example.com","password":"pw"}`)))
 	var loginResp loginResponse
@@ -884,7 +1098,7 @@ func TestAuthProjectTokenHandler(t *testing.T) {
 		t.Fatalf("login: %v %s", err, rec.Body)
 	}
 
-	h := authProjectTokenHandler(secret, issuer)
+	h := authProjectTokenHandler(secret, nil, issuer)
 	post := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
 		h(rec, httptest.NewRequest(http.MethodPost, "/auth/project-token", strings.NewReader(body)))
@@ -931,7 +1145,7 @@ func TestAuthProjectTokenHandler(t *testing.T) {
 
 	t.Run("rejects a token signed with the wrong secret", func(t *testing.T) {
 		otherIssuer := devclaims.NewWithTTL([]byte("other-secret"), time.Hour)
-		other := authPasswordHandler("dev@example.com", "pw", pm, otherIssuer)
+		other := authPasswordHandler("dev@example.com", "pw", pm, nil, otherIssuer)
 		rec := httptest.NewRecorder()
 		other(rec, httptest.NewRequest(http.MethodPost, "/auth/password", strings.NewReader(`{"email":"dev@example.com","password":"pw"}`)))
 		var otherResp loginResponse

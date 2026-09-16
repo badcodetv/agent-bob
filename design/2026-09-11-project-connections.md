@@ -1123,6 +1123,25 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
 - (T19) A proxy request whose `Status` says connected but whose `Token` then returns
   `ErrNotConnected` (a disconnect landing between the two) gets the same 503 not-connected body,
   not a 502.
+- (T20) The ticket's file list (`googleauth.go`, `googleauth_test.go`, `auth_test.go`) does not
+  mention `main.go`, but `mintProjectTokens`, `writeLoginResponse`, `authGoogleHandler`,
+  `authPasswordHandler` and `authProjectTokenHandler` all gained a new parameter, and `main.go` is
+  the only place outside those two files that calls any of them — `go build ./...` would not stay
+  green without updating its three call sites to pass `projectMapHolder` through. Treated as
+  implied by "Apply at both mint sites … reading the live `projectSettingsHolder`": there is
+  nowhere else to get that holder from at the call sites. `auth_test.go` needed no change — it
+  never calls the login handlers, only asserts `identity.Operator` from tokens built directly.
+- (T20) `authProjectTokenHandler`'s mint is always on behalf of a wildcard login (checked just
+  above the mint), so `settings.isOperator(p, email, true)` always short-circuits to `true` there
+  regardless of the map. Routed through it anyway, rather than passing a bare `true` as before, so
+  there is exactly one code path that decides the operator claim and a future change to
+  `isOperator` cannot silently miss this call site.
+- (T20) No new test mounts `GET /agent/whoami` itself (it lives in `go/httpapi`, a different
+  package with its own test file, and pulling it into `cmd/agentd`'s test binary just to re-prove
+  "a JWT claim survives being read back" would duplicate `httpapi/whoami_test.go` rather than test
+  anything T20 touches). The acceptance criterion is satisfied by construction: `whoami.go` reads
+  `identity.Operator`, which is the same `devclaims.OperatorClaim` this ticket's tests decode
+  directly off the minted token — see `TestAuthGoogleHandler_PerProjectOperatorClaim`'s comment.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1633,8 +1652,22 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'ProjectMap|ProjectSettings|Login|Operator|Whoami|Auth' -count=1` → PASS.
 - **Depends on:** —
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `projectConfig.Operators` + validation in `parseProjectSettingsObjectForm` (a new
+  `projectMap.coversProject` helper does the users-entry check); `(*projectSettings).isOperator`
+  exactly as specified, plus a thin `(*projectSettingsHolder).isOperator` that reads through
+  `Get()` for the reload case — both are nil-receiver-safe, so a login with no object-form config
+  at all still works. `mintProjectTokens` now takes `isOperator func(project string) bool` instead
+  of one bool; `writeLoginResponse`, `authGoogleHandler`, `authPasswordHandler` and
+  `authProjectTokenHandler` all gained a `settings *projectSettingsHolder` parameter (existing
+  tests pass `nil`, which is correct: no object-form config, so no non-wildcard operators — see
+  Discovered Issues for why `main.go` needed touching even though it wasn't in the ticket's file
+  list). `GET /agent/whoami` needed no code change: it already surfaces `identity.Operator`, which
+  is minted from the same claim this ticket now sets per project, so pinning the claim at the
+  token level pins whoami's answer too — confirmed by reasoning through `go/httpapi/whoami.go`,
+  not by a new whoami-mounted test. Validation ran green; also `go build ./... && go vet ./...`
+  and `go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1` (agentdb without
+  `AGENTKIT_TEST_POSTGRES_URL`, so its live-Postgres cases skipped as usual).
 
 ### T21: OAuth state, pending connects, authorize URL   [Status: pending | Model: opus]
 - **Scope:** create `go/cmd/agentd/googleconnect_state.go`:
