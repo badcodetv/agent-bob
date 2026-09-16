@@ -1127,8 +1127,10 @@ the database, a config event, a log line, git, or a session container.
   that issued it, and the redirect URI is registered on that one client, so letting the project
   map name another client would only create a way to break it.
 - **A3. Scopes are fixed in code, not in the map.**
-  `openid email https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.compose
-  https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/spreadsheets`.
+  `openid email https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.readonly
+  https://www.googleapis.com/auth/gmail.compose https://www.googleapis.com/auth/documents
+  https://www.googleapis.com/auth/spreadsheets`. (`gmail.readonly` added 2026-09-16 on Kai's answer
+  to open question 1: Bob may read ENC's inbox as well as write drafts.)
   `openid email` are added to Kai's four because the ID token is how the account email is
   recorded ("Connected as …") without another API call. The list lives in one Go constant
   (`googleConnectScopes`). A project-map edit cannot widen what Richard is asked to approve.
@@ -1465,7 +1467,7 @@ then strips the query with `history.replaceState`.
   Key-shape errors are checked against any 6-character run of the input. Validation (`-race`,
   plus the sealer tests at `-count=200`), `go build ./...` and `go vet ./...` pass.
 
-### T17: `connection_credentials` table, store methods, config log   [Status: pending | Model: sonnet]
+### T17: `connection_credentials` table, store methods, config log   [Status: done | Model: sonnet]
 - **Scope:** migration `052_connection_credentials` (addendum SQL); `agentdb.ConnectionCredential`
   and the four store methods; actions `connection_connect`/`connection_disconnect` appended to
   `ConfigActions`; `EntityConnection` added to `EntityKinds` and `entityKindForAction`;
@@ -1834,6 +1836,12 @@ appear from the next session) and its §5 *Google* keeps the hand-held refresh-t
 alternative. T15 gains an offline Go test of the whole connect flow and a mock-stack UI check.
 
 ### Open questions for Kai (the only ones)
+
+> **Answered by Kai, 2026-09-16.** (1) Yes: add `gmail.readonly`; A3 and T21's constant carry it,
+> and any T21/T23 test expecting exactly `gmail.compose` must expect both Gmail scopes. Sending
+> stays unavailable only because Google's Gmail MCP server has no send tool — T28 re-confirms that.
+> (2) Yes: Richard is an operator for ENC via the `operators` list (A5 as written), accepting the
+> budget authority that comes with it.
 
 1. **Gmail scope.** `gmail.compose` lets Bob create drafts but, as far as Google documents it,
    not read or search the inbox; the Gmail MCP server lists `gmail.readonly` + `gmail.compose`
