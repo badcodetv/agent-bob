@@ -737,7 +737,7 @@ One test (TestRenderTreeCreateParseSeesTheWholeFile) and two other pinned-list a
 
 Merge step: merged into feat/project-connections (after T9) with no conflicts; `go build ./...`, `go vet ./...`, the Validation command, and `go test ./gitproj/... ./cmd/agentd/...` (live Postgres, bob_mt11) all PASS on the merged tree.
 
-### T12: Wire `/connect/` into agentd   [Status: pending | Model: sonnet]
+### T12: Wire `/connect/` into agentd   [Status: done | Model: sonnet]
 - **Scope:** **Boot order first:** today the session-context provider is built at `main.go:250`,
   the runner at `:317` and `httpapi.New` at `:368`, but the project map is only loaded at `:431`.
   Move `loadProjectSettingsOptional` (it only reads env) and the Registry build **above `:247`** so
