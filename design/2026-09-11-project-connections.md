@@ -1428,7 +1428,7 @@ then strips the query with `history.replaceState`.
 
 ### Tickets
 
-### T16: Sealer — key parsing and AES-256-GCM   [Status: pending | Model: sonnet]
+### T16: Sealer — key parsing and AES-256-GCM   [Status: done | Model: sonnet]
 - **Scope:** create `go/connections/sealed.go` with `ParseKey`, `Sealer`, `NewSealer`, `KeyID`,
   `Seal`, `Open`, `AccountAAD`, `StateKey` exactly as in the addendum's Interfaces. Standard
   library only (`crypto/aes`, `crypto/cipher`, `crypto/rand`, `crypto/hmac`, `crypto/sha256`).
