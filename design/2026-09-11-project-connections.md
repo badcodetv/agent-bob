@@ -1166,6 +1166,26 @@ Merge step: merged into feat/project-connections (after T9) with no conflicts; `
   `take`) is what keeps a wrong-browser callback from consuming the entry; `pendingConnects` itself
   cannot tell. `put` refuses with `errPendingConnectsFull` (a user-safe sentence) at 256 live
   entries; T23 should answer that as 503, not 500.
+- (T22) `Token` re-reads `GetConnectionCredential` on every call rather than trusting a cached
+  "connected" flag — this is deliberate (it is the only way a reconnect's new `connected_at` or a
+  disconnect is noticed without waiting on T23's `Invalidate`), but it means `Token` makes one store
+  round trip per call even when the cached `TokenSource` is reused, unlike `Status` which is
+  cache-only most of the time. Worth knowing if `Token` ever ends up on a very hot path — today it
+  is once per outbound MCP call through `Registry.accountToken`, which already does its own
+  per-request work, so this seemed fine.
+- (T22) The 20-concurrent-callers guarantee depends on two things holding together: this file
+  builds and caches the `TokenSource` while holding `googleAccounts.mu` (so concurrent callers for
+  the same `(project, account, connected_at)` always get the same object), and `GoogleRefresh`'s
+  underlying `oauth2.ReuseTokenSource` holds its own lock across the whole exchange (T3's finding).
+  Removing either lock passes `go test` without `-race` but fails under `-race` (confirmed by
+  mutation) or, for the cache lock, could pass even under `-race` on a lucky interleaving while
+  still doing N exchanges — the acceptance criterion is really "one upstream request", which the
+  test asserts directly, not just "no data race".
+- (T22) "Logs once" for a persistent store error is implemented as a per-`(project,account)` boolean
+  cleared on the next successful read, not a global rate limit — a second account's store errors
+  still log independently, and the same account logs again after one success followed by a fresh
+  failure. Seemed like the more useful reading of the ticket text than a single agentd-wide
+  once-ever log.
 
 ## Addendum 2026-09-16: Connect Google button (decision A)
 
@@ -1734,7 +1754,7 @@ then strips the query with `history.replaceState`.
   `go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1` pass (agentdb live cases
   skipped, no `AGENTKIT_TEST_POSTGRES_URL`).
 
-### T22: Store-backed `AccountSource`   [Status: pending | Model: sonnet]
+### T22: Store-backed `AccountSource`   [Status: done | Model: sonnet]
 - **Scope:** create `go/cmd/agentd/googleaccounts.go`: `googleAccounts` implementing
   `connections.AccountSource` over a narrow store interface (`GetConnectionCredential`) and the
   `Sealer`. `Status` reads a per-(project, account) cache entry refreshed at most every 30 s
@@ -1756,8 +1776,23 @@ then strips the query with `history.replaceState`.
 - **TDD:** yes
 - **Validation:** `cd go && go test ./cmd/agentd/ -run 'GoogleAccounts' -count=1 -race` → PASS.
 - **Depends on:** T16, T17, T19, T21 (config struct)
-- [ ] done
-- Notes:
+- [x] done
+- Notes: `go/cmd/agentd/googleaccounts.go` + `_test.go`. `googleAccounts` holds a `connectionCredentialStore`
+  (narrow interface, just `GetConnectionCredential` — the T13 nil-store trap means T24 must
+  construct this only when `agentDB != nil` and never box a nil `*agentdb.Store` into it) and the
+  `Sealer` from `googleConnectConfig`. `Status` caches per-`acctKey` for 30s (2s-timeout background
+  read); a store error keeps the last cached status and logs once (a per-key `errLogged` flag,
+  cleared on the next success) rather than repeating every call. `Token` always re-reads the row
+  (cheap, and the only way it notices a reconnect/disconnect without waiting on `Invalidate`) but
+  caches the built `connections.TokenSource` per `(project, account)` keyed additionally by
+  `connected_at`, built and stored under the same lock so concurrent callers for one credential
+  always land on the one cached source — `GoogleRefresh`'s own internal reuse lock then collapses
+  their calls into one upstream request (confirmed with `-race` and a 20-goroutine test). Tests
+  mutation-checked: removing the `KeyID` comparison and removing the lock around the token-source
+  cache both turn a test red (the latter as a `-race` failure, not a logic failure — see Discovered
+  Issues). Validation ran exactly as specified plus the full gate
+  (`go build ./... && go vet ./... && go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1`,
+  agentdb's live-Postgres cases skipped as usual): all green.
 
 ### T23: The four HTTP routes   [Status: pending | Model: opus]
 - **Scope:** create `go/cmd/agentd/googleconnect.go` implementing the addendum's route table:
