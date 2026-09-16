@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// DK2: the Desk — the three stacks on the spine, the "since you last looked"
+// DK2: the Desk — the needs-you stacks on the spine, the team view (2026-09-16), the "since you last looked"
 // mark in localStorage, the first-run state, and the degraded render when the
 // attention route is not mounted.
 
@@ -17,6 +17,9 @@ import { GuideProvider, type GuideParagraphMap } from '../guide/GuideProvider.js
 // fixture newer than today would never fall behind the mark.
 const NOW = 1_700_000_000
 const NOW_MS = NOW * 1000
+
+/** The fixture's one config event, as the Activity fold words it. */
+const CHANGE_HEADLINE = 'email-reviewer rewrote email-answerer'
 
 let originalFetch: typeof globalThis.fetch
 let workers: Record<string, unknown>[]
@@ -224,10 +227,10 @@ function renderDeskWithGuide(
   )
 }
 
-describe('the three stacks', () => {
+describe('what needs you', () => {
   it('asks first, with the sentence the worker wrote and how long it has waited', async () => {
     renderDesk()
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     // The section mounts before its rows do — awaiting the region only proves
     // the heading is there, and its count still reads 0. Every first assertion
     // inside a region has to be a findBy for that reason; the ones after it can
@@ -239,15 +242,10 @@ describe('the three stacks', () => {
     expect(within(asks).getByText(/reply in its thread, dismiss it here/)).toBeInTheDocument()
   })
 
-  it('reads the changes as a changelog: who, what, and why', async () => {
+  it('lists what happened, newest first, including a worker rewriting another', async () => {
     renderDesk()
-    const changes = await screen.findByRole('region', { name: 'Changes' })
-    expect(
-      await within(changes).findByText('email-reviewer rewrote email-answerer'),
-    ).toBeInTheDocument()
-    expect(
-      within(changes).getByText('answers kept omitting the ticket reference'),
-    ).toBeInTheDocument()
+    const recent = await screen.findByRole('region', { name: 'What happened' })
+    expect(await within(recent).findByText(CHANGE_HEADLINE)).toBeInTheDocument()
   })
 
   it('collects the three failure shapes, each with the sentence the docs wrote', async () => {
@@ -291,7 +289,7 @@ describe('the three stacks', () => {
   it('opens the thread through the host, rather than navigating itself', async () => {
     const onOpenSession = vi.fn()
     renderDesk({ onOpenSession })
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     await userEvent.click(await within(asks).findByRole('button', { name: 'open thread to answer' }))
     expect(onOpenSession).toHaveBeenCalledWith('sess-1')
   })
@@ -321,7 +319,7 @@ describe('notices and dismissing', () => {
     expect(await within(team).findByText('note from architect')).toBeInTheDocument()
     expect(within(team).getByText(/created four workers/)).toBeInTheDocument()
     expect(within(team).getByRole('button', { name: 'Got it' })).toBeInTheDocument()
-    const asks = screen.getByRole('region', { name: 'Asks' })
+    const asks = screen.getByRole('region', { name: 'Waiting on you' })
     expect(within(asks).queryByText(/created four workers/)).toBeNull()
   })
 
@@ -362,9 +360,12 @@ describe('notices and dismissing', () => {
       return inner(url, init)
     }) as typeof globalThis.fetch
     renderDesk()
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     await userEvent.click(await within(asks).findByRole('button', { name: 'Dismiss' }))
-    await waitFor(() => expect(within(asks).queryByText(/Ridley invoice query/)).toBeNull())
+    // The only ask gone, the stack goes with it — a Desk with nothing waiting
+    // draws no empty "Waiting on you" section.
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Waiting on you' })).toBeNull())
+    expect(screen.queryByText(/Ridley invoice query/)).toBeNull()
     expect(posted).toEqual(['/agent/attention-requests/a1/resolve'])
   })
 
@@ -384,27 +385,6 @@ describe('notices and dismissing', () => {
 })
 
 describe('since you last looked', () => {
-  it('hides changes older than the stored mark', async () => {
-    window.localStorage.setItem(deskLastSeenKey('acme'), String(NOW_MS))
-    renderDesk()
-    const changes = await screen.findByRole('region', { name: 'Changes' })
-    await waitFor(() =>
-      expect(
-        within(changes).getByText('Nothing has changed since you last looked.'),
-      ).toBeInTheDocument(),
-    )
-  })
-
-  it('stores the mark per project when the operator marks them seen', async () => {
-    renderDesk()
-    await screen.findByText('email-reviewer rewrote email-answerer')
-    await userEvent.click(screen.getByRole('button', { name: 'Mark these changes as seen' }))
-    await waitFor(() => expect(readDeskLastSeen('acme')).toBeGreaterThan(0))
-    // Another project's Desk is untouched — the mark is keyed, not global.
-    expect(readDeskLastSeen('other')).toBe(0)
-    expect(screen.getByText('Nothing has changed since you last looked.')).toBeInTheDocument()
-  })
-
   it('treats unreadable or rubbish storage as "never looked"', () => {
     window.localStorage.setItem(deskLastSeenKey('acme'), 'yesterday')
     expect(readDeskLastSeen('acme')).toBe(0)
@@ -417,7 +397,7 @@ describe('degraded and empty', () => {
   it('still shows the asks when the attention route is not mounted, and says why they are wordless', async () => {
     attentionStatus = 501
     renderDesk()
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     expect(
       await within(asks).findByText('email-answerer · awaiting_human · 2h 40m'),
     ).toBeInTheDocument()
@@ -431,7 +411,7 @@ describe('degraded and empty', () => {
   it('never says nothing is waiting when the attention route failed', async () => {
     attentionStatus = 500
     renderDesk()
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     expect(
       await within(asks).findByText('email-answerer · awaiting_human · 2h 40m'),
     ).toBeInTheDocument()
@@ -463,7 +443,7 @@ describe('degraded and empty', () => {
     expect(await screen.findByText(/workers: connection refused/)).toBeInTheDocument()
     expect(screen.queryByText('This project has no workers yet')).toBeNull()
     // The Desk itself is still there, with what did load.
-    expect(await screen.findByRole('region', { name: 'Asks' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Waiting on you' })).toBeInTheDocument()
   })
 
   // The same class one line down: three empty stacks after three failed loads
@@ -538,16 +518,17 @@ describe('degraded and empty', () => {
     expect(screen.getByRole('button', { name: 'Finish setting up this project' })).toBeInTheDocument()
   })
 
-  it('a quiet Desk in a working project says the fleet ran and nobody needed you', async () => {
+  it('a quiet Desk draws no needs-you stacks at all — the team comes first', async () => {
     deliveries = []
     events = []
     schedules = []
     configEvents = []
     attentionRequests = []
     renderDesk()
-    expect(await screen.findByText(/nobody needed you/)).toBeInTheDocument()
-    expect(screen.getByText('Nothing is waiting on you.')).toBeInTheDocument()
-    expect(screen.getByText('Nothing has failed.')).toBeInTheDocument()
+    expect(await screen.findByTestId('desk-worker-email-answerer')).toBeInTheDocument()
+    expect(screen.queryByTestId('desk-needs-you')).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Waiting on you' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Trouble' })).toBeNull()
   })
 })
 
@@ -558,48 +539,26 @@ describe('degraded and empty', () => {
 describe('liveness', () => {
   it('hangs each stack off a role="log", not a role="feed"', async () => {
     renderDesk()
-    await screen.findByText('email-reviewer rewrote email-answerer')
+    await screen.findByText(CHANGE_HEADLINE)
     const logs = screen.getAllByRole('log')
     expect(logs.map((l) => l.getAttribute('aria-label'))).toEqual(
-      expect.arrayContaining(['Asks', 'Changes', 'Trouble']),
+      expect.arrayContaining(['Waiting on you', 'What happened', 'Trouble']),
     )
     // `feed` drags in an article-navigation keyboard contract we do not
     // implement; `log` is chronological and implicitly polite.
     expect(screen.queryAllByRole('feed')).toHaveLength(0)
   })
 
-  it('draws a labelled waterline with the already-read changes beneath it', async () => {
-    // A mark AFTER the fixture's config events: everything is "already read",
-    // so the line has something to divide.
-    window.localStorage.setItem(deskLastSeenKey('acme'), String(NOW_MS))
-    renderDesk()
-    const changes = await screen.findByRole('region', { name: 'Changes' })
-    // The window is still the window — the empty line stays honest…
-    expect(
-      within(changes).getByText('Nothing has changed since you last looked.'),
-    ).toBeInTheDocument()
-    // …and the divider now says WHEN, with the change underneath it.
-    const rule = await within(changes).findByRole('separator')
-    expect(rule.getAttribute('aria-label')).toMatch(/^New since /)
-    expect(within(changes).getByText('email-reviewer rewrote email-answerer')).toBeInTheDocument()
-  })
-
-  it('carries no waterline on a first visit — a line above everything says nothing', async () => {
-    renderDesk()
-    const changes = await screen.findByRole('region', { name: 'Changes' })
-    expect(within(changes).queryByRole('separator')).toBeNull()
-  })
-
   it('offers the pause toggle exactly where something is actually polling', async () => {
     renderDesk()
-    await screen.findByText('email-reviewer rewrote email-answerer')
+    await screen.findByText(CHANGE_HEADLINE)
     // Nothing polls by default, so there is nothing to pause and no switch.
     expect(screen.queryByRole('checkbox', { name: 'Pause live updates' })).toBeNull()
   })
 
   it('shows the toggle when the host asked for a live Desk', async () => {
     renderDesk({ refreshMs: 60_000 })
-    await screen.findByText('email-reviewer rewrote email-answerer')
+    await screen.findByText(CHANGE_HEADLINE)
     expect(screen.getByRole('checkbox', { name: 'Pause live updates' })).toBeInTheDocument()
   })
 
@@ -624,14 +583,14 @@ describe('liveness', () => {
 })
 
 describe('firsts — the Desk narrates them once (design §3 G4)', () => {
-  it('narrates the first rewrite on its change row, and the first ask on its row', async () => {
+  it('narrates the first rewrite on its row in What happened, and the first ask on its row', async () => {
     renderDesk()
-    const changes = await screen.findByRole('region', { name: 'Changes' })
+    const recent = await screen.findByRole('region', { name: 'What happened' })
     expect(
-      within(changes).getByTestId('first-first-rewrite'),
+      await within(recent).findByTestId('first-first-rewrite'),
     ).toHaveTextContent("This is the project's first rewrite.")
 
-    const asks = await screen.findByRole('region', { name: 'Asks' })
+    const asks = await screen.findByRole('region', { name: 'Waiting on you' })
     expect(within(asks).getByTestId('first-first-ask')).toHaveTextContent(
       "This is the project's first ask.",
     )
@@ -695,7 +654,7 @@ describe('firsts — the Desk narrates them once (design §3 G4)', () => {
   it('never narrates a kind twice per project: a seen-set from a previous visit silences it', async () => {
     writeFirstsSeen('acme', ['first-rewrite', 'first-ask'])
     renderDesk()
-    await screen.findByText('email-reviewer rewrote email-answerer')
+    await screen.findByText(CHANGE_HEADLINE)
     expect(screen.queryByTestId('first-first-rewrite')).toBeNull()
     expect(screen.queryByTestId('first-first-ask')).toBeNull()
   })
@@ -714,7 +673,7 @@ describe('firsts — the Desk narrates them once (design §3 G4)', () => {
     // contradict it.
     configEvents = []
     renderDesk()
-    await screen.findByRole('region', { name: 'Changes' })
+    await screen.findByRole('region', { name: 'What happened' })
     expect(screen.queryByTestId('first-first-rewrite')).toBeNull()
   })
 })
@@ -724,40 +683,89 @@ function readWatermarkOf(key: string): string[] {
   return raw ? (JSON.parse(raw) as string[]) : []
 }
 
-describe('DeskPage — Written down', () => {
-  it("shows the team's newest memories with who wrote them, short, and a way to the rest", async () => {
-    memories = [
+describe('the team', () => {
+  beforeEach(() => {
+    workers = [
       {
-        id: 'm2',
+        name: 'email-answerer',
         project: 'acme',
-        labels: { kind: 'summary', name: 'review-2026-w37' },
-        snippet: Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'),
-        score: 0,
-        created_by_worker: 'weekly-review',
-        created_by_session: 'sess-4',
-        created_at: NOW_MS - 1000,
+        description: 'Answers customer email in the house style.',
+        system_prompt: 'Answer.',
+        enabled: true,
       },
+      {
+        name: 'nightly-sweep',
+        project: 'acme',
+        description: '',
+        system_prompt: '# Sweep\n\nYou tidy the inbox every night. Then you stop.',
+        enabled: true,
+      },
+      { name: 'interviewer', project: 'acme', system_prompt: 'Interview.', enabled: false },
     ]
-    const onOpenMemory = vi.fn()
-    const onOpenSession = vi.fn()
-    renderDesk({ onOpenMemory, onOpenSession })
-    const region = await screen.findByRole('region', { name: 'Written down' })
-    const note = await within(region).findByTestId('desk-note')
-    expect(note).toHaveTextContent('summary · review-2026-w37')
-    expect(note).toHaveTextContent('weekly-review')
-    // Clamped: the fifth line is behind "Show all".
-    expect(note).not.toHaveTextContent('line 5')
-    await userEvent.click(within(note).getByRole('button', { name: 'Show all' }))
-    expect(note).toHaveTextContent('line 12')
-    await userEvent.click(within(note).getByRole('button', { name: 'open the session that wrote it' }))
-    expect(onOpenSession).toHaveBeenCalledWith('sess-4')
-    await userEvent.click(within(region).getByRole('button', { name: 'See everything written down' }))
-    expect(onOpenMemory).toHaveBeenCalled()
   })
 
-  it('says plainly when nothing has been written down', async () => {
+  it('shows each worker with what it is for and what wakes it', async () => {
     renderDesk()
-    const region = await screen.findByRole('region', { name: 'Written down' })
-    expect(region).toHaveTextContent('Nothing has been written down yet.')
+    const answerer = await screen.findByTestId('desk-worker-email-answerer')
+    expect(answerer).toHaveTextContent('Answers customer email in the house style.')
+    expect(answerer).toHaveTextContent('when email.received happens')
+    // No description: the prompt's first sentence stands in, heading skipped.
+    const sweep = screen.getByTestId('desk-worker-nightly-sweep')
+    expect(sweep).toHaveTextContent('You tidy the inbox every night.')
+    expect(sweep).not.toHaveTextContent('Then you stop.')
+    expect(sweep).toHaveTextContent('every day at 02:00 (off)')
+  })
+
+  it('starts a chat with a worker through the host, and says so when that fails', async () => {
+    const onChatWithWorker = vi.fn().mockRejectedValueOnce(new Error('worker is disabled'))
+    renderDesk({ onChatWithWorker })
+    const answerer = await screen.findByTestId('desk-worker-email-answerer')
+    await userEvent.click(within(answerer).getByRole('button', { name: 'Chat to email-answerer' }))
+    expect(onChatWithWorker).toHaveBeenCalledWith('email-answerer')
+    expect(await within(answerer).findByRole('alert')).toHaveTextContent('worker is disabled')
+  })
+
+  it('offers no chat to a switched-off worker, and no chat at all without a host handler', async () => {
+    const { unmount } = renderDesk({ onChatWithWorker: vi.fn() })
+    const off = await screen.findByTestId('desk-worker-interviewer')
+    expect(off).toHaveTextContent('switched off')
+    expect(within(off).queryByRole('button', { name: /Chat to/ })).toBeNull()
+    unmount()
+
+    renderDesk()
+    await screen.findByTestId('desk-worker-email-answerer')
+    expect(screen.queryByRole('button', { name: /Chat to/ })).toBeNull()
+  })
+
+  it('lists every clock and handler in words, with the raw rule beside it', async () => {
+    const onOpenWorker = vi.fn()
+    renderDesk({ onOpenWorker })
+    const clocks = await screen.findByTestId('desk-clocks')
+    expect(await within(clocks).findByText('Every day at 02:00')).toBeInTheDocument()
+    expect(within(clocks).getByText('0 2 * * *')).toBeInTheDocument()
+    expect(within(clocks).getByText('off')).toBeInTheDocument()
+    const handlers = screen.getByTestId('desk-handlers')
+    expect(within(handlers).getByText('When email.received happens')).toBeInTheDocument()
+    await userEvent.click(within(handlers).getByRole('button', { name: 'email-answerer' }))
+    expect(onOpenWorker).toHaveBeenCalledWith('email-answerer')
+  })
+
+  it('shows at most ten things in What happened, with a way to the rest', async () => {
+    configEvents = Array.from({ length: 14 }, (_, i) => ({
+      id: `c${i}`,
+      project: 'acme',
+      actor_worker: '',
+      actor_session: '',
+      action: 'worker_update',
+      payload: { name: 'email-answerer' },
+      rationale: `change ${i}`,
+      created_at: NOW_MS - 1000 * (i + 1),
+    }))
+    const onOpenActivity = vi.fn()
+    renderDesk({ onOpenActivity })
+    const recent = await screen.findByRole('region', { name: 'What happened' })
+    await waitFor(() => expect(within(recent).getAllByRole('listitem')).toHaveLength(10))
+    await userEvent.click(within(recent).getByRole('button', { name: 'All activity →' }))
+    expect(onOpenActivity).toHaveBeenCalled()
   })
 })

@@ -1,10 +1,12 @@
 // DeskPage — the landing view (decision K1; design §5.2).
 //
-// Three stacks, in the order the morning is actually read: *does anything want
-// me? what changed? what broke?* Everything on the page is read-only and every
-// item's action is to open the thing it names — this is a query, not an
-// approval queue, and it holds no state of its own beyond one `localStorage`
-// high-water mark for "since you last looked".
+// Read top to bottom: *does anything need me* (notes, asks, failures — drawn
+// only when there are some), *who is on the team and what is each one for*
+// (with a way to chat to any of them), *what just happened*, and *what wakes
+// the team*. That order is the 2026-09-16 dashboard redesign (layout A), which
+// replaced the "Written down" and "Changes" stacks: the Desk had become too
+// busy to read at a glance, and both lists have their own pages (Memory,
+// Activity). Everything is read-only except "Chat to …", which the host starts.
 //
 // The empty Desk is the FIRST-RUN state: a project with no workers is not shown
 // "nothing to show", it is shown the two ways in: the org chart the topology
@@ -15,43 +17,36 @@
 // It exists because a young project's clocks are daily and the Desk is where
 // a human watches what a cycle does.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Alert, Box, Button, Chip, Link, Paper, Stack, Typography } from '@mui/material'
 import useDesk, { type UseDeskOptions } from '../useDesk.js'
 import {
   DESK_ASKS_CAVEAT,
   type DeskAsk,
   type DeskNotice,
-  deskNotes,
-  type DeskChange,
   type DeskFirstRecord,
-  type DeskNote,
   type DeskTrouble,
 } from '../desk.js'
+import type { ActivityRecord } from '../activity.js'
 import { formatTimestamp } from '../events.js'
-import { formatConfigTimestamp } from '../configLog.js'
 import { SpineGlyph, SpineRail, SpineRow } from '../spine.js'
-import { newItemsSummary, waterlineLabel } from '../watermark.js'
-import {
-  highlightSx,
-  highlightMarker,
-  NEW_MARKER_LABEL,
-  type HighlightTone,
-} from '../feedhighlight.js'
+import { newItemsSummary } from '../watermark.js'
+import { highlightSx, highlightMarker, NEW_MARKER_LABEL } from '../feedhighlight.js'
+import { buildWakeRules } from '../team.js'
 import { ageEscalation, coarseAgeLabel } from '../useElapsedTicker.js'
 import usePrefersReducedMotion from '../useReducedMotion.js'
 import useStagedFeed from '../useStagedFeed.js'
 import useMemories from '../useMemories.js'
-import { formatMemoryTimestamp } from '../memories.js'
 import useFirsts from '../useFirsts.js'
 import type { FirstToNarrate } from '../firsts.js'
 import { buildGuideHash } from '../guide/guideRoute.js'
 import { useGuideParagraph } from '../guide/GuideProvider.js'
-import { FeedWaterline, NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
+import { NewItemsPill, PauseLiveUpdates } from './FeedLiveness.js'
 import AboutThisScreen from './AboutThisScreen.js'
 import BudgetPanel from './BudgetPanel.js'
 import ClampedText from './ClampedText.js'
 import RunCycleControl from './RunCycleControl.js'
+import { RecentActivitySection, TeamSection, WakeSection } from './TeamDashboard.js'
 
 export interface DeskPageProps extends UseDeskOptions {
   /**
@@ -97,15 +92,19 @@ export interface DeskPageProps extends UseDeskOptions {
    * a human watches what a cycle does.
    */
   showRunCycle?: boolean
-  /** Take the human to the memory browser. Renders "See everything written
-   *  down" under the Written down stack only when given. */
-  onOpenMemory?: () => void
+  /**
+   * Start a new conversation with a worker. Renders a "Chat to <worker>"
+   * button on each enabled worker's card only when given. A rejection's
+   * message is shown on that card.
+   */
+  onChatWithWorker?: (worker: string) => Promise<void> | void
+  /** Open a worker's own page. Renders "Full prompt" on each card when given. */
+  onOpenWorker?: (worker: string) => void
+  /** Take the human to Activity. Renders "All activity →" when given. */
+  onOpenActivity?: () => void
 }
 
 /** Identifiers are mono, content is prose (§3.4). */
-/** How many of the newest memories the Written down stack shows. */
-const DESK_NOTES_LIMIT = 5
-
 const MONO = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }
 
 /** Off-screen but announced — the coarse label beside an `aria-hidden` age. */
@@ -129,7 +128,9 @@ export default function DeskPage({
   showPauseToggle,
   onAsksCount,
   showRunCycle = true,
-  onOpenMemory,
+  onChatWithWorker,
+  onOpenWorker,
+  onOpenActivity,
   ...deskOptions
 }: DeskPageProps) {
   const reduced = usePrefersReducedMotion()
@@ -143,8 +144,10 @@ export default function DeskPage({
     asksHaveMessages,
     asksRouteAvailable,
     workerCount,
-    lastSeenMs,
-    markSeen,
+    workers,
+    schedules,
+    subscriptions,
+    activity,
     nowMs,
     resolveAttention,
   } = useDesk({
@@ -166,9 +169,9 @@ export default function DeskPage({
   // "the project's first memory ever" rather than the true earliest one —
   // exactly right for a NEW project (there is only one row to be newest),
   // approximate for a project already old when this feature first ran on it.
-  // The same read feeds "Written down", so it asks for a few rows and follows
-  // the Desk's own poll: a conclusion landing should not need a reload.
-  const memories = useMemories({ ...deskOptions, limit: DESK_NOTES_LIMIT })
+  // It follows the Desk's own poll, so a project's first memory is narrated
+  // without a reload.
+  const memories = useMemories({ ...deskOptions, limit: 1 })
   const reloadMemories = memories.reload
   const memoryPollPaused = deskOptions.paused ?? paused
   useEffect(() => {
@@ -177,7 +180,6 @@ export default function DeskPage({
     const timer = setInterval(() => void reloadMemories(), every)
     return () => clearInterval(timer)
   }, [deskOptions.refreshMs, memoryPollPaused, reloadMemories])
-  const notes = useMemo(() => deskNotes(memories.memories, DESK_NOTES_LIMIT), [memories.memories])
   const memoryFirsts: DeskFirstRecord[] = useMemo(() => {
     const newest = memories.memories[0]
     return newest ? [{ kind: 'first-memory' as const, createdAtMs: newest.created_at, id: `memory:${newest.id}` }] : []
@@ -202,11 +204,20 @@ export default function DeskPage({
   const polling = (deskOptions.refreshMs ?? 0) > 0
   const showPause = showPauseToggle ?? polling
 
-  // Arrivals stage rather than insert. Both growing stacks go behind a pill;
-  // Trouble does not, because a failure appearing quietly is the one thing this
-  // screen must never do.
-  const changesFeed = useStagedFeed(desk.changes, (c) => c.id, { paused })
+  // Arrivals stage rather than insert: new asks go behind a pill. Trouble does
+  // not, because a failure appearing quietly is the one thing this screen must
+  // never do.
   const asksFeed = useStagedFeed(desk.asks, (a) => a.id, { paused })
+
+  const rules = useMemo(() => buildWakeRules(schedules, subscriptions), [schedules, subscriptions])
+  // Firsts narrated on a change (first worker, first rewrite, …) now ride the
+  // "What happened" row for that change. Activity prefixes the config event's
+  // id with `change:`; the Desk's fold does not.
+  const firstNarrationFor = useCallback(
+    (record: ActivityRecord) =>
+      record.kind === 'change' ? narrationByRecordId.get(record.id.replace(/^change:/, '')) : undefined,
+    [narrationByRecordId],
+  )
 
   // `error === null` is load-bearing, not defensive: a failed worker list stays
   // the initial `[]`, and without this gate an established project's Desk is
@@ -220,38 +231,23 @@ export default function DeskPage({
   // load protection `firstRun` uses (RD28): a broken fetch must never read as
   // "still in interview".
   const showFirstRunPanel = firstRun || (inInterview === true && !loading && error === null)
-  // Same gate, same reason: "the fleet ran and nobody needed you" is a claim
-  // about the fleet, and three empty lists from three failed fetches are not
-  // evidence for it.
-  const nothingAtAll =
-    !loading &&
-    error === null &&
-    desk.asks.length === 0 &&
-    desk.notices.length === 0 &&
-    desk.changes.length === 0 &&
-    desk.trouble.length === 0
+  const needsYou = desk.notices.length + desk.asks.length + desk.trouble.length > 0
 
   return (
-    <Box sx={{ p: 3, maxWidth: 900 }}>
-      <Stack direction="row" alignItems="baseline" justifyContent="space-between" sx={{ mb: 2 }}>
-        {title !== '' && <Typography variant="h6">{title}</Typography>}
+    <Box sx={{ p: 3, maxWidth: 1240 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2} sx={{ mb: 1 }}>
+        {title !== '' && <Typography variant="h5">{title}</Typography>}
         <Stack direction="row" spacing={2} alignItems="center">
           {showPause && <PauseLiveUpdates paused={paused} onChange={setPaused} />}
-          {desk.changes.length > 0 && (
-            <Link component="button" type="button" variant="caption" onClick={markSeen}>
-              Mark these changes as seen
-            </Link>
+          {showRunCycle && !showFirstRunPanel && workerCount > 0 && (
+            <Box data-testid="desk-run-cycle">
+              <RunCycleControl apiBaseUrl={deskOptions.apiBaseUrl} getAuthToken={deskOptions.getAuthToken} />
+            </Box>
           )}
         </Stack>
       </Stack>
 
       <AboutThisScreen surface="desk" projectId={projectId} />
-
-      {showRunCycle && !showFirstRunPanel && workerCount > 0 && (
-        <Box sx={{ mb: 2 }} data-testid="desk-run-cycle">
-          <RunCycleControl apiBaseUrl={deskOptions.apiBaseUrl} getAuthToken={deskOptions.getAuthToken} />
-        </Box>
-      )}
 
       {memoryNarration && (
         <FirstNarrationLine first={memoryNarration} guideAvailable={guideAvailable} sx={{ mb: 2 }} />
@@ -263,15 +259,6 @@ export default function DeskPage({
         </Alert>
       )}
 
-      <Box sx={{ mb: 3, border: 1, borderColor: 'divider', borderRadius: 1 }}>
-        <BudgetPanel
-          title="Budget"
-          collapsible
-          apiBaseUrl={deskOptions.apiBaseUrl}
-          getAuthToken={deskOptions.getAuthToken}
-        />
-      </Box>
-
       {showFirstRunPanel ? (
         <FirstRun
           onStartFromTopology={onStartFromTopology}
@@ -280,161 +267,126 @@ export default function DeskPage({
           onOpenOnboarding={onOpenOnboarding}
         />
       ) : (
-        <Stack spacing={4}>
-          {desk.notices.length > 0 && (
-            <Section
-              label="From the team"
-              count={desk.notices.length}
-              caption="what they did — nothing to answer"
-              empty=""
-            >
-              {desk.notices.map((notice) => (
-                <NoticeRow
-                  key={notice.id}
-                  notice={notice}
-                  onOpenSession={onOpenSession}
-                  onAcknowledge={() => resolveAttention(notice.requestId)}
-                />
-              ))}
-            </Section>
+        <Stack spacing={5} sx={{ mt: 2 }}>
+          {needsYou && (
+            <Stack spacing={4} data-testid="desk-needs-you">
+              {desk.notices.length > 0 && (
+                <Section
+                  label="From the team"
+                  count={desk.notices.length}
+                  caption="what they did — nothing to answer"
+                  empty=""
+                >
+                  {desk.notices.map((notice) => (
+                    <NoticeRow
+                      key={notice.id}
+                      notice={notice}
+                      onOpenSession={onOpenSession}
+                      onAcknowledge={() => resolveAttention(notice.requestId)}
+                    />
+                  ))}
+                </Section>
+              )}
+
+              {desk.asks.length > 0 && (
+                <Section
+                  label="Waiting on you"
+                  count={desk.asks.length}
+                  caption="nobody has answered these"
+                  empty=""
+                >
+                  {!asksHaveMessages && (
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                      {asksRouteAvailable ? (
+                        <>
+                          <code>GET /agent/attention-requests</code> did not answer, so these asks are
+                          rebuilt from the parked jobs and show without the sentence the worker wrote.
+                          Open the thread to read it.
+                        </>
+                      ) : (
+                        <>
+                          This deployment does not serve <code>GET /agent/attention-requests</code>, so
+                          these asks show without the sentence the worker wrote. Open the thread to read
+                          it.
+                        </>
+                      )}
+                    </Alert>
+                  )}
+                  <NewItemsPill
+                    count={asksFeed.stagedCount}
+                    summary={newItemsSummary(asksFeed.stagedCount, 'ask')}
+                    onShow={asksFeed.flush}
+                  />
+                  {asksFeed.visible.map((ask) => (
+                    <AskRow
+                      key={ask.id}
+                      ask={ask}
+                      onOpenSession={onOpenSession}
+                      arrived={asksFeed.arrivals.has(ask.id)}
+                      reduced={reduced}
+                      firstNarration={narrationByRecordId.get(ask.id)}
+                      guideAvailable={guideAvailable}
+                      // A stand-in ask rebuilt from a parked delivery has no request
+                      // to resolve, so it offers no Dismiss.
+                      onDismiss={asksHaveMessages ? () => resolveAttention(ask.requestId) : undefined}
+                    />
+                  ))}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    {DESK_ASKS_CAVEAT}
+                  </Typography>
+                </Section>
+              )}
+
+              {desk.trouble.length > 0 && (
+                <Section label="Trouble" count={desk.trouble.length} caption="" empty="">
+                  {desk.trouble.map((item) => (
+                    <TroubleRow key={item.id} item={item} onOpenSession={onOpenSession} />
+                  ))}
+                </Section>
+              )}
+            </Stack>
           )}
 
-          <Section
-            label="Asks"
-            count={desk.asks.length}
-            caption="nobody has answered these"
-            empty="Nothing is waiting on you."
+          <Box
+            sx={{
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1fr) 360px' },
+              gap: 5,
+              alignItems: 'start',
+            }}
           >
-            {!asksHaveMessages && desk.asks.length > 0 && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                {asksRouteAvailable ? (
-                  <>
-                    <code>GET /agent/attention-requests</code> did not answer, so these asks are
-                    rebuilt from the parked jobs and show without the sentence the worker wrote.
-                    Open the thread to read it.
-                  </>
-                ) : (
-                  <>
-                    This deployment does not serve <code>GET /agent/attention-requests</code>, so
-                    these asks show without the sentence the worker wrote. Open the thread to read
-                    it.
-                  </>
-                )}
-              </Alert>
-            )}
-            <NewItemsPill
-              count={asksFeed.stagedCount}
-              summary={newItemsSummary(asksFeed.stagedCount, 'ask')}
-              onShow={asksFeed.flush}
+            <TeamSection
+              workers={workers}
+              rules={rules}
+              activity={activity}
+              nowMs={nowMs}
+              onChatWithWorker={onChatWithWorker}
+              onOpenWorker={onOpenWorker}
             />
-            {asksFeed.visible.map((ask) => (
-              <AskRow
-                key={ask.id}
-                ask={ask}
-                onOpenSession={onOpenSession}
-                arrived={asksFeed.arrivals.has(ask.id)}
-                reduced={reduced}
-                firstNarration={narrationByRecordId.get(ask.id)}
-                guideAvailable={guideAvailable}
-                // A stand-in ask rebuilt from a parked delivery has no request
-                // to resolve, so it offers no Dismiss.
-                onDismiss={asksHaveMessages ? () => resolveAttention(ask.requestId) : undefined}
-              />
-            ))}
-            {desk.asks.length > 0 && (
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {DESK_ASKS_CAVEAT}
-              </Typography>
-            )}
-          </Section>
-
-          <Section
-            label="Written down"
-            count={notes.length}
-            caption="the newest things the team concluded"
-            empty="Nothing has been written down yet. Workers write what they find and decide here as they finish."
-            after={
-              onOpenMemory && notes.length > 0 ? (
-                <Link component="button" type="button" variant="caption" onClick={onOpenMemory} sx={{ mt: 1 }}>
-                  See everything written down
-                </Link>
-              ) : undefined
-            }
-          >
-            {notes.map((note) => (
-              <NoteRow key={note.id} note={note} onOpenSession={onOpenSession} />
-            ))}
-          </Section>
-
-          <Section
-            label="Changes"
-            count={desk.changes.length}
-            after={
-              desk.earlierChanges.length > 0 ? (
-                // The waterline and the few changes the operator had already
-                // read. Outside the stack's own count deliberately: "Nothing
-                // has changed since you last looked" is still the honest line
-                // when nothing has, and these sit under it as context.
-                <>
-                  <FeedWaterline label={waterlineLabel(lastSeenMs, nowMs)} />
-                  <SpineRail component="ol">
-                    {desk.earlierChanges.map((change) => (
-                      <ChangeRow
-                        key={change.id}
-                        change={change}
-                        onOpenSession={onOpenSession}
-                        firstNarration={narrationByRecordId.get(change.id)}
-                        guideAvailable={guideAvailable}
-                      />
-                    ))}
-                  </SpineRail>
-                </>
-              ) : undefined
-            }
-            caption={lastSeenMs === 0 ? 'everything recorded so far' : 'since you last looked'}
-            empty={
-              lastSeenMs === 0
-                ? 'No configuration changes recorded.'
-                : 'Nothing has changed since you last looked.'
-            }
-          >
-            <NewItemsPill
-              count={changesFeed.stagedCount}
-              summary={newItemsSummary(changesFeed.stagedCount, 'change')}
-              onShow={changesFeed.flush}
+            <RecentActivitySection
+              activity={activity}
+              nowMs={nowMs}
+              onOpenSession={onOpenSession}
+              onOpenActivity={onOpenActivity}
+              firstNarrationFor={firstNarrationFor}
+              renderFirstNarration={(first) => (
+                <FirstNarrationLine first={first} guideAvailable={guideAvailable} />
+              )}
             />
-            {changesFeed.visible.map((change) => (
-              <ChangeRow
-                key={change.id}
-                change={change}
-                onOpenSession={onOpenSession}
-                arrived={changesFeed.arrivals.has(change.id)}
-                reduced={reduced}
-                firstNarration={narrationByRecordId.get(change.id)}
-                guideAvailable={guideAvailable}
-              />
-            ))}
-          </Section>
+          </Box>
 
-          <Section
-            label="Trouble"
-            count={desk.trouble.length}
-            caption=""
-            empty="Nothing has failed."
-          >
-            {desk.trouble.map((item) => (
-              <TroubleRow key={item.id} item={item} onOpenSession={onOpenSession} />
-            ))}
-          </Section>
-
-          {nothingAtAll && (
-            <Typography variant="body2" color="text.secondary">
-              A quiet Desk means the fleet ran and nobody needed you — Activity has the jobs it
-              ran, and each worker's Triggers tab has what will wake it next.
-            </Typography>
-          )}
+          <WakeSection rules={rules} onOpenWorker={onOpenWorker} />
         </Stack>
       )}
+
+      <Box sx={{ mt: 5, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+        <BudgetPanel
+          title="Budget"
+          collapsible
+          apiBaseUrl={deskOptions.apiBaseUrl}
+          getAuthToken={deskOptions.getAuthToken}
+        />
+      </Box>
     </Box>
   )
 }
@@ -632,101 +584,6 @@ function ResolveControl({
   )
 }
 
-function NoteRow({
-  note,
-  onOpenSession,
-}: {
-  note: DeskNote
-  onOpenSession?: (id: string) => void
-}) {
-  return (
-    <SpineRow glyph="agent" component="li" glyphLabel="written down" data-testid="desk-note">
-      <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
-        <Typography variant="body2" sx={MONO}>
-          {note.title}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {note.writer} · {formatMemoryTimestamp(note.createdAtMs)}
-        </Typography>
-      </Stack>
-      {note.excerpt !== '' && <ClampedText text={note.excerpt} markdown maxLines={4} maxChars={320} sx={{ mt: 0.5 }} />}
-      {note.sessionId !== '' && (
-        <Box sx={{ mt: 0.5 }}>
-          <ThreadLink
-            sessionId={note.sessionId}
-            url=""
-            onOpenSession={onOpenSession}
-            label="open the session that wrote it"
-          />
-        </Box>
-      )}
-    </SpineRow>
-  )
-}
-
-function ChangeRow({
-  change,
-  onOpenSession,
-  arrived = false,
-  reduced = false,
-  firstNarration,
-  guideAvailable = false,
-}: {
-  change: DeskChange
-  onOpenSession?: (id: string) => void
-  arrived?: boolean
-  reduced?: boolean
-  /** design §3 G4: set only on the project's first record of that kind. */
-  firstNarration?: FirstToNarrate
-  guideAvailable?: boolean
-}) {
-  // Authorship decides the tint, exactly as it decides the glyph (§3.2).
-  const tone: HighlightTone = change.byAgent ? 'agent' : 'human'
-  return (
-    <SpineRow
-      glyph={change.glyph}
-      component="li"
-      glyphLabel={change.byAgent ? 'a worker did this' : 'you did this'}
-      sx={highlightSx({ active: arrived, tone, reduced })}
-    >
-      <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
-        <Typography variant="body2" sx={MONO}>
-          {change.sentence}
-        </Typography>
-        <Typography variant="caption" color="text.secondary">
-          {formatConfigTimestamp(change.createdAt)}
-        </Typography>
-        {change.diffLabel !== '' && (
-          <Typography variant="caption" sx={MONO} color="text.secondary">
-            {change.diffLabel}
-          </Typography>
-        )}
-        {highlightMarker({ active: arrived, tone, reduced }) && (
-          <Chip size="small" variant="outlined" label={NEW_MARKER_LABEL} />
-        )}
-      </Stack>
-      <ClampedText
-        text={change.reason}
-        maxLines={4}
-        maxChars={320}
-        color={change.noReason ? 'text.disabled' : 'text.primary'}
-        sx={{ mt: 0.5 }}
-      />
-      {change.entry.actorSession !== '' && (
-        <Box sx={{ mt: 0.5 }}>
-          <ThreadLink
-            sessionId={change.entry.actorSession}
-            url={change.entry.sessionPath ?? ''}
-            onOpenSession={onOpenSession}
-            label="open the session that decided it"
-          />
-        </Box>
-      )}
-      {firstNarration && <FirstNarrationLine first={firstNarration} guideAvailable={guideAvailable} />}
-    </SpineRow>
-  )
-}
-
 /**
  * One sentence (design §3 G4) plus a link to the guide, or just the sentence
  * when no guide is mounted (§3 G7's degradation). Not a checklist, not a
@@ -876,8 +733,8 @@ function FirstRun({
       ) : (
         <>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            The Desk answers three questions every morning — what wants you, what changed, what broke.
-            It stays quiet until something is running. Start from an org chart, which hires a set of
+            Once there is a team, the Desk shows each worker and what it is for, with a button to chat
+            to it, what just happened, and what wakes them. Start from an org chart, which hires a set of
             workers and wires them to each other in one step, or just talk to the agent.
           </Typography>
           <Stack direction="row" spacing={1} sx={{ mb: 2 }}>

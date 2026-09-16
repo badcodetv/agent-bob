@@ -49,6 +49,10 @@ export { default as DeskPage } from './DeskPage.js'
 
 export type { DeskPageProps } from './DeskPage.js'
 
+export { TeamSection, RecentActivitySection, WakeSection } from './TeamDashboard.js'
+
+export type { TeamSectionProps, RecentActivitySectionProps } from './TeamDashboard.js'
+
 export {
   default as OrgChartPage,
   stateLine,
