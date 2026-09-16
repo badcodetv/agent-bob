@@ -1818,7 +1818,7 @@ then strips the query with `history.replaceState`.
   (`go build ./... && go vet ./... && go test ./connections/... ./cmd/agentd/ ./agentdb/... -count=1`,
   agentdb's live-Postgres cases skipped as usual): all green.
 
-### T23: The four HTTP routes   [Status: pending | Model: opus]
+### T23: The four HTTP routes   [Status: done | Model: opus]
 - **Scope:** create `go/cmd/agentd/googleconnect.go` implementing the addendum's route table:
   `connectAuthority(r, jwtSecretSet) (email, project string, err)` (A4);
   `GET /agent/connections` (Registry `List` + `Accounts` + store rows' metadata + `can_connect`);
